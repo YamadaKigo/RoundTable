@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 //  十三、去掉系统画在窗口外圈的东西（Windows 专用）
 // ===========================================================================
 //  窗口最外圈原本有两层系统装饰，两层都得自己清：
-//    a) 窗口最上面那 1px —— 用户看到的那条「奇怪颜色的 1px 边框」就是它。
+//    a) 窗口最上面那 1px - 用户看到的那条「奇怪颜色的 1px 边框」就是它。
 //       winit 为了让无边框窗口带上投影，在 WM_NCCALCSIZE 里把客户区整体下移 1px
 //       （winit 源码注释原话：leads to a small black 1px border on the top）。
 //       于是窗口最上面那一行永远不在客户区里：我们自己画不到，露出来的是 DWM 画的
@@ -32,6 +32,59 @@ unsafe extern "system" {
     pub(crate) fn SetWindowPos(hwnd: isize, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
     pub(crate) fn DefWindowProcW(hwnd: isize, msg: u32, wp: usize, lp: isize) -> isize;
     pub(crate) fn CallWindowProcW(prev: isize, hwnd: isize, msg: u32, wp: usize, lp: isize) -> isize;
+    pub(crate) fn OpenClipboard(hwnd: isize) -> i32;
+    pub(crate) fn CloseClipboard() -> i32;
+    pub(crate) fn IsClipboardFormatAvailable(format: u32) -> i32;
+    pub(crate) fn GetClipboardData(format: u32) -> isize;
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    pub(crate) fn GlobalLock(handle: isize) -> *mut u8;
+    pub(crate) fn GlobalUnlock(handle: isize) -> i32;
+}
+
+/// CF_UNICODETEXT：系统剪贴板里的宽字符文本格式。
+pub(crate) const CF_UNICODETEXT: u32 = 13;
+
+/// 读系统剪贴板里的文本。自绘编辑器 / 输入框的「粘贴」按钮用它
+/// （Ctrl+V 不用它 - winit 会直接把内容作为 Event::Paste 送进来）。
+/// 读不到（剪贴板被别的进程占着、里面也不是文本）就返回 None，调用方一个字都不动。
+pub(crate) fn clipboard_text() -> Option<String> {
+    unsafe {
+        if IsClipboardFormatAvailable(CF_UNICODETEXT) == 0 {
+            return None;
+        }
+        // 打开剪贴板最多试几次：它同一时刻只允许一个进程拿着。
+        let mut opened = false;
+        for _ in 0..8 {
+            if OpenClipboard(0) != 0 {
+                opened = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        if !opened {
+            return None;
+        }
+        let mut out = None;
+        let handle = GetClipboardData(CF_UNICODETEXT);
+        if handle != 0 {
+            let ptr = GlobalLock(handle);
+            if !ptr.is_null() {
+                // 宽字符串：数到第一个 0 为止（另加一个上限兜底，防止对面没给结束符）。
+                let mut len = 0usize;
+                while len < (1 << 22) && *(ptr as *const u16).add(len) != 0 {
+                    len += 1;
+                }
+                let wide = std::slice::from_raw_parts(ptr as *const u16, len);
+                out = Some(String::from_utf16_lossy(wide));
+                GlobalUnlock(handle);
+            }
+        }
+        CloseClipboard();
+        out
+    }
 }
 
 pub(crate) const GWL_STYLE: i32 = -16;
@@ -64,11 +117,11 @@ pub(crate) fn win32_hwnd(raw: RawWindowHandle) -> isize {
 /// 清掉会让系统画出投影 / 3D 边 / 边框的那几个样式位，再让窗口重算一次框架。
 ///
 /// 为什么要清：
-///   投影 —— DWM 会给「带标题栏样式（WS_CAPTION）的窗口」画一圈投影；winit 为了
+///   投影 - DWM 会给「带标题栏样式（WS_CAPTION）的窗口」画一圈投影；winit 为了
 ///   保住 Aero Snap 之类的功能，无边框窗口也一直留着 WS_CAPTION，而 egui-winit
 ///   在 decorations(false) 时还会主动请求这个阴影（它那个开关只影响客户区顶部
 ///   1px 的处理，治不了 DWM 本身）。
-///   3D 边 —— WS_EX_WINDOWEDGE / CLIENTEDGE / STATICEDGE 会让系统沿窗口外圈画一条
+///   3D 边 - WS_EX_WINDOWEDGE / CLIENTEDGE / STATICEDGE 会让系统沿窗口外圈画一条
 ///   立体边（左上亮、右下暗）。
 /// winit 在最小化/还原这类标志位变化时会把样式重新套回去，所以这里每帧查一次。
 pub(crate) fn clear_window_frame(hwnd: isize) {

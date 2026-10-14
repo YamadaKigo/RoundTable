@@ -50,6 +50,21 @@ impl Date {
             d: d as u8,
         }
     }
+
+    /// "MM-DD"：时间轴上同一年里那种短标签。
+    pub fn md(self) -> String {
+        format!("{:02}-{:02}", self.m, self.d)
+    }
+
+    /// "YY-MM-DD"：时间轴上跨年那一格用的短标签。
+    pub fn ymd_short(self) -> String {
+        format!("{:02}-{:02}-{:02}", self.y.rem_euclid(100), self.m, self.d)
+    }
+
+    /// "YYYY-MM-DD"：状态条里的完整日期。
+    pub fn full(self) -> String {
+        format!("{:04}-{:02}-{:02}", self.y, self.m, self.d)
+    }
 }
 
 fn is_leap(y: i32) -> bool {
@@ -102,7 +117,7 @@ impl Rng {
     }
 }
 
-/// 生成 count 根 K 线。价格从 start 起步，每天收盘价在开盘价基础上随机走 ±DAILY_MOVE；
+/// 生成 count 根 K 线。价格从 start 起步，每天收盘价在开盘价基础上随机走 +/-DAILY_MOVE；
 /// 高低点在实体之外再各随机延伸一段，保证 h >= max(o, c) 且 l <= min(o, c)。
 pub fn generate(seed: u64, count: usize, start: f64) -> Vec<Bar> {
     let mut rng = Rng::new(seed);
@@ -110,7 +125,7 @@ pub fn generate(seed: u64, count: usize, start: f64) -> Vec<Bar> {
     let mut prev_close = start;
     // 日期只走工作日：从周二起步，周五收盘之后直接跳到下周一（跳过周末）。
     let mut date = DATE_START;
-    let mut weekday = 1; // 0 = 周一 … 4 = 周五
+    let mut weekday = 1; // 0 = 周一 ... 4 = 周五
 
     for i in 0..count {
         if i > 0 {
@@ -122,7 +137,7 @@ pub fn generate(seed: u64, count: usize, start: f64) -> Vec<Bar> {
         let c = o + rng.signed() * DAILY_MOVE;
         let h = o.max(c) + rng.unit() * DAILY_MOVE;
         let l = o.min(c) - rng.unit() * DAILY_MOVE;
-        // 成交量：走势越猛量越大（跟真实盘面一个方向），基准 ±，上下再抖一抖。
+        // 成交量：走势越猛量越大（跟真实盘面一个方向），基准 +/-，上下再抖一抖。
         let amp = ((c - o).abs() / DAILY_MOVE).clamp(0.0, 1.0);
         let vol = VOL_BASE * (0.35 + 1.15 * rng.unit()) * (0.7 + 0.6 * amp);
         bars.push(Bar {
