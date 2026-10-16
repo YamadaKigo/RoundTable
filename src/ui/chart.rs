@@ -16,7 +16,7 @@
 use crate::app::*;
 use crate::grid::*;
 use crate::indicator::{ChartCtx, ChartLayout, DrawCmd};
-use crate::ui::button::*;
+use crate::ui::menu::*;
 
 use crate::theme::*;
 use eframe::egui;
@@ -98,13 +98,15 @@ pub(crate) fn paint_ohlc(
 //  几何：一块图表内部的分段 + 绘图区 / 纵轴
 // ===========================================================================
 
-/// 一块图表内部的竖直分段：标题栏 2 格 / 1px /（可选）状态带 / 1px / 绘图区 / 1px /（可选）时间带。
+/// 一块图表内部的竖直分段：标题栏 2 格 / 1px /（可选）状态带 / 1px / 绘图区 / 1px /
+///（可选）时间带 / 1px / 图表窗自己的状态栏 2 格。
 /// 每段都是「跨若干格」的段（矩形是 cells(rows)），相邻两段共用边界那条 1px 线格 -
 /// 两个矩形在那一行上重叠 1px，所以线永远只有 1px，不可能叠成 2px。
-/// 绘图区取「剩下的全部高度」（精确值，不再向下吸 8）：几条带正好把面板铺满，底下不留白条。
+/// 绘图区取「剩下的全部高度」（精确值，不再向下吸 8）：几条带正好把面板铺满，底下不留白条
+/// （最下面那条是图表窗的状态栏，见 chart_bar）。
 /// 面板高度本身就是整数格（cells(n)），所以绘图区高度自动是「格数 x9 再减掉 1px 线格」，边界全在网格线上。
-/// 返回 (标题栏, 状态带, 绘图区, 时间带)；不需要的那段是 None。要哪几条带由 layout 声明，
-/// 所以同一份指标挂到哪一块上都切出一样的几段。
+/// 返回 (标题栏, 状态带, 绘图区, 时间带)；不需要的那段是 None（状态栏永远有，单独用 chart_bar 算）。
+/// 要哪几条带由 layout 声明，所以同一份指标挂到哪一块上都切出一样的几段。
 pub(crate) fn chart_rows(
     area: egui::Rect,
     layout: ChartLayout,
@@ -120,10 +122,12 @@ pub(crate) fn chart_rows(
     };
     // 绘图区从第 row 条网格线下面那 1px 起：那条线就是它和上一段共用的上边框。
     let main_y = area.min.y + grid_line(row) + LINE_W;
+    // 底下的尾巴：最下面是状态栏（2 格），它上面（可选）是时间带。相邻两段共用边界那条 1px 线，
+    // 所以总高度 = 两段各自的高度 - 一条共用的线（不这么算的话绘图区下沿会差 1px、落不在网格线上）。
     let tail = if layout.time_rows > 0 {
-        cells(layout.time_rows)
+        cells(layout.time_rows) + CHART_BAR_H - LINE_W
     } else {
-        0.0
+        CHART_BAR_H
     };
     let main_h = (area.max.y - main_y - tail).max(0.0);
     let main = egui::Rect::from_min_size(
@@ -140,6 +144,15 @@ pub(crate) fn chart_rows(
         None
     };
     (title, status, main, time)
+}
+
+/// 图表窗自己那条状态栏（整块图表最下面一条，2 格）：缩放 / 平移 / 可见几根写在这儿。
+/// 它是「窗口」的一部分 - 主窗口的状态栏只留帧率和操作回显（调试信息）。
+pub(crate) fn chart_bar(area: egui::Rect) -> egui::Rect {
+    egui::Rect::from_min_size(
+        egui::pos2(area.min.x, area.max.y - CHART_BAR_H),
+        egui::vec2(area.width(), CHART_BAR_H),
+    )
 }
 
 /// 一块图表的绘图区 ->（绘图区, 右侧纵轴）：纵轴占最右边 AXIS_COLS 个内容格，
@@ -218,6 +231,13 @@ pub(crate) struct ChartGeom {
     status: Option<egui::Rect>,
     time: Option<egui::Rect>,
     map: CmdMap,
+    /// 绘图区下沿那条边界线所在的像素行（有时间带 = 共用的那条线；没时间带 = Pane 自己的
+    /// 下边框线）。十字光标那两块标签的下边框一律压在它上面 - 铁律：不许 2px 线叠加。
+    bottom: f32,
+    /// 这块图表自己的 9px 网格原点：窗口左上角（内容区让开一条标题栏 = 2 格，
+    /// 差整数格、和窗口左上角同余，所以拿内容区左上角当原点，吸附结果一模一样）。
+    /// 文字落点 / 标签吸附全按它算 - 窗口 1px 1px 地挪，里头的东西跟着一起挪，不会在窗口里漂。
+    origin: egui::Pos2,
 }
 
 /// 0xRRGGBB -> Color32。
@@ -301,13 +321,13 @@ impl StockApp {
 
     /// 交互：滚轮缩放（锚在鼠标那一根上）+ 左键拖拽平移。三块图表共用同一个 offset / scale，
     /// 所以在哪一块的绘图区里操作都是同一个视图；标题栏 / 状态带 / 拖拽条上不接这些操作。
-    /// bars 是那三条「拖拽条」（左栏里两条横向拖拽条 + 两栏之间那条竖向分割条）：
+    /// bars 是「不许算图表平移」的那几条拖拽条（拖拽条取消后传空切片；这一套保留备用）：
     /// 按在它们上面永远不算图表平移 - 拖拽条和图表区互不干扰，谁也别抢谁的拖动会话。
     pub(crate) fn chart_interact(
         &mut self,
         ui: &egui::Ui,
-        plots: &[egui::Rect; 3],
-        bars: &[egui::Rect; 3],
+        plots: &[egui::Rect],
+        bars: &[egui::Rect],
     ) {
         // 已经在拖别的东西（窗口 / 分割条 / 拖拽条 / 浮动面板）时，图表整块让路：
         // 不管两边谁先抢到会话，只要别的拖拽会话已经开起来，图表平移立刻收手。
@@ -318,14 +338,20 @@ impl StockApp {
             return;
         }
 
+        // 鼠标压在哪一块绘图区里（多块图表窗各有各的绘图区，只有压着的那一块算数）。
         let hover = ui.input(|i| i.pointer.hover_pos());
-        let over_plot = hover.filter(|p| plots.iter().any(|r| r.contains(*p)));
+        let over_plot = hover.and_then(|p| {
+            plots
+                .iter()
+                .position(|r| r.contains(p))
+                .map(|i| (i, p))
+        });
 
-        // 滚轮：鼠标压在绘图区里、且没压在浮动面板上才算数（三块的绘图区左边对齐，锚点同源）。
-        let notches = self.take_wheel_notches(ui, over_plot);
+        // 滚轮：鼠标压在绘图区里、且没压在浮动面板上才算数；缩放锚点取压着的那一块的左边。
+        let notches = self.take_wheel_notches(ui, over_plot.map(|(_, p)| p));
         if notches != 0 {
-            if let Some(p) = over_plot {
-                self.zoom_around(p.x - plots[0].min.x, notches);
+            if let Some((i, p)) = over_plot {
+                self.zoom_around(p.x - plots[i].min.x, notches);
             }
         }
 
@@ -365,7 +391,7 @@ impl StockApp {
     /// 十字光标：鼠标压在哪一块的绘图区里。竖线在三块里都画（共用 x 映射，天然连成一条）；
     /// 横线 + 数值标签只画鼠标压着的那一块（别的块那根鼠标 y 不在它值域里）。
     /// 拖拽平移时鼠标滑出绘图区也继续显示（坐标夹回最近的那一块），十字线不会闪。
-    pub(crate) fn update_crosshair(&mut self, ui: &egui::Ui, plots: &[egui::Rect; 3]) {
+    pub(crate) fn update_crosshair(&mut self, ui: &egui::Ui, plots: &[egui::Rect]) {
         // 正在拖窗口 / 拖分割条 / 拖横向拖拽条时，图表区整块不响应十字光标：
         // 鼠标这时候扫过绘图区也不会冒十字线，拖拽条和图表区互不干扰。
         if self.ui_drag_active() {
@@ -440,7 +466,8 @@ impl StockApp {
         });
     }
 
-    /// 画一块图表：几何按指标声明的几条带切，重放缓存 + 现算四个钩子。
+    /// 画一块图表的内容：整块窗口的标题栏（含关闭 / 最小化键）在它上面，由 ui::winmgr 画；
+    /// 这儿从「图表栏」那一条横栏起算 - 几何按指标声明的几条带切，重放缓存 + 现算四个钩子。
     /// 这儿不认识任何具体指标 - 加指标只改 src/indicator/，这个文件一行都不用动。
     pub(crate) fn ui_chart(&mut self, ui: &mut egui::Ui, pane: usize, area: egui::Rect) {
         let painter = ui.painter().clone();
@@ -465,8 +492,24 @@ impl StockApp {
         if let Some(t) = time {
             hline_hard(&painter, area.min.x, area.max.x, t.min.y, theme().line);
         }
-        // 标题栏最后画：底色盖住上面的工作区白，两个按钮和下沿那条线也在这一层。
-        self.ui_pane_title(ui, &painter, pane, title);
+        // 图表栏最后画：底色盖住上面的窗口白，几个按钮和下沿那条线也在这一层。
+        // （关闭 / 最小化键在整块窗口的标题栏上，见 ui::winmgr，不在这儿。）
+        self.ui_pane_title(ui, pane, title);
+        // UI工程测试：这块图表窗里的几条带各报一笔（按窗口自己那套网格判对齐）。
+        self.probe("图表栏", title);
+        if let Some(s) = status {
+            self.probe("图表状态带", s);
+        }
+        self.probe("绘图区", main);
+        if let Some(t) = time {
+            self.probe("时间带", t);
+        }
+        self.probe("图表窗状态栏", chart_bar(area));
+        // 图表窗自己那条状态栏（整块最下面一条）：缩放 / 平移 / 可见几根写在这儿 -
+        // 主窗口的状态栏只留帧率和操作回显（见 app::StockApp::status_segments）。
+        let bar_segs = self.chart_status_segments();
+        let bar = chart_bar(area);
+        self.paint_status_bar(&painter, bar, &bar_segs);
 
         // 高度记下来、涨跌色可能刚被改过、缓存脏了就重算、一屏几根现算。
         self.panes[pane].height = main.height() as i32;
@@ -505,6 +548,14 @@ impl StockApp {
             status,
             time,
             map,
+            // 绘图区下沿那条「边界线」所在的像素行，十字光标的标签下边框要压在它上面：
+            //   - 有时间带：就是绘图区和时间带共用的那条线 = time.min.y（= main.max.y）；
+            //   - 没有时间带（比如最下面那块 MACD）：是这块 Pane 自己的下边框线，也就是
+            //     main.max.y 往上 1px（main.max.y 是「下一个像素行」，不是边框线本身）。
+            // 不分开算的话，没时间带的那块会把标签下边框画进状态栏里，和边框线叠成 2px。
+            bottom: time.map_or(main.max.y - LINE_W, |t| t.min.y),
+            // 这块窗口自己那套网格的原点：拿内容区左上角当原点（和窗口左上角差整数格，同余）。
+            origin: area.min,
         };
 
         // 每帧现算的四个钩子：从缓存好的数据指令里读数。
@@ -548,7 +599,8 @@ impl StockApp {
     fn replay_cmds(&mut self, painter: &egui::Painter, geom: &ChartGeom, cmds: &[DrawCmd]) {
         let map = &geom.map;
         // 状态带里那几项从左往右接着排：每一项都是整数格（cells(n)），相邻两项共用边界那条 1px
-        // 网格线，所以每两项之间的点状虚线分割线正好落在网格线上。文字左右各留 1 格
+        // 网格线，所以每两项之间的点状虚线分割线正好落在网格线上。文字左右各留 1 格
+
         //（宽按 TEXT_PAD_X 算、落点用 TEXT_INSET_X，见 grid.rs）。
         let mut sx = geom.status.map_or(0.0, |r| r.min.x);
         let mut first = true;
@@ -660,7 +712,7 @@ impl StockApp {
                     let y = map.y(*p);
                     if *bg == 0 {
                         // 纵轴刻度数字：右对齐写在轴里（末尾停在轴右框那条线左边 1 格，
-                        // 落点由 axis_tick_x 保证踩在内容格上）。
+                        // 落点由 axis_tick_x 按窗口自己的右沿算，1px 1px 地跟着窗口缩）。
                         self.text(
                             painter,
                             egui::pos2(Self::axis_tick_x(geom.axis), y),
@@ -682,7 +734,8 @@ impl StockApp {
                             y,
                             CROSS_LABEL_ROWS,
                             geom.plot.min.y - LINE_W,
-                            geom.plot.max.y,
+                            geom.bottom,
+                            geom.origin.y,
                         );
                         self.label_box(painter, s, egui::pos2(x0, y0), w, color32(*bg), color32(*fg));
                     }
@@ -708,13 +761,15 @@ impl StockApp {
                     } else {
                         // 十字光标的索引标签：贴在绘图区下沿、竖线那一列的正中。
                         let w = self.cross_label_w(s);
-                        let x0 = Self::cross_time_label_x(geom.plot, map.line_x(*i), w);
-                        // 贴在绘图区下沿：牌子上沿落在下沿往上 2 格那条网格线上，下边框正好压在和
-                        // 时间带共用的那条线上（同一条 1px 线），不会在时间轴上方叠出 2px 的横线。
+                        let x0 =
+                            Self::cross_time_label_x(geom.plot, map.line_x(*i), w, geom.origin.x);
+                        // 贴在绘图区下沿：牌子上沿落在下沿往上 2 格那条网格线上，下边框正好压在这块
+                        // 图表下沿那条边界线上（时间带的上沿 / Pane 自己的下边框，同一条 1px 线），
+                        // 绝不在它下面再叠出 2px 的横线（见 ChartGeom::bottom）。
                         self.label_box(
                             painter,
                             s,
-                            egui::pos2(x0, geom.plot.max.y - PITCH * CROSS_LABEL_ROWS as f32),
+                            egui::pos2(x0, geom.bottom - PITCH * CROSS_LABEL_ROWS as f32),
                             w,
                             color32(*bg),
                             color32(*fg),
@@ -732,7 +787,7 @@ impl StockApp {
                     self.status_divider(painter, band, sx, first);
                     self.text(
                         painter,
-                        egui::pos2(text_left_x(sx), band.center().y),
+                        egui::pos2(text_left_x(sx, geom.origin.x), band.center().y),
                         egui::Align2::LEFT_CENTER,
                         s,
                         color32(*color),
@@ -757,14 +812,17 @@ impl StockApp {
                     self.status_divider(painter, band, sx, first);
                     self.text(
                         painter,
-                        egui::pos2(text_left_x(sx), band.center().y),
+                        egui::pos2(text_left_x(sx, geom.origin.x), band.center().y),
                         egui::Align2::LEFT_CENTER,
                         label,
                         theme().text,
                     );
                     self.text(
                         painter,
-                        egui::pos2(text_right_x(sx + w - LINE_W), band.center().y),
+                        egui::pos2(
+                            text_right_x(sx + w - LINE_W, geom.origin.x),
+                            band.center().y,
+                        ),
                         egui::Align2::RIGHT_CENTER,
                         value,
                         color32(*color),
@@ -800,99 +858,99 @@ impl StockApp {
         self.text(painter, rect.center(), egui::Align2::CENTER_CENTER, text, fg);
     }
 
-    /// 标题栏右侧那几个按钮的矩形，从右往左排：最右边那个贴着 Pane 右边框，
-    /// 相邻两个共用中间那条竖线（步进 = 宽 - 1px）；高就是标题栏那一段（上下两条边框压在
-    /// 标题栏上下的网格线上，不会多冒出一条线）。宽度由调用方按文字量好 - 铁律要求文字左右
-    /// 各留 1 格空档，所以每个按钮的宽都是 cells(文字格数 + 2)，这里只留一条下限。
-    /// widths 从右往左对应；返回顺序从左往右（K 线图是 [叠加, 切换, 代码]，别的图是 [切换, 代码]）。
-    pub(crate) fn pane_button_rects(title: egui::Rect, widths: &[f32]) -> Vec<egui::Rect> {
-        let mut rects = vec![egui::Rect::NOTHING; widths.len()];
-        let mut right = title.max.x;
-        for i in (0..widths.len()).rev() {
-            let w = widths[i].max(PANE_BTN_W);
-            rects[i] = egui::Rect::from_min_size(
-                egui::pos2(right - w, title.min.y),
-                egui::vec2(w, PANE_BTN_H),
-            );
-            right = rects[i].min.x + LINE_W;
+    /// 图表栏那几个按钮（就是这条菜单栏的「项」，从左往右）：认叠加的（K 线图）多一个「叠加」，
+    /// 排在「切换」左边；别的指标只有「切换 / 代码」。
+    pub(crate) const PANE_TABS_KLINE: [&'static str; 3] = ["叠加", "切换", "代码"];
+    pub(crate) const PANE_TABS_PLAIN: [&'static str; 2] = ["切换", "代码"];
+
+    /// 这块图表该有哪几个按钮：只有认叠加的（K 线图两种）才有「叠加」。
+    fn pane_title_tabs(&self, pane: usize) -> &'static [&'static str] {
+        if self.panes[pane].indicator.supports_overlay() {
+            &Self::PANE_TABS_KLINE
+        } else {
+            &Self::PANE_TABS_PLAIN
         }
-        rects
     }
 
-    /// 图表顶部标题栏：底色 + 指标名 + 右侧那几个自绘按钮（K 线图多一个「叠加」，排在「切换」左边）。
+    /// 图表栏那几个按钮的矩形：从右往左排（最右边那个贴着 Pane 右边框），相邻两个共用中间
+    /// 那条竖线（步进 = 宽 - 1px）；高就是标题栏那一段。排版整个交给菜单栏那一份
+    ///（ui::menu 的 menu_item_rects，右对齐）- 图表栏就是一条菜单栏，只是按钮往右靠。
+    /// 宽度由调用方按文字量好（tab_width：文字宽 + 左右各 1 格，向上吸到整数格，保底 3 格）。
+    /// widths 从左往右对应；返回顺序从左往右（K 线图是 [叠加, 切换, 代码]，别的图是 [切换, 代码]）。
+    /// 生产代码那条路走 ui::menu 的 menu_bar_ui（它自己算同一套矩形），这条口子是给测试核对排版的。
+    #[allow(dead_code)]
+    pub(crate) fn pane_button_rects(title: egui::Rect, widths: &[f32]) -> Vec<egui::Rect> {
+        menu_item_rects(title, widths, MenuAlign::Right)
+    }
+
+    /// 图表栏（图表窗内容区最上面那一条横栏，整块窗口的标题栏在它上面 - 见 ui::winmgr）：
+    /// 它**就是一条菜单栏** - 只是按钮往右靠、左边多一段文字（指标名）。底色 / 项宽 / hover
+    /// 高亮 / 项间竖线 / 下沿那条 1px 线 / 点击开合与 hover 换项的规矩，全走 ui::menu 的
+    /// menu_bar_ui：主窗口菜单栏长什么样，它就长什么样（铁律：同类型的东西必须长一个样）。
     /// 「叠加」开合均线叠加菜单（只有 K 线图有，见 Indicator::supports_overlay）；「切换」开合指标
     /// 下拉面板（面板在每帧最后画，见 ui::panemenu）；「代码」打开源码查看窗。两个下拉菜单互斥 -
-    /// 开一个就把另一个收起来。按钮一律走 draw_button，不另写一份外观。下沿那条线格最后画：
-    /// 和按钮的下边框重合，盖上去也只有 1px。返回按钮的矩形（从左往右，下拉面板各拿自己那个对齐）。
+    /// 开一个就把另一个收起来（和主窗口菜单栏「同时只开一个」是同一个规矩）。
+    /// 返回按钮的矩形（从左往右，下拉面板各拿自己那个当锚点）。
     pub(crate) fn ui_pane_title(
         &mut self,
         ui: &mut egui::Ui,
-        painter: &egui::Painter,
         pane: usize,
         title: egui::Rect,
     ) -> Vec<egui::Rect> {
-        painter.rect_filled(title, egui::CornerRadius::ZERO, theme().title_bg);
+        let tabs = self.pane_title_tabs(pane);
+        let overlay_slot = self.panes[pane].indicator.supports_overlay().then_some(0);
+        let switch_slot = usize::from(overlay_slot.is_some());
+        let code_slot = switch_slot + 1;
+        // 展开状态：0 = 叠加（只有 K 线图有）、接着是「切换」；「代码」不是下拉项，不占展开状态。
+        let open = if self.overlay_menu == Some(pane) {
+            overlay_slot
+        } else if self.pane_menu == Some(pane) {
+            Some(switch_slot)
+        } else {
+            None
+        };
         let name = self.panes[pane].indicator.name().to_owned();
-        self.text(
-            painter,
-            egui::pos2(text_left_x(title.min.x), title.center().y),
-            egui::Align2::LEFT_CENTER,
-            &name,
-            theme().text,
+        let out = menu_bar_ui(
+            self,
+            ui,
+            title,
+            tabs,
+            MenuAlign::Right,
+            open,
+            Some(&name),
+            MenuBarStyle::PANE_BAR,
         );
-
-        let overlay_ok = self.panes[pane].indicator.supports_overlay();
-        let overlay = ButtonContent::Text("叠加".to_owned());
-        let switch = ButtonContent::Text("切换".to_owned());
-        let code = ButtonContent::Text("代码".to_owned());
-        // 按钮的宽都按文字量（button_width：文字宽 + 左右各 1 格，向上吸到整数格）。
-        let mut widths = Vec::with_capacity(3);
-        if overlay_ok {
-            widths.push(self.button_width(&overlay));
+        // 「代码」不是下拉项：点了就记一笔开源码编辑窗（真正打开在本帧末尾的 run_win_cmd -
+        // 这会儿窗口管理器正被借走），不留一个「展开中」的状态。
+        let mut open = out.open;
+        if out.clicked == Some(code_slot) {
+            self.request_win(WinCmd::OpenSource(pane));
+            open = None;
         }
-        widths.push(self.button_width(&switch));
-        widths.push(self.button_width(&code));
-        let buttons = Self::pane_button_rects(title, &widths);
-        let mut k = 0;
-        if overlay_ok {
-            let open_ov = self.overlay_menu == Some(pane);
-            if self.draw_button(
-                ui,
-                painter,
-                buttons[k],
-                &overlay,
-                open_ov,
-                "叠加均线（MA / EMA）",
-            ) {
-                self.overlay_menu = if open_ov { None } else { Some(pane) };
-                self.pane_menu = None;
-            }
-            if self.overlay_menu == Some(pane) {
-                self.overlay_menu_anchor = buttons[k];
-            }
-            k += 1;
-        }
-        let open = self.pane_menu == Some(pane);
-        if self.draw_button(ui, painter, buttons[k], &switch, open, "换这块图表的指标") {
-            self.pane_menu = if open { None } else { Some(pane) };
+        // 展开状态照菜单栏那套落到这块图表的两个菜单上（点开 / 再点收起 / hover 换项都走这条）。
+        if overlay_slot.is_some() && open == overlay_slot {
+            self.overlay_menu = Some(pane);
+            self.pane_menu = None;
+        } else if open == Some(switch_slot) {
+            self.pane_menu = Some(pane);
             self.overlay_menu = None;
+        } else {
+            self.overlay_menu = None;
+            self.pane_menu = None;
+        }
+        // 锚点 = 对应的那个按钮（下拉面板挂在它下沿 / 右边缘跟它对齐）；顺手把这条图表栏
+        //（= 这块图表的菜单栏）也记下来 - 鼠标移出面板和它，面板就收起（见 ui::panemenu）。
+        if self.overlay_menu == Some(pane) {
+            if let Some(i) = overlay_slot {
+                self.overlay_menu_anchor = out.rects[i];
+                self.overlay_menu_bar = title;
+            }
         }
         if self.pane_menu == Some(pane) {
-            self.pane_menu_anchor = buttons[k];
+            self.pane_menu_anchor = out.rects[switch_slot];
+            self.pane_menu_bar = title;
         }
-        k += 1;
-        if self.draw_button(ui, painter, buttons[k], &code, false, "编辑这个指标的源码") {
-            self.open_source(pane);
-        }
-
-        hline_hard(
-            painter,
-            title.min.x,
-            title.max.x,
-            title.max.y - LINE_W,
-            theme().ctrl_border,
-        );
-        buttons
+        out.rects
     }
 
     /// 这一帧滚轮滚了几格（正 = 往上滚 = 放大）。只有鼠标在绘图区里、且没压在浮动面板上
@@ -962,27 +1020,34 @@ impl StockApp {
             .min(cells(VALUE_COLS_MAX + 2))
     }
 
-    /// 纵轴刻度数字的落点（Align2::RIGHT_CENTER 的 x）：轴右框那条网格线往左 1 格 -
-    /// 末尾那个字因而落在完整的内容格里（内容格 = [9k+1, 9k+9)）。
+    /// 纵轴刻度数字的落点（Align2::RIGHT_CENTER 的 x）：轴右框那条线往左 1 格 - 末尾那个字
+    /// 因而落在完整的内容格里（内容格 = [9k+1, 9k+9)），右边正好留 1 格空档。
+    /// 【一律按窗口自己的右沿算，1px 1px 地走】窗口可以 1px 1px 地缩，靠右的元素就得跟着
+    /// 1px 1px 地挪 - 要是拿 9px 网格去吸（grid_floor 那一套），窗口宽 1px 地变时数字要等
+    /// 满一格才跳一次，看上去就是「窗口缩放时元素 8px 8px 地动」。
     pub(crate) fn axis_tick_x(axis: egui::Rect) -> f32 {
-        text_right_x(axis.max.x - LINE_W)
+        axis.max.x - LINE_W - GRID
     }
 
-    /// 十字光标的数值标签（轴里那块带 1px 边框的小牌子）的左边 x：牌子右边缘停在轴右框那条线
-    /// 左边 1 格，宽度就是 cross_label_w（cells 形状）。牌子左边必须是网格线，里头的居中文字才
-    /// 会正好从内容格起点起排；牌子比轴还宽（数值位数太多）就贴住轴的左框，宁可越出去一点也不越格。
+    /// 十字光标的数值标签（轴里那块带 1px 边框的小牌子）的左边 x：牌子右边缘停在刻度数字
+    /// 右边那条空档上（也就是轴右框那条线往左 1 格），宽度就是 cross_label_w（cells 形状）。
+    /// 和刻度数字一样一律按窗口自己的右沿算、1px 1px 地走；牌子比轴还宽（数值位数太多）就
+    /// 贴住轴的左框，宁可越出去一点也不越格。
     pub(crate) fn cross_axis_label_x(axis: egui::Rect, w: f32) -> f32 {
-        let right = text_right_x(axis.max.x - LINE_W) - w;
-        clamp_soft(right, grid_floor(axis.min.x), right)
+        let right = Self::axis_tick_x(axis) - w;
+        clamp_soft(right, axis.min.x, right)
     }
 
     /// 时间带里那个索引标签（贴绘图区下沿）的左边 x：先按十字光标那一列居中，再吸到最近的
     /// 竖网格线（牌子左边必须是网格线），最后夹在绘图区里。
-    pub(crate) fn cross_time_label_x(plot: egui::Rect, cx: f32, w: f32) -> f32 {
+    /// 吸附的原点是这块窗口自己的网格（origin）- 窗口挪一格，牌子跟着挪一格，相对位置一个
+    /// 像素都不变；夹的两条边则是绘图区自己的左右沿，按 1px 算（窗口 1px 1px 地缩时，
+    /// 贴边的那块牌子才会跟着 1px 1px 地挪，而不是等满一格才跳）。
+    pub(crate) fn cross_time_label_x(plot: egui::Rect, cx: f32, w: f32, origin: f32) -> f32 {
         clamp_soft(
-            grid_snap((cx - w / 2.0).round()),
-            grid_floor(plot.min.x),
-            grid_floor(plot.max.x - w),
+            grid_snap((cx - w / 2.0).round(), origin),
+            plot.min.x - LINE_W,
+            plot.max.x - w - GRID,
         )
     }
 }

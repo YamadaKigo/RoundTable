@@ -6,6 +6,8 @@
 //
 //  铁律：不许用 egui::TextEdit（连它的外观一起不要）。全 painter 手绘 - 半格都不许有；
 //  坐标一律走 grid 那套（cells / grid_line / text_left_x / text_right_x），字号 16px 点阵字。
+//  语法着色：关键字蓝、注释绿、字符串品红，其余代码文字（变量名 / 数字 / 标点等）走默认
+//  文字色 - 颜色都在 theme 里，切皮肤跟着变（见 code_runs / paint_code_line）。
 //  输入法：只有拿到焦点的那个控件才消费 IME 事件（egui 的 owns_ime_events），
 //  候选串（Preedit）画在光标处并加 1px 下划线，上屏（Commit）才真正插进缓冲区；
 //  候选窗位置通过 PlatformOutput::ime（IMEOutput）告诉系统 - 不设它，拼音框会弹在屏幕左上角。
@@ -14,6 +16,9 @@
 //  绝不叠成 2px）：标题栏 / 菜单栏 / 按钮栏 / 正文区从上往下依次排，相邻两段共用中间那条
 //  1px 网格线 - 各段自己往里让开这条线画底色，分隔线统一留到最后再画一遍，谁都盖不掉
 //  （见 paint_separators）。全工程的控件区分割都照这条来。
+//  弹出层（菜单栏的下拉面板等）属于**当前窗口的最上层**：它必须排在窗口里所有内容之后画，
+//  才盖得住底下的控件、不会透出别的元素；菜单栏一律左对齐，摆法和主窗口的那条完全一致
+//  （共用 ui::menu::ui_menu_bar / ui_menu_popup）。
 //
 //  状态全部存在 TextEditor 的字段里（egui 是即时模式）：缓冲区、滚动行、候选串、打开的菜单、
 //  是不是正在划选、最近的查找词、有没有改过。
@@ -37,28 +42,42 @@ use eframe::egui;
 pub(crate) const EDITOR_TABS: [MenuTab; 3] = [
     MenuTab {
         title: "文件",
-        items: &["保存", "编译", "还原原始源码", "关闭窗口"],
+        items: &[
+            MenuNode::act("保存"),
+            MenuNode::act("编译"),
+            MenuNode::act("还原原始源码"),
+            MenuNode::act("关闭窗口"),
+        ],
     },
     MenuTab {
         title: "编辑",
-        items: &["撤销", "剪切", "复制", "粘贴", "删除选中", "全选", "查找下一个"],
+        items: &[
+            MenuNode::act("撤销"),
+            MenuNode::act("剪切"),
+            MenuNode::act("复制"),
+            MenuNode::act("粘贴"),
+            MenuNode::act("全选"),
+            MenuNode::sub(
+                "查找",
+                &[MenuNode::act("查找下一个")],
+            ),
+        ],
     },
     MenuTab {
         title: "查看",
-        items: &["回到开头", "跳到末尾"],
+        items: &[MenuNode::act("回到开头"), MenuNode::act("跳到末尾")],
     },
 ];
 
-/// 编辑器按钮栏上那一排按钮（图标 + 悬停便签 + 动作），从左往右：新建 / 保存 / 编译 /
-/// 剪切 / 复制 / 粘贴 / 删除 / 撤销 / 查找。便签就是鼠标悬停时显示的那句按钮含义。
-pub(crate) const EDITOR_BUTTONS: [(IconKind, &str, EditorCmd); 9] = [
+/// 编辑器按钮栏上那一排按钮（图标 + 悬停便签 + 动作），从左往右：还原 / 保存 / 编译 /
+/// 剪切 / 复制 / 粘贴 / 撤销 / 查找。便签就是鼠标悬停时显示的那句按钮含义。
+pub(crate) const EDITOR_BUTTONS: [(IconKind, &str, EditorCmd); 8] = [
     (IconKind::New, "还原原始源码", EditorCmd::Reload),
     (IconKind::Save, "保存到源文件", EditorCmd::Save),
     (IconKind::Compile, "编译（cargo check）", EditorCmd::Compile),
     (IconKind::Cut, "剪切选中", EditorCmd::Cut),
     (IconKind::Copy, "复制选中", EditorCmd::Copy),
     (IconKind::Paste, "粘贴", EditorCmd::Paste),
-    (IconKind::Cross, "删除选中", EditorCmd::Delete),
     (IconKind::Undo, "撤销", EditorCmd::Undo),
     (IconKind::Find, "查找下一个", EditorCmd::Find),
 ];
@@ -79,8 +98,6 @@ pub(crate) enum EditorCmd {
     Cut,
     Copy,
     Paste,
-    /// 删除选中的文本。
-    Delete,
     Undo,
     SelectAll,
     /// 查找下一个（没选区就用上一次的词）。
@@ -101,7 +118,6 @@ impl EditorCmd {
             "剪切" => EditorCmd::Cut,
             "复制" => EditorCmd::Copy,
             "粘贴" => EditorCmd::Paste,
-            "删除选中" => EditorCmd::Delete,
             "全选" => EditorCmd::SelectAll,
             "查找下一个" => EditorCmd::Find,
             "回到开头" => EditorCmd::DocHome,
@@ -287,6 +303,8 @@ pub(crate) struct TextEditor {
     pub(crate) buf: TextBuffer,
     /// 第一行可见行的行号（整数行滚动）。
     pub(crate) scroll: usize,
+    /// 正文区一屏能画几行：按窗口高度每帧现算（默认就是自然高度下的一屏行数）。
+    pub(crate) rows: usize,
     /// 输入法候选串：画在光标处、底下加一根 1px 下划线。
     pub(crate) preedit: String,
     /// 滚轮攒下来的零头（触控板那种按点上报的增量）。
@@ -297,8 +315,7 @@ pub(crate) struct TextEditor {
     /// （egui_wants_keyboard_input 要为真，按键才不被系统吞掉），但「收不收键盘事件」
     /// 只认这一个标志 - 不依赖 egui 内部焦点哪天被谁踢掉，打字永远跟手。
     pub(crate) focused: bool,
-    /// 正在拖滚动条的把手：记下鼠标相对把手上沿的偏移，拖的时候把手不跳。
-    pub(crate) bar_grab: Option<f32>,
+
     /// 这次鼠标拖拽是不是在划选区。
     pub(crate) selecting: bool,
     /// 上一次查找用的词（没选区时「查找下一个」接着用它）。
@@ -318,11 +335,11 @@ impl TextEditor {
         Self {
             buf: TextBuffer::default(),
             scroll: 0,
+            rows: SRC_VISIBLE_LINES,
             preedit: String::new(),
             wheel_acc: 0.0,
             menu: MenuState::default(),
             focused: false,
-            bar_grab: None,
             selecting: false,
             find_term: String::new(),
             modified: false,
@@ -335,14 +352,13 @@ impl TextEditor {
         self.scroll = 0;
         self.preedit.clear();
         self.wheel_acc = 0.0;
-        self.bar_grab = None;
         self.selecting = false;
         self.modified = false;
     }
 
     /// 滚动上限：总行数减一屏行数。
     pub(crate) fn max_scroll(&self) -> usize {
-        self.buf.line_count().saturating_sub(SRC_VISIBLE_LINES)
+        self.buf.line_count().saturating_sub(self.rows)
     }
 
     /// 光标跑到屏幕外了就把它拉回来（键盘翻页 / 打字之后自动跟随）。
@@ -350,13 +366,13 @@ impl TextEditor {
         let l = self.buf.cursor.0;
         if l < self.scroll {
             self.scroll = l;
-        } else if l >= self.scroll + SRC_VISIBLE_LINES {
-            self.scroll = l + 1 - SRC_VISIBLE_LINES;
+        } else if l >= self.scroll + self.rows {
+            self.scroll = l + 1 - self.rows;
         }
         self.scroll = self.scroll.min(self.max_scroll());
     }
 
-    /// 画整块编辑器并处理交互：菜单栏 -> 按钮栏 -> 正文区 -> 下拉面板（最后一层）。
+    /// 画整块编辑器并处理交互：菜单栏 -> 按钮栏 -> 正文区 -> 分隔线 -> 下拉面板（本窗最上层）。
     /// 返回宿主还要去做的动作（保存 / 编译 / 还原 / 关闭）。
     pub(crate) fn ui(
         &mut self,
@@ -366,17 +382,32 @@ impl TextEditor {
         id: egui::Id,
     ) -> EditorCmd {
         let mut cmd = EditorCmd::None;
+        // 正文区一屏几行：按窗口高度现算（行高 SRC_ROW_PITCH = 2 格），窗口改大改小都跟着走。
+        self.rows = (((panel.max.y - LINE_W - (panel.min.y + SRC_BODY_TOP)) / SRC_ROW_PITCH).floor()
+            as usize)
+            .max(1);
         let menu_band = grid_band(panel, SRC_TITLE_ROWS, SRC_MENU_ROWS);
         let bar_band = grid_band(panel, SRC_TITLE_ROWS + SRC_MENU_ROWS, SRC_BAR_ROWS);
-        let dropdown = self.ui_menubar(app, ui, menu_band, id);
+        // 菜单栏走 ui::menu 那一份（左对齐、相邻两项共用网格线、下沿那条 1px 线），
+        // 和主窗口的菜单栏是同一套实现、同一个摆法。
+        let (open, state) = ui_menu_bar(app, ui, menu_band, &EDITOR_TABS, self.menu.clone());
+        self.menu = state;
         self.ui_buttonbar(app, ui, bar_band, &mut cmd);
         self.ui_body(app, ui, panel, id, &mut cmd);
-        if let Some(anchor) = dropdown {
-            self.ui_dropdown(app, ui, anchor, &mut cmd);
-        }
-        // 各段之间那条 1px 分隔线最后画一遍：铁律 - 每个控件区的外圈都得有落在网格线上的线，
+        // 各段之间那条 1px 分隔线排在内容之后画：铁律 - 每个控件区的外圈都得有落在网格线上的线，
         // 而且谁都盖不掉（内容先画、线后画，永远只有 1px）。
         self.paint_separators(&ui.painter().clone(), panel);
+        // 下拉面板：本窗口的最上层（盖住菜单栏 / 按钮栏 / 正文 / 分隔线），挂在菜单项下沿、
+        // 左对齐、整块夹在这块窗口里 - 和主窗口菜单栏是同一份实现（ui::menu::ui_menu_popup）。
+        if let Some((idx, anchor)) = open {
+            let items = EDITOR_TABS[idx].items;
+            let mut menu = self.menu.clone();
+            if let Some(label) = ui_menu_popup(app, ui, anchor, items, &mut menu, panel, &[menu_band])
+            {
+                cmd = EditorCmd::of(label);
+            }
+            self.menu = menu;
+        }
         self.finish_cmd(ui, cmd)
     }
 
@@ -391,7 +422,8 @@ impl TextEditor {
 
     /// 缓冲区内部的动作用不着宿主，当场做掉；只有碰文件 / 碰宿主状态的才往外传。
     fn finish_cmd(&mut self, ui: &egui::Ui, cmd: EditorCmd) -> EditorCmd {
-        match cmd {
+        let caret_before = self.buf.cursor;
+        let out = match cmd {
             EditorCmd::None => EditorCmd::None,
             EditorCmd::Save | EditorCmd::Compile | EditorCmd::Reload | EditorCmd::Close => cmd,
             EditorCmd::Cut => {
@@ -417,12 +449,7 @@ impl TextEditor {
                 }
                 EditorCmd::None
             }
-            EditorCmd::Delete => {
-                if self.buf.delete_selection() {
-                    self.modified = true;
-                }
-                EditorCmd::None
-            }
+
             EditorCmd::Undo => {
                 if self.buf.undo() {
                     self.modified = true;
@@ -455,44 +482,15 @@ impl TextEditor {
                 self.buf.move_doc_end();
                 EditorCmd::None
             }
-        }
-    }
-
-    /// 菜单栏：走 ui::menu 那一套（左对齐、相邻两项共用网格线、下沿那条 1px 线在最后画，
-    /// 点菜单栏和下拉面板以外的地方自动收起）。返回下拉面板的锚点矩形（没开着就是 None）。
-    fn ui_menubar(
-        &mut self,
-        app: &mut StockApp,
-        ui: &mut egui::Ui,
-        band: egui::Rect,
-        _id: egui::Id,
-    ) -> Option<egui::Rect> {
-        let (open, state) = ui_menu_bar(app, ui, band, &EDITOR_TABS, self.menu);
-        self.menu = state;
-        open.map(|(_, anchor)| anchor)
-    }
-
-    /// 菜单下拉面板：走 ui::menu 那一套（铺底 -> 逐条画 -> 1px 硬边压在最后）。
-    /// 点中的条目按名字反查动作。
-    fn ui_dropdown(
-        &mut self,
-        app: &mut StockApp,
-        ui: &mut egui::Ui,
-        anchor: egui::Rect,
-        cmd: &mut EditorCmd,
-    ) {
-        let Some(open) = self.menu.open else {
-            return;
         };
-        let items = EDITOR_TABS[open].items;
-        let panel = MenuPanel::right(anchor, MENU_PANEL_W, items.len(), ui.max_rect().max.y);
-        let state = self.menu;
-        let (clicked, state) = ui_dropdown(app, ui, panel, items, state);
-        self.menu = state;
-        if let Some(j) = clicked {
-            *cmd = EditorCmd::of(items[j]);
+        // 这些动作可能把光标挪到屏幕外（撤销 / 查找 / 回开头 / 跳末尾）：只在光标真动了的时候
+        // 把视图拉回来。光标没动就一律不碰 scroll - 编辑和滚动互不干扰。
+        if self.buf.cursor != caret_before {
+            self.ensure_caret_visible();
         }
+        out
     }
+
 
     /// 按钮栏：一排只有图标的方按钮（各 cells(2) 见方，相邻共用中间那条网格线），
     /// 外观走全工程通用的 draw_button；悬停时弹便签说明按钮含义。
@@ -561,10 +559,12 @@ impl TextEditor {
         let body_top = panel.min.y + SRC_BODY_TOP;
         let body_bottom = panel.max.y - LINE_W;
         let gutter_line = panel.min.x + grid_line(SRC_GUTTER_COLS);
-        let bar_line = panel.min.x + grid_line(SRC_COLS - 1);
-        let code_x = text_left_x(gutter_line);
+        // 代码区铺到窗口右边缘为止：右边是「1px 线格 + 8px 滚动条 + 最右那条边框线」。
+        let bar_line = panel.max.x - 2.0 * LINE_W - SRC_BAR_W;
+        // 文字的吸附原点 = 这块窗口自己的网格（面板左边那条线）。
+        let code_x = text_left_x(gutter_line, panel.min.x);
         let code_w = (bar_line - GRID - code_x).max(0.0);
-        let visible = SRC_VISIBLE_LINES;
+        let visible = self.rows;
 
         // 行号区底色 + 右边那条竖线。底色让开上沿那条共用网格线（按钮栏下沿那条）。
         painter.rect_filled(
@@ -615,6 +615,8 @@ impl TextEditor {
         }
         if resp.clicked() || resp.drag_started() {
             self.focused = true;
+            // 点进来的时候要一次 egui 的键盘焦点（要了才能收按键 / 输入法事件）。
+            ui.memory_mut(|m| m.request_focus(id));
         }
         // 点在面板外面（别的窗口 / 图表上）就把焦点还回去。
         if self.focused {
@@ -628,12 +630,14 @@ impl TextEditor {
                 self.focused = false;
             }
         }
-        // 键盘焦点照样每帧申请（egui_wants_keyboard_input 要为真，按键才不被系统当成没人在听），
-        // 但「收不收键盘事件」只认 self.focused - 不靠 egui 内部焦点跨帧留存。
-        if self.focused {
-            ui.memory_mut(|m| m.request_focus(id));
-        } else {
+        // egui 的键盘焦点：只在「真的丢了」的时候补要一次，绝不能每帧都 request_focus。
+        // 铁律：Memory::request_focus 内部会顺手 interrupt_ime()，每帧都调就变成每帧
+        // set_ime_allowed(false)/(true) 重置一次输入法 - 表相就是「输入法弹出来了，拼音却
+        // 永远上不了屏」。所以打字期间（有候选串）一次都不许打断，焦点只认 self.focused。
+        if !self.focused {
             ui.memory_mut(|m| m.surrender_focus(id));
+        } else if self.preedit.is_empty() && !ui.memory(|m| m.has_focus(id)) {
+            ui.memory_mut(|m| m.request_focus(id));
         }
         let focused = self.focused;
 
@@ -668,6 +672,7 @@ impl TextEditor {
                     },
                 )
             });
+            let caret_before = self.buf.cursor;
             let events = ui.input(|i| i.events.clone());
             let out = apply_edit_events(&mut self.buf, &mut self.preedit, &events, true, &char_allowed);
             if out.changed {
@@ -679,7 +684,11 @@ impl TextEditor {
             if out.save {
                 *cmd = EditorCmd::Save;
             }
-            self.ensure_caret_visible();
+            // 只在光标真的动了的时候把视图拉回来；光标停着不动的帧（比如只是滚轮往下看）
+            // 一律不碰 scroll - 编辑和滚动互不干扰。
+            if self.buf.cursor != caret_before {
+                self.ensure_caret_visible();
+            }
         } else {
             self.preedit.clear();
         }
@@ -726,19 +735,12 @@ impl TextEditor {
             let y = body_top + k as f32 * SRC_ROW_PITCH + LINE_W + SRC_LINE_H / 2.0;
             app.text(
                 &painter,
-                egui::pos2(text_right_x(gutter_line), y),
+                egui::pos2(text_right_x(gutter_line, panel.min.x), y),
                 egui::Align2::RIGHT_CENTER,
                 &format!("{}", idx + 1),
                 theme().cross,
             );
-            let shown = fit_line(self.buf.line(idx), code_w);
-            app.text(
-                &text_painter,
-                egui::pos2(code_x, y),
-                egui::Align2::LEFT_CENTER,
-                &shown,
-                theme().text,
-            );
+            paint_code_line(app, &text_painter, code_x, y, self.buf.line(idx), code_w);
         }
 
         // 光标（2px 宽的竖线，整数像素、不闪）+ 输入法候选串（在下划线上）。
@@ -797,16 +799,15 @@ impl TextEditor {
             }
         }
 
-        // ---- 滚动条：1 格宽的槽 + 按内容比例算高度的把手（鼠标按住可以拖）----
-        // 槽底铺满到窗口下边框；把手的行程比槽上下各收一点：贴着上沿时上边框正好压在
-        // 按钮栏下沿那条共用线上（重合，仍是 1px），滑到底时下边框也离窗口下边框留一行空档
-        // - 铁律：任何一条线都不许和别的线紧挨着堆成 2px。
+        // ---- 滚动条：1 格宽的槽 + 按内容比例算高度的把手（鼠标滚轮和拖拽把手都能滚）----
+        // 行程两端都压在相邻的边框线上：顶到最上时把手的上沿和按钮栏下沿那条共用线重合，
+        // 滑到最下时把手底边和下边框线重合 - 上下一样齐。铁律：线不许叠成 2px，也不许差一行。
         let track = egui::Rect::from_min_max(
             egui::pos2(bar_line + LINE_W, body_top),
             egui::pos2(panel.max.x - LINE_W, body_bottom),
         );
         let travel_min = body_top;
-        let travel_max = body_bottom - LINE_W;
+        let travel_max = panel.max.y;
         let total = self.buf.line_count().max(1) as f32;
         let track_h = track.height();
         let handle_h = (track_h * visible as f32 / total)
@@ -814,7 +815,7 @@ impl TextEditor {
             .clamp(SRC_BAR_W, track_h.max(SRC_BAR_W));
         let max_scroll = self.max_scroll();
         let travel = (travel_max - travel_min - handle_h).max(1.0);
-        // 某个滚动位置对应的把手矩形（交互先按这一帧开头那份 scroll 算，改完再算一次来画）。
+        // 某个滚动位置对应的把手矩形。
         let handle_at = |scroll: usize| {
             let t = if max_scroll == 0 {
                 0.0
@@ -828,36 +829,27 @@ impl TextEditor {
         };
         let handle = handle_at(self.scroll);
 
-        // 拖动：按住把手拖（把手不跳）；点槽 / 拖槽就把把手心挪到鼠标那儿。
-        let bar_resp = ui.interact(track, id.with("scrollbar"), egui::Sense::click_and_drag());
-        if bar_resp.hovered() || bar_resp.dragged() {
+        // 拖拽：按住把手上下拖 = 直接滚到那个位置（和滚轮同一套范围，互相不干扰）。
+        // 热区 id 固定挂在编辑器自己的 id 上 - 把手每帧都在动，用「按矩形算」的 id 会一帧一个样，
+        // 按下的那一半和松手的那一半对不上，拖拽直接就丢了（见 grid::interact_rect 的说明）。
+        let bar = ui.interact(handle, id.with("vscroll"), egui::Sense::click_and_drag());
+        if bar.hovered() || bar.dragged() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
         }
-        if bar_resp.drag_started() {
-            self.bar_grab = ui
-                .input(|i| i.pointer.latest_pos())
-                .map(|p| p.y - handle.min.y);
-        }
-        if bar_resp.clicked() {
-            // 点的是槽（没点着把手）：把手心跳过来，接着就能拖。
-            self.bar_grab = Some(handle_h / 2.0);
-        }
-        if bar_resp.dragged() {
-            let grab = self.bar_grab.unwrap_or(handle_h / 2.0);
-            if let Some(p) = ui.input(|i| i.pointer.latest_pos()) {
-                let t = ((p.y - grab - track.min.y) / travel).clamp(0.0, 1.0);
+        if bar.dragged() {
+            if let Some(p) = ui.input(|i| i.pointer.interact_pos()) {
+                // 拿鼠标当把手的中心：抓住把手哪一处，滚动都跟手，不会跳。
+                let t = ((p.y - handle_h / 2.0 - travel_min) / travel).clamp(0.0, 1.0);
                 self.scroll = (t * max_scroll as f32).round() as usize;
             }
         }
-        if bar_resp.drag_stopped() {
-            self.bar_grab = None;
-        }
+        // 拖完按新的滚动位置重算把手：这一帧画出来的把手就跟着鼠标走，不多拖一帧。
         let handle = handle_at(self.scroll);
-
-        // 槽：只铺浅底色，左右两侧不画线（左边紧挨着代码区那条竖线，再画一条就叠成 2px 了）。
-        painter.rect_filled(track, egui::CornerRadius::ZERO, theme().splitter);
-        // 把手：浅底色 + 上下两条 1px 线（1px 的线叠不出 2px），左右不画线。
-        painter.rect_filled(handle, egui::CornerRadius::ZERO, theme().btn_face);
+        // 槽：只铺槽底色，左右两侧不画线（左边紧挨着代码区那条竖线，再画一条就叠成 2px 了）。
+        painter.rect_filled(track, egui::CornerRadius::ZERO, theme().scroll_track);
+        // 把手：把手底色（比槽亮一档，滚到哪儿一眼看得出来）+ 上下两条 1px 线（1px 的线叠不出
+        // 2px），左右不画线。
+        painter.rect_filled(handle, egui::CornerRadius::ZERO, theme().scroll_thumb);
         hline_hard(
             &painter,
             handle.min.x,
@@ -872,20 +864,153 @@ impl TextEditor {
             handle.max.y - LINE_W,
             theme().ctrl_border,
         );
-        // 把手中间三根短横线（抓手纹）：不连到左右边框上，落在网格线内。
-        if handle_h >= 3.0 * GRID {
-            let cx = handle.center().x;
-            let cy = grid_snap(handle.center().y);
-            let half = GRID / 2.0;
-            for k in [-GRID, 0.0, GRID] {
-                let y = cy + k;
-                if y > handle.min.y + LINE_W && y < handle.max.y - 2.0 * LINE_W {
-                    hline_hard(&painter, cx - half, cx + half, y, theme().line);
-                }
-            }
-        }
+
         // 代码区和滚动条列之间那条竖线：两段共用的边界线，永远 1px。
         vline_hard(&painter, bar_line, body_top, body_bottom, theme().ctrl_border);
+    }
+}
+
+/// 一行源码里一个着色片段的种类。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum SynKind {
+    /// 普通代码：变量名 / 数字 / 标点 / 运算符等，一律走默认文字色。
+    Plain,
+    /// 关键字：`let` / `fn` / `impl` 这些（用户点名的蓝色）。
+    Keyword,
+    /// 注释：`//` 到行尾（绿色）。
+    Comment,
+    /// 字符串：一对引号之间（品红色）。
+    String,
+}
+
+/// Rust 关键字 + 内置类型名：这些画成关键字蓝，其余标识符（变量名 / 函数名等）走默认文字色。
+const RUST_KEYWORDS: &[&str] = &[
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum",
+    "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move",
+    "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true",
+    "type", "union", "unsafe", "use", "where", "while", "abstract", "become", "box", "do",
+    "final", "macro", "override", "priv", "typeof", "unsized", "virtual", "yield", "bool", "char",
+    "str", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64",
+    "u128", "usize",
+];
+
+/// 是不是 Rust 关键字 / 内置类型名。
+fn is_rust_keyword(word: &str) -> bool {
+    RUST_KEYWORDS.contains(&word)
+}
+
+/// 往 runs 末尾追加一段；和上一段同色就并进去，免得切出一堆碎片。
+fn push_run(runs: &mut Vec<(String, SynKind)>, text: String, kind: SynKind) {
+    if text.is_empty() {
+        return;
+    }
+    if let Some(last) = runs.last_mut() {
+        if last.1 == kind {
+            last.0.push_str(&text);
+            return;
+        }
+    }
+    runs.push((text, kind));
+}
+
+/// 把一段「代码」（非字符串、非注释）切成片段：关键字算 Keyword（蓝色），
+/// 变量名 / 数字 / 标点 / 运算符 / 空白一律算 Plain（默认文字色）。
+fn push_code(runs: &mut Vec<(String, SynKind)>, code: &str) {
+    let chars: Vec<char> = code.chars().collect();
+    let n = chars.len();
+    let mut i = 0;
+    while i < n {
+        let start = i;
+        if chars[i].is_alphabetic() || chars[i] == '_' {
+            while i < n && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let word: String = chars[start..i].iter().collect();
+            let kind = if is_rust_keyword(&word) { SynKind::Keyword } else { SynKind::Plain };
+            push_run(runs, word, kind);
+        } else {
+            while i < n && !(chars[i].is_alphabetic() || chars[i] == '_') {
+                i += 1;
+            }
+            push_run(runs, chars[start..i].iter().collect(), SynKind::Plain);
+        }
+    }
+}
+
+/// 把一行源码切成若干着色片段：`"..."` 之间算字符串，`//` 到行尾算注释，其余算代码再细分
+/// 成「关键字（蓝）/ 普通代码（默认色）」。片段拼起来就是原行，一个字都不丢、也不插字。
+pub(crate) fn code_runs(line: &str) -> Vec<(String, SynKind)> {
+    let chars: Vec<char> = line.chars().collect();
+    let n = chars.len();
+    let mut runs: Vec<(String, SynKind)> = Vec::new();
+    let mut code = String::new();
+    let mut i = 0;
+    while i < n {
+        if chars[i] == '"' {
+            push_code(&mut runs, &code);
+            code.clear();
+            // 从这个引号一直吃到下一个引号；没有收尾的（半行字符串）就算到行尾。
+            let mut s = String::from('"');
+            i += 1;
+            while i < n {
+                s.push(chars[i]);
+                let closed = chars[i] == '"';
+                i += 1;
+                if closed {
+                    break;
+                }
+            }
+            push_run(&mut runs, s, SynKind::String);
+        } else if chars[i] == '/' && i + 1 < n && chars[i + 1] == '/' {
+            push_code(&mut runs, &code);
+            code.clear();
+            push_run(&mut runs, chars[i..].iter().collect(), SynKind::Comment);
+            i = n;
+        } else {
+            code.push(chars[i]);
+            i += 1;
+        }
+    }
+    push_code(&mut runs, &code);
+    runs
+}
+
+/// 一个片段该用什么颜色：一律从当前皮肤取（见 theme 里的 syn_code / syn_comment / syn_string）。
+pub(crate) fn syn_color(kind: SynKind) -> egui::Color32 {
+    match kind {
+        SynKind::Plain => theme().text,
+        SynKind::Keyword => theme().syn_code,
+        SynKind::Comment => theme().syn_comment,
+        SynKind::String => theme().syn_string,
+    }
+}
+/// 画一行带语法着色的源码：逐段量宽、接着往右排；超出 code_w 的那一段用 fit_line 截断。
+/// 落点全在整数像素上，段与段之间不留缝也不重叠（拼起来和不着色时一模一样）。
+pub(crate) fn paint_code_line(
+    app: &mut StockApp,
+    painter: &egui::Painter,
+    code_x: f32,
+    y: f32,
+    line: &str,
+    code_w: f32,
+) {
+    let end = code_x + code_w;
+    let mut x = code_x;
+    for (text, kind) in code_runs(line) {
+        if x >= end {
+            break;
+        }
+        let color = syn_color(kind);
+        let w = text_advance(&text);
+        if x + w > end {
+            let shown = fit_line(&text, end - x);
+            if !shown.is_empty() {
+                app.text(painter, egui::pos2(x, y), egui::Align2::LEFT_CENTER, &shown, color);
+            }
+            break;
+        }
+        app.text(painter, egui::pos2(x, y), egui::Align2::LEFT_CENTER, &text, color);
+        x += w;
     }
 }
 

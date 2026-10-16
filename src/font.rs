@@ -661,10 +661,13 @@ impl HardText {
             let _ = ink;
             self.texture
                 .set_partial([ax, ay], patch, egui::TextureOptions::NEAREST);
+            // Fixedsys 的 '0' 在字格里墨迹偏右 1px（点阵字模自带的毛病）：单独把它左移 1px，
+            // 别的字符一个都不动（字格本身还是 8px 宽，只是整体往左挪一格像素）。
+            let ox = if c == '0' { -1 } else { 0 };
             Some(Glyph {
                 w: RAS_CELL_W,
                 h: RAS_CELL_H,
-                ox: 0,
+                ox,
                 oy: self.ascii_ascent,
                 atlas: [ax, ay],
             })

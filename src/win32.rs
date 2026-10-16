@@ -36,6 +36,7 @@ unsafe extern "system" {
     pub(crate) fn CloseClipboard() -> i32;
     pub(crate) fn IsClipboardFormatAvailable(format: u32) -> i32;
     pub(crate) fn GetClipboardData(format: u32) -> isize;
+    pub(crate) fn SystemParametersInfoW(action: u32, param: u32, data: *mut core::ffi::c_void, win_ini: u32) -> i32;
 }
 
 #[link(name = "kernel32")]
@@ -46,6 +47,35 @@ unsafe extern "system" {
 
 /// CF_UNICODETEXT：系统剪贴板里的宽字符文本格式。
 pub(crate) const CF_UNICODETEXT: u32 = 13;
+
+/// SPI_GETWORKAREA：主显示器上「没被任务栏挡住」的那块工作区。
+pub(crate) const SPI_GETWORKAREA: u32 = 0x0030;
+
+/// 主显示器的工作区（左上角 + 宽高，物理像素）：任务栏占掉的那一条不算在内。
+/// 开机按它给窗口定位定尺寸，窗口就正好铺满工作区、不会压到任务栏上。
+/// 读不到（理论上不会）就返回 None，调用方退回默认尺寸。
+pub(crate) fn work_area() -> Option<(i32, i32, i32, i32)> {
+    #[repr(C)]
+    struct Rect {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+    let mut r = Rect { left: 0, top: 0, right: 0, bottom: 0 };
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            &mut r as *mut Rect as *mut core::ffi::c_void,
+            0,
+        )
+    };
+    if ok == 0 || r.right <= r.left || r.bottom <= r.top {
+        return None;
+    }
+    Some((r.left, r.top, r.right - r.left, r.bottom - r.top))
+}
 
 /// 读系统剪贴板里的文本。自绘编辑器 / 输入框的「粘贴」按钮用它
 /// （Ctrl+V 不用它 - winit 会直接把内容作为 Event::Paste 送进来）。

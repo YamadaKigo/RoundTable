@@ -290,14 +290,22 @@ impl IconKind {
 /// PNG 里的透明色：#ff00ff（洋红）。整张图里凡是这个颜色的像素都算没墨。
 pub(crate) const ICON_TRANSPARENT_RGB: (u8, u8, u8) = (0xFF, 0x00, 0xFF);
 
-/// 白色墨迹：画的时候换成当前皮肤的文字色（见 IconImage::paint）。
-const ICON_INK_FOLLOWS_THEME: egui::Color32 = egui::Color32::WHITE;
+/// 一个墨点是什么颜色。两种来源必须分得开，不然后面会出错：
+///   - 代码里的内置点阵（'#'）是「跟随皮肤文字色」，画的时候才去取当前皮肤的文字色；
+///   - PNG 里读进来的是写死的颜色，白色就是白色 - 绝不能再被当成「跟随皮肤」而变黑。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Ink {
+    /// 跟随当前皮肤的文字色（只有内置点阵用）。
+    Theme,
+    /// 写死的颜色（PNG 里读进来的）。
+    Rgb(egui::Color32),
+}
 
-/// 一张 16x16 的图标：每个像素要么透明（None）、要么一个颜色。
+/// 一张 16x16 的图标：每个像素要么透明（None）、要么一个墨点。
 /// 颜色一律是 #aabbcc 形（每个通道都是 0x11 的倍数）。
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct IconImage {
-    px: [[Option<egui::Color32>; ICON_PX]; ICON_PX],
+    px: [[Option<Ink>; ICON_PX]; ICON_PX],
 }
 
 /// 把一个颜色通道吸到最近的 0x11 倍数（#aabbcc 规矩）：0x00 / 0x11 / ... / 0xFF 共十七档。
@@ -323,13 +331,13 @@ impl IconImage {
         }
     }
 
-    /// 由内置点阵建图：'#' 是白色墨迹（画的时候跟随主题文字色），别的字符都是没墨。
+    /// 由内置点阵建图：'#' 是墨迹（画的时候跟随主题文字色），别的字符都是没墨。
     pub(crate) fn from_art(art: &[&str; ICON_PX]) -> Self {
         let mut px = [[None; ICON_PX]; ICON_PX];
         for (row, line) in art.iter().enumerate() {
             for (col, ch) in line.chars().take(ICON_PX).enumerate() {
                 if ch == '#' {
-                    px[row][col] = Some(ICON_INK_FOLLOWS_THEME);
+                    px[row][col] = Some(Ink::Theme);
                 }
             }
         }
@@ -361,7 +369,7 @@ impl IconImage {
                 if a < 128 || (r, g, b) == ICON_TRANSPARENT_RGB {
                     continue;
                 }
-                px[y][x] = Some(snap_aabbcc(egui::Color32::from_rgb(r, g, b)));
+                px[y][x] = Some(Ink::Rgb(snap_aabbcc(egui::Color32::from_rgb(r, g, b))));
             }
         }
         Self { px }
@@ -372,23 +380,29 @@ impl IconImage {
         self.px.iter().all(|row| row.iter().all(|p| p.is_none()))
     }
 
+    /// 某个像素最终画出来是什么颜色（None = 透明）：内置点阵的墨迹取当前皮肤的文字色，
+    /// PNG 里读进来的颜色原样用它自己（白就是白）。
+    pub(crate) fn resolved(&self, x: usize, y: usize) -> Option<egui::Color32> {
+        match self.px[y][x]? {
+            Ink::Theme => Some(theme().text),
+            Ink::Rgb(c) => Some(c),
+        }
+    }
+
     /// 画在给定矩形里：落点吸到整数像素，同一行相邻的同色像素并成一条 1px 长条
-    /// （比逐像素填方块省图形，画出来一模一样）。白色墨迹换成当前皮肤的文字色。
+    /// （比逐像素填方块省图形，画出来一模一样）。颜色一律过 resolved（见上）。
     pub(crate) fn paint(&self, painter: &egui::Painter, rect: egui::Rect) {
         let x0 = rect.min.x.round();
         let y0 = rect.min.y.round();
-        let themed = theme().text;
-        let resolved = |c: egui::Color32| if c == ICON_INK_FOLLOWS_THEME { themed } else { c };
-        for (row, line) in self.px.iter().enumerate() {
+        for row in 0..ICON_PX {
             let mut col = 0usize;
             while col < ICON_PX {
-                let Some(c) = line[col] else {
+                let Some(color) = self.resolved(col, row) else {
                     col += 1;
                     continue;
                 };
-                let color = resolved(c);
                 let start = col;
-                while col < ICON_PX && line[col].map(resolved) == Some(color) {
+                while col < ICON_PX && self.resolved(col, row) == Some(color) {
                     col += 1;
                 }
                 painter.rect_filled(
@@ -403,14 +417,16 @@ impl IconImage {
         }
     }
 
-    /// 导出成 PNG 用的 RGBA 像素：透明处写 #ff00ff（约定的透明色），白色墨迹原样写白。
+    /// 导出成 PNG 用的 RGBA 像素：透明处写 #ff00ff（约定的透明色）；内置点阵的「跟随皮肤」
+    /// 墨迹写成白色（默认图标落盘就是白墨），PNG 读进来的颜色原样写回。
     fn to_rgba(&self) -> Vec<u8> {
         let (tr, tg, tb) = ICON_TRANSPARENT_RGB;
         let mut out = Vec::with_capacity(ICON_PX * ICON_PX * 4);
         for row in &self.px {
             for cell in row {
                 match cell {
-                    Some(c) => out.extend_from_slice(&[c.r(), c.g(), c.b(), 255]),
+                    Some(Ink::Theme) => out.extend_from_slice(&[0xFF, 0xFF, 0xFF, 255]),
+                    Some(Ink::Rgb(c)) => out.extend_from_slice(&[c.r(), c.g(), c.b(), 255]),
                     None => out.extend_from_slice(&[tr, tg, tb, 255]),
                 }
             }
@@ -477,7 +493,7 @@ pub(crate) fn icons_dir() -> std::path::PathBuf {
 
 /// 解一张 PNG：只认 8 位灰度 / 真彩（含 alpha）；调色板 / 低位深 / 16 位交给 png 自己展开。
 /// 读不动就 None（调用方退回内置点阵）。
-fn decode_png(bytes: &[u8]) -> Option<IconImage> {
+pub(crate) fn decode_png(bytes: &[u8]) -> Option<IconImage> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().ok()?;

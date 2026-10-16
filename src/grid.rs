@@ -53,6 +53,30 @@ pub(crate) fn grid_band(area: egui::Rect, row: i32, rows: i32) -> egui::Rect {
     )
 }
 
+// ---- 自由尺寸窗口（不吸网格的子窗口）里的分段 ----
+//  窗口区里的子窗口可以 1px 1px 地挪 / 缩（铁律 4），所以窗口本体不再是 cells(n) 的形状，
+//  内部排版要分两种段：固定段 + 弹性段（吸零头的那一段）。
+//    - 固定段（free_band）：尺寸永远是死的（最小化键 / 关闭键 / 状态带 / 时间带）；
+//    - 弹性段（free_tail）：吃下窗口里剩下的全部，窗口多出来的那几个像素（溢出空间）
+//      只许落进它里面 - 原则上落在右边和下方，而且只落在装得下零头的地方。
+
+/// 自由尺寸窗口里的一条固定段：上沿 = 区域顶边 + 9*row，高 = cells(rows)（尺寸就是死的）。
+pub(crate) fn free_band(area: egui::Rect, row: i32, rows: i32) -> egui::Rect {
+    egui::Rect::from_min_size(
+        egui::pos2(area.min.x, area.min.y + grid_line(row)),
+        egui::vec2(area.width(), cells(rows)),
+    )
+}
+
+/// 自由尺寸窗口里的弹性段（尾段）：从区域顶边往下第 row 条网格线起，一直铺到区域下沿 -
+/// 窗口尺寸不是整格时多出来的零头全归它。
+pub(crate) fn free_tail(area: egui::Rect, row: i32) -> egui::Rect {
+    egui::Rect::from_min_max(
+        egui::pos2(area.min.x, area.min.y + grid_line(row)),
+        area.max,
+    )
+}
+
 /// 把一段跨度吸到最近的整数格：结果一定是 cells(n) 的形状（拖拽条拖动时用它把像素吸成格）。
 pub(crate) fn snap_cells_round(v: f32) -> f32 {
     let n = ((v - LINE_W) / PITCH).round().max(0.0);
@@ -94,9 +118,9 @@ pub(crate) const WINDOW_W: f32 = cells(WINDOW_COLS);
 pub(crate) const WINDOW_H: f32 = cells(WINDOW_ROWS);
 
 // ---- 窗口尺寸下限（不再钉死尺寸，但也不能小到排不下）----
-//   宽：两栏各自最小 35 格 + 1 格分割条 = 71 格 = 640px。
-//   高：标题 / 菜单 / 状态各 2 格，加上左栏最小（三块图表各 PANE_ROWS_MIN 格，中间夹两条
-//    1 格拖拽条）= 68 格 = 613px。再小就排不下三块图表了。
+//   宽：左栏（图表）最小 35 格 + 右栏（面板列）35 格 + 1 格共用的线格 = 71 格 = 640px。
+//   高：标题 / 菜单 / 状态各 2 格 + 左栏最小 62 格 = 68 格 = 613px。左栏那条下限当年是按
+//    三块图表叠着算的（3*PANE_ROWS_MIN + 2），现在只有一块图表，留着这条下限图个保险。
 pub(crate) const WINDOW_MIN_COLS: i32 = PANE_MIN_COLS * 2 + SPLITTER_COLS;
 pub(crate) const LEFT_WORK_MIN_ROWS: i32 = 3 * PANE_ROWS_MIN + 2;
 pub(crate) const WINDOW_MIN_ROWS: i32 = TITLE_ROWS + MENU_ROWS + STATUS_ROWS + LEFT_WORK_MIN_ROWS;
@@ -132,30 +156,35 @@ pub(crate) const TEXT_INSET_X: f32 = LINE_W + PITCH;
 pub(crate) const TEXT_ROWS: i32 = 2;
 
 // ---- 文字的横向落点：全界面的文字都必须踩在内容格上（内容格 = [9k+1, 9k+9)，见 font.rs）----
+//  每个窗口自带一套网格：原点 = 这块窗口自己的左上角（窗口可以 1px 1px 地挪 / 缩，不吸主窗口的网格）。
+//  所以这几个吸附入口一律要一个 origin 参数 = 「当前这套网格的原点」，
+//  通常是所在区块（标题栏 / 面板 / 状态带 / 编辑器正文区）的左边那条线。
+//  同一块窗口里，任何以 grid_line(k) 起算的区块，它的 min 都跟窗口左上角同余（差整数格），
+//  所以拿区块自己的 min 当原点，和拿窗口左上角当原点，吸附结果完全一样。
 
-/// 把绝对坐标向下吸到最近的竖网格线。整窗的竖网格线都落在 PITCH 的整数倍上（原点 = 窗口左上角），
-/// 所以直接对绝对值取整就够；区块自己 shrink(LINE_W) 出来的内框也能吸回同一条线。
-pub(crate) fn grid_floor(v: f32) -> f32 {
-    (v / PITCH).floor() * PITCH
+/// 把坐标 v 向下吸到「原点 origin 那一套 9px 网格」上离它最近的竖网格线。
+/// 区块自己 shrink(LINE_W) 出来的内框也能吸回同一条线（差 1px 不影响向下取整的结果）。
+pub(crate) fn grid_floor(v: f32, origin: f32) -> f32 {
+    origin + ((v - origin) / PITCH).floor() * PITCH
 }
 
-/// 把绝对坐标吸到最近的竖网格线（四舍五入）：居中摆放的浮动标签用它。
-pub(crate) fn grid_snap(v: f32) -> f32 {
-    (v / PITCH).round() * PITCH
+/// 把坐标 v 吸到原点 origin 那套网格上最近的竖网格线（四舍五入）：居中摆放的浮动标签用它。
+pub(crate) fn grid_snap(v: f32, origin: f32) -> f32 {
+    origin + ((v - origin) / PITCH).round() * PITCH
 }
 
 /// 左对齐文字的 x 落点：区块左边那条 1px 网格线右边第 1 个内容格。
-/// 区块外框的 min.x、或它 shrink(LINE_W) 之后的内框 min.x 都行 - 先吸到左边那条线上再偏移，
-/// 结果一定落在内容格起点，左边正好留出 1 格空档。
-pub(crate) fn text_left_x(rect_left: f32) -> f32 {
-    grid_floor(rect_left) + TEXT_INSET_X
+/// origin = 这块窗口自己的网格原点（区块左边那条线所在的那一套网格）：
+/// 先吸到左边那条线上再偏移，结果一定落在内容格起点，左边正好留出 1 格空档。
+pub(crate) fn text_left_x(rect_left: f32, origin: f32) -> f32 {
+    grid_floor(rect_left, origin) + TEXT_INSET_X
 }
 
 /// 右对齐文字的 x 落点（当作 Align2::RIGHT_* 的 pos.x）：文字末尾停在右边那条网格线的左边 1 格。
-/// 参数是那条线的坐标（= 边框线所在的像素列，一定是网格线）- 最后一个字因而落在完整的内容格里，
-/// 右边正好留出 1 格空档。
-pub(crate) fn text_right_x(line_x: f32) -> f32 {
-    grid_floor(line_x) - GRID
+/// 参数是那条线的坐标（= 边框线所在的像素列，一定落在这块窗口的网格线上）- 最后一个字因而
+/// 落在完整的内容格里，右边正好留出 1 格空档。
+pub(crate) fn text_right_x(line_x: f32, origin: f32) -> f32 {
+    grid_floor(line_x, origin) - GRID
 }
 
 // ---- 功能区里的图表 ----
@@ -169,10 +198,11 @@ pub(crate) const AXIS_W: f32 = cells(AXIS_COLS);
 /// 7 格封顶。纵轴留 VALUE_COLS_MAX + 2 = 9 格，数值标签永远越不出轴那一列。
 pub(crate) const VALUE_COLS_MAX: i32 = 7;
 
-// ---- 左栏三块图表 + 它们之间的横向拖拽条 ----
-//  K 线区 / 1px 线格 / 横向拖拽条 1 格 / 1px 线格 / 成交量区 / 1px 线格 / 横向拖拽条 1 格 /
-//  1px 线格 / 指标区。三块高度都是整数格 cells(n) = 9n + 1（默认 52 / 21 / 21 格），
-//  拽条各 1 格；相邻两块共用边界那条 1px 线格，谁也不再单独画一条。固定开销见 LEFT_FIXED_H。
+// ---- 左栏各块（原先夹在它们之间的横向拖拽条已取消，那套算法原样保留备用）----
+//  现在的排法：左栏只有一块图表，占满功能区高度，自己画自己的边框（见 ui::panel 的 child_areas）。
+//  老排法（代码还在，以后可能用回来）：K 线区 / 1px 线格 / 成交量区 / 1px 线格 / 指标区，
+//  相邻两块共用边界那条 1px 线格，夹在中间那条 1 格（cells(1) = 10px）的横向拖拽条已取消，
+//  各块高度都是整数格 cells(n) = 9n + 1（默认 52 / 21 / 21 格），固定开销见 LEFT_FIXED_H。
 //  每个图表内部再从上下往下切（见 ui::chart 的 chart_rows）：标题栏 2 格 /（可选）状态带
 //  （条数由指标自己声明）/（可选）时间带 / 中间的绘图区 - 各段都从网格线起、高度是 cells(k)，
 //  相邻两段共用边界那条线格，线永远只有 1px；绘图区吃掉剩下的高度，最后一段一直铺到面板底边
@@ -182,9 +212,9 @@ pub(crate) const VALUE_COLS_MAX: i32 = 7;
 /// 时间轴相邻标签中心的最小间距：48px（6 格）。
 pub(crate) const TIME_LABEL_GAP_MIN: f32 = 48.0;
 
-// ---- 浮动窗口（颜色设置 / 源码查看 / 以后的窗口）：统一的一套尺寸 ----
-//  一块浮动窗口 = 标题栏 2 格 + 内容若干格，外壳由 ui::floatwin 的 FloatWindow 统一画，
-//  所以「标题栏多高、关闭键多大」这类尺寸全工程只有这一份。内容区第 row 条网格线的偏移
+// ---- 窗口（窗口区里的子窗口 / 源码编辑窗 / 颜色面板）：统一的一套尺寸 ----
+//  一块窗口 = 标题栏 2 格 + 内容若干格，外壳由 ui::floatwin 的 Win 统一画（全工程只有这一份），
+//  所以「标题栏多高、关闭键多大」这类尺寸也只有这一份。内容区第 row 条网格线的偏移
 //  一律是 grid_line(row)，和 Pane / 颜色面板一个口径（各段共用边界那条 1px 线格）。
 
 /// 浮动窗口的标题栏格数：2 格 = 一个文本行盒（和 Pane 标题栏 / 菜单栏一个口径）。
@@ -263,13 +293,19 @@ pub(crate) const IDLE_REPAINT_MS: u64 = 500;
 pub(crate) const PANE_TITLE_ROWS: i32 = 2;
 pub(crate) const PANE_TITLE_H: f32 = cells(PANE_TITLE_ROWS);
 
-/// 一块图表（Pane）的最小高度（格）：标题栏 2 格 + 状态带 2 格 + 时间带 2 格 + 绘图区至少 14 格
-/// （= 20 格 = cells(20) = 181px）。三块图表不分主图 / 副图，统一用这一条下限 -
+/// 图表窗自己那条状态栏（整块图表最下面一条，2 格）：缩放 / 平移 / 可见几根写在这儿。
+/// 它属于「图表窗」，不属于「图表」- 主窗口的状态栏只留调试信息（帧率 / 操作回显）。
+pub(crate) const CHART_BAR_ROWS: i32 = TEXT_ROWS;
+pub(crate) const CHART_BAR_H: f32 = cells(CHART_BAR_ROWS);
+
+/// 一块图表（Pane）的最小高度（格）：标题栏 2 格 + 状态带 2 格 + 时间带 2 格 + 状态栏 2 格
+/// + 绘图区至少 14 格（= 22 格 = cells(22) = 199px）。所有图表不分主图 / 副图，统一用这一条下限 -
 /// 拉到最小也放得下全部元素，文字不会挤在一起，绘图区也还有 14 格（125px）可用。
-pub(crate) const PANE_ROWS_MIN: i32 = 20;
+pub(crate) const PANE_ROWS_MIN: i32 = 22;
 pub(crate) const PANE_H_MIN: f32 = cells(PANE_ROWS_MIN);
-/// 绘图区最小格数：总格数减去标题栏 / 状态带 / 时间带（三条带各 2 格 = 一个文本行盒）。
-pub(crate) const PANE_PLOT_ROWS_MIN: i32 = PANE_ROWS_MIN - PANE_TITLE_ROWS - 2 - 2;
+/// 绘图区最小格数：总格数减去标题栏 / 状态带 / 时间带 / 状态栏（四条带各 2 格 = 一个文本行盒）。
+pub(crate) const PANE_PLOT_ROWS_MIN: i32 =
+    PANE_ROWS_MIN - PANE_TITLE_ROWS - 2 - 2 - CHART_BAR_ROWS;
 
 
 /// 标题栏右侧那两个按钮（「切换」「代码」）：宽度按文字量（铁律：文字左右各留 1 格空档），
@@ -329,11 +365,15 @@ const _: () = assert!((WINDOW_W as i32 - 1) % 9 == 0);
 const _: () = assert!((WINDOW_H as i32 - 1) % 9 == 0);
 const _: () = assert!((WINDOW_MIN_W as i32 - 1) % 9 == 0);
 const _: () = assert!((WINDOW_MIN_H as i32 - 1) % 9 == 0);
-// 最小窗口高度里，功能区那块必须放得下左栏三块的最小高度：三块各 PANE_ROWS_MIN 格，中间夹两条
-// 1 格拖拽条（相邻共用线格，所以列里总格数 = 3*PANE_ROWS_MIN + 2）。
+// 最小窗口高度里，功能区那块必须放得下左栏的最小高度（按三块图表叠着算的保守值：三块各
+// PANE_ROWS_MIN 格，中间夹两条 1 格拖拽条共用线格，所以列里总格数 = 3*PANE_ROWS_MIN + 2）。
 const _: () = assert!(LEFT_WORK_MIN_ROWS == 3 * PANE_ROWS_MIN + 2);
-// 最小高度必须刚好装得下标题栏 / 状态带 / 时间带，还留出绘图区那几格；而且下限本身是 cells(n)。
-const _: () = assert!(PANE_ROWS_MIN == PANE_TITLE_ROWS + TEXT_ROWS + TEXT_ROWS + PANE_PLOT_ROWS_MIN);
+// 最小高度必须刚好装得下标题栏 / 状态带 / 时间带 / 状态栏，还留出绘图区那几格；
+// 而且下限本身是 cells(n)。
+const _: () = assert!(
+    PANE_ROWS_MIN == PANE_TITLE_ROWS + TEXT_ROWS + TEXT_ROWS + CHART_BAR_ROWS + PANE_PLOT_ROWS_MIN
+);
+const _: () = assert!((CHART_BAR_H as i32 - 1) % 9 == 0);
 const _: () = assert!(PANE_PLOT_ROWS_MIN >= 8);
 // 文本行盒 / 标题 / 菜单 / 状态栏都必须正好是 2 格（一个文本行盒），文字才踩得在网格线上。
 const _: () = assert!(TEXT_ROWS == 2);
@@ -415,6 +455,20 @@ pub(crate) fn vline_dotted(painter: &egui::Painter, x: f32, y0: f32, y1: f32, co
     }
 }
 
+/// 1px 点状虚线（横）：同上，只占一个像素行 - UI 工程测试叠层的横网格线用它。
+pub(crate) fn hline_dotted(painter: &egui::Painter, x0: f32, x1: f32, y: f32, color: egui::Color32) {
+    let top = px_center(y) - 0.5;
+    let mut x = x0.floor();
+    while x < x1 {
+        painter.rect_filled(
+            egui::Rect::from_min_size(egui::pos2(x, top), egui::vec2(LINE_W, LINE_W)),
+            egui::CornerRadius::ZERO,
+            color,
+        );
+        x += 2.0;
+    }
+}
+
 /// 「软夹取」：正常就是 v.clamp(lo, hi)，但 hi < lo（区域太窄 / 太矮，图片里塞不下标签）时
 /// 返回 lo - f32::clamp 在 hi < lo 时会 panic，绘图代码绝不能因为面板被拖小就崩掉。
 pub(crate) fn clamp_soft(v: f32, lo: f32, hi: f32) -> f32 {
@@ -426,13 +480,20 @@ pub(crate) fn clamp_soft(v: f32, lo: f32, hi: f32) -> f32 {
 }
 
 /// 浮动标签（纵轴数值牌 / 时间带索引牌）的上沿 y：标签高 cells(rows)，先把「以 y_center 为中心」
-/// 的位置吸附到最近的横网格线（上沿因此落在网格线上），再把整段夹进 [top_line, bot_line] 两条
-/// 网格线之间。上沿落在网格线上、下边框就正好落在 rows 格之后那条网格线上 - 两条边框各占 1px，
-/// 永远不可能和相邻的线（比如绘图区下沿 / 时间带上沿）叠成 2px（铁律：不许 2px 线叠加）。
-/// top_line / bot_line 传边界线所在的网格线坐标（Region 边框线所在的那一行）。
-pub(crate) fn floating_label_top(y_center: f32, rows: i32, top_line: f32, bot_line: f32) -> f32 {
+/// 的位置吸附到原点 origin 那套网格上最近的横网格线（上沿因此落在网格线上），再把整段夹进
+/// [top_line, bot_line] 两条网格线之间。上沿落在网格线上、下边框就正好落在 rows 格之后那条
+/// 网格线上 - 两条边框各占 1px，永远不可能和相邻的线（比如绘图区下沿 / 时间带上沿）叠成 2px
+/// （铁律：不许 2px 线叠加）。top_line / bot_line 传边界线所在的网格线坐标（Region 边框线
+/// 所在的那一行），origin 传这块窗口自己的网格原点（横向那一套的 y 分量）。
+pub(crate) fn floating_label_top(
+    y_center: f32,
+    rows: i32,
+    top_line: f32,
+    bot_line: f32,
+    origin: f32,
+) -> f32 {
     let span = PITCH * rows as f32;
-    let snap = grid_snap(y_center - cells(rows) / 2.0);
+    let snap = grid_snap(y_center - cells(rows) / 2.0, origin);
     clamp_soft(snap, top_line, bot_line - span)
 }
 
@@ -477,6 +538,29 @@ pub(crate) fn border_hard(painter: &egui::Painter, rect: egui::Rect, color: egui
     hline_hard(painter, rect.min.x, rect.max.x, rect.max.y - LINE_W, color);
     vline_hard(painter, rect.min.x, rect.min.y, rect.max.y, color);
     vline_hard(painter, rect.max.x - LINE_W, rect.min.y, rect.max.y, color);
+}
+
+/// 登记一块可交互区域：**id 按这块矩形自己算**，不是 egui 的自动 id（allocate_rect 那一套）。
+///
+/// 为什么不能用自动 id：egui 的自动 id = 「这一帧第几个登记的东西」算出来的，跟登记顺序绑死。
+/// 窗口区里的窗口会因「点一下激活」换绘制顺序（被点的那块画到最后 = 压在最上面），
+/// 顺序一变，同一颗按钮的自动 id 就变了 - 按下的那一下算出来的 id 和松手时对不上，
+/// 点击直接丢掉。所以窗口区里的控件一律走这个口子：矩形不动，id 就不动，跟层级无关。
+///
+/// 同一个矩形被登记两次（两块窗口摆在同一处）时，后登记的（画在上面的那块）赢 - 正好是想要的。
+pub(crate) fn interact_rect(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    sense: egui::Sense,
+) -> egui::Response {
+    let id = egui::Id::new((
+        "rt_widget",
+        rect.min.x.to_bits(),
+        rect.min.y.to_bits(),
+        rect.max.x.to_bits(),
+        rect.max.y.to_bits(),
+    ));
+    ui.interact(rect, id, sense)
 }
 
 /// 硬边折线：按像素列走，每列把上一列的 y 到这一列的 y 竖着填满 - 斜线是硬像素阶梯，

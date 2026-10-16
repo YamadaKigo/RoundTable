@@ -1,8 +1,9 @@
 // ===========================================================================
 //  模块 ui::source：指标源码编辑窗
 // ===========================================================================
-//  点 Pane 标题栏上的「代码」打开：主窗口里一块完全自绘的浮动窗口（走 ui::floatwin 那套统一
-//  外壳：底色 + 标题栏 + 标题栏下沿那条线 + 1px 外框 + 按格拖动 + 关闭键），画在每帧最上层。
+//  点 Pane 标题栏上的「代码」打开：窗口区（桌面）里的一块子窗口 - 和图表窗 / 按钮面板同级，
+//  归 ui::winmgr 统一管（层级 / 自由位置尺寸 / 最小化 / 还原 / 关闭），外壳也是它画的那份
+//  （ui::floatwin 的统一外壳 + ui::titlebar 的系统键）。
 //  窗口里装的是 ui::editor 那块可编辑文本编辑器（菜单栏 + 按钮栏 + 行号区 + 代码区 + 光标 +
 //  选区 + 中文输入法），打开时灌进该指标自己的源码（indicator.source()）。
 //   - 「保存」把缓冲区写回 indicator.path()（file!() 给的源文件路径），写完不重编译、也不重读
@@ -12,17 +13,13 @@
 //
 //  窗口尺寸 / 各段几何全部来自 grid.rs 的 SRC_* 常量（和编辑器共用一份口径）。
 use crate::app::*;
-use crate::grid::*;
 use crate::ui::editor::*;
-use crate::ui::floatwin::*;
 use eframe::egui;
 
-/// 源码编辑窗的全部跨帧状态：窗口外壳 + 编辑的是哪个 Pane + 编辑器本体 + 后台编译的共享状态。
+/// 源码编辑窗的全部跨帧状态：编辑的是哪个 Pane + 编辑器本体 + 后台编译的共享状态。
 /// egui 是即时模式，这些东西不存字段就跨不过一帧。
-#[derive(Clone)]
+/// 窗口本身（位置 / 尺寸 / 最小化 / 层级）不在这儿 - 它归 ui::winmgr，和图表窗 / 按钮面板同级。
 pub(crate) struct SourceView {
-    /// 窗口外壳：全工程统一的浮动窗口那一套（位置按 9px 格走、标题栏下沿那条线也在里面）。
-    pub(crate) win: FloatWindow,
     /// 编辑的是哪个 Pane 的指标（换指标 / 再点「代码」都是换这一份源码）。
     pub(crate) pane: usize,
     /// 编辑器本体（缓冲区 + 光标 + 选区 + 滚动 + 输入法候选串）。
@@ -34,13 +31,11 @@ pub(crate) struct SourceView {
 impl SourceView {
     pub(crate) fn new() -> Self {
         Self {
-            win: FloatWindow::new(SRC_DEFAULT_X, SRC_DEFAULT_Y, SRC_W, SRC_H),
             pane: 0,
             editor: TextEditor::new(),
             compile: CompileSlot::default(),
         }
     }
-
 }
 
 // ===========================================================================
@@ -90,16 +85,24 @@ pub(crate) enum CompileState {
 pub(crate) const EDITOR_ID: &str = "rt_source_editor";
 
 impl StockApp {
-    /// 打开源码编辑窗：把该 Pane 当前指标的 source() 灌进编辑器，滚动位置归零。
-    /// 已经开着同一个 Pane 就只把它提到最前，不重新灌源码 - 用户手里那份改动（哪怕还没保存）
+    /// 打开源码编辑窗（Pane 标题栏的「代码」点了记一笔 WinCmd::OpenSource，到这儿才真做）：
+    /// 先把该 Pane 当前指标的 source() 灌进编辑器（滚动位置归零），再把窗口摆出来抬到最上层。
+    /// 已经开着同一个 Pane 就只把窗口提到最前，不重新灌源码 - 用户手里那份改动（哪怕还没保存）
     /// 不能因为多点了一下「代码」就没了。真要重新来一份走 reload_source（菜单里的「还原原始源码」）。
-    pub(crate) fn open_source(&mut self, pane: usize) {
-        if self.source.win.open && self.source.pane == pane {
-            let name = self.panes[pane].indicator.name().to_owned();
-            self.status_msg = format!("源码：{name}");
-            return;
+    pub(crate) fn open_source_window(&mut self, pane: usize) {
+        if self.source.pane != pane || !self.win_mgr.source_open() {
+            self.reload_source(pane);
         }
-        self.reload_source(pane);
+        self.win_mgr.show_source(self.work_rect);
+        let name = self.panes[pane].indicator.name().to_owned();
+        self.status_msg = format!("源码：{name}");
+    }
+
+    /// 源码编辑窗标题栏上的字：源码 - 指标名（缓冲区改过就带个星号）。
+    pub(crate) fn source_title(&self) -> String {
+        let name = self.panes[self.source.pane].indicator.name();
+        let star = if self.source.editor.modified { " *" } else { "" };
+        format!("源码 - {name}{star}")
     }
 
     /// 重新灌一份源码：打开窗口、换 Pane、换了指标、以及「还原原始源码」都走这儿。
@@ -108,44 +111,25 @@ impl StockApp {
     pub(crate) fn reload_source(&mut self, pane: usize) {
         let src = self.panes[pane].indicator.source();
         let name = self.panes[pane].indicator.name().to_owned();
-        self.source.win.open = true;
         self.source.pane = pane;
         self.source.editor.load(src);
-        self.source.win.drag = false;
         self.status_msg = format!("源码：{name}");
     }
 
-    /// 源码编辑窗：主窗口里的一块自绘浮动面板，画在每帧最上层（压在界面所有东西之上）。
-    /// 面板状态整份搬到本地变量上改，最后再写回字段 - 中途要调 self.text(...)，那会借走整个 self。
-    pub(crate) fn ui_source_window(&mut self, ui: &mut egui::Ui, layout: egui::Rect) {
-        // 编译是后台线程跑的：不管窗口开没开，每帧都看一眼结果。
-        self.poll_compile();
+    /// 关掉源码编辑窗（编辑器菜单里的「关闭」走这儿；标题栏那个关闭键由窗口管理器直接办）。
+    pub(crate) fn close_source(&mut self) {
+        self.win_mgr.hide_source();
+        self.status_msg = "源码编辑窗：已关闭".to_owned();
+    }
 
-        let mut sv = self.source.clone();
-        if !sv.win.open {
-            return;
-        }
-
-        let name = self.panes[sv.pane].indicator.name().to_owned();
-        let star = if sv.editor.modified { " *" } else { "" };
-        let mut cmd = EditorCmd::None;
-        match sv.win.begin(self, ui, layout, &format!("源码 - {name}{star}")) {
-            FloatShell::Closed => {
-                sv.win.open = false;
-                sv.win.drag = false;
-                self.status_msg = "源码编辑窗：已关闭".to_owned();
-            }
-            FloatShell::Open(panel) => {
-                let painter = ui.painter().clone();
-                cmd = sv
-                    .editor
-                    .ui(self, ui, panel, egui::Id::new(EDITOR_ID));
-                // 最外圈那 1px 硬边框和标题栏下沿那条线由外壳补画（排在内容之后）。
-                sv.win.end(&painter);
-            }
-        }
-        self.source = sv;
-        self.run_editor_cmd(cmd);
+    /// 源码编辑窗的内容那一块：整块窗口交给编辑器本体（它自己按 SRC_* 排版：
+    /// 菜单栏 / 按钮栏 / 行号区 / 代码区 / 滚动条），外壳归 ui::winmgr。
+    /// 编辑器状态整份搬到本地变量上改，最后再写回字段 - 中途要调 self.text(...)，那会借走整个 self。
+    pub(crate) fn ui_source_body(&mut self, ui: &mut egui::Ui, rect: egui::Rect) -> EditorCmd {
+        let mut editor = std::mem::replace(&mut self.source.editor, TextEditor::new());
+        let cmd = editor.ui(self, ui, rect, egui::Id::new(EDITOR_ID));
+        self.source.editor = editor;
+        cmd
     }
 
     /// 编辑器交回来的动作：碰文件 / 碰宿主状态的那四个在这儿做。
@@ -160,11 +144,7 @@ impl StockApp {
                 let name = self.panes[pane].indicator.name().to_owned();
                 self.status_msg = format!("已还原成原始源码：{name}");
             }
-            EditorCmd::Close => {
-                self.source.win.open = false;
-                self.source.win.drag = false;
-                self.status_msg = "源码编辑窗：已关闭".to_owned();
-            }
+            EditorCmd::Close => self.close_source(),
             // 其余动作编辑器自己就做完了，不会传上来。
             _ => {}
         }
@@ -206,8 +186,8 @@ impl StockApp {
         });
     }
 
-    /// 每帧看一眼后台编译：跑完了就把结果写到状态栏。
-    fn poll_compile(&mut self) {
+    /// 每帧看一眼后台编译：跑完了就把结果写到状态栏（窗口关着也照看 - 编译是后台跑的）。
+    pub(crate) fn poll_compile(&mut self) {
         if let Some(res) = self.source.compile.take_done() {
             self.status_msg = match res {
                 Ok(()) => "编译成功".to_owned(),

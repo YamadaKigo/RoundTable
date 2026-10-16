@@ -145,7 +145,8 @@ impl TextInput {
     ) -> bool {
         let painter = ui.painter().clone();
         let inner = rect.shrink(LINE_W);
-        let text_x = text_left_x(rect.min.x);
+        // 文字的吸附原点 = 外框左边那条线（rect 就是外框，它落在这块窗口自己的网格线上）。
+        let text_x = text_left_x(rect.min.x, rect.min.x);
         let mid_y = inner.center().y;
 
         // ---- 焦点：谁最后点谁说了算 ----

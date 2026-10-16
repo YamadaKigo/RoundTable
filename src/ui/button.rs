@@ -2,6 +2,8 @@
 //  模块 ui::button：全工程统一的按钮（自绘）
 // ===========================================================================
 //  按钮只有这一个类：内容（纯文字 / 图标 / 图标 + 文字）+ 悬停便签 + 量好的宽度。
+//  便签是「opt-in」的：只有明确要提示的按钮（文本编辑器的快捷按钮）才把 tip 传进来，
+//  其余调用方一律传空串 - 空串 = 不弹便签（见 draw_button 的 tip 参数）。
 //  外观一律走这儿，别处不许再抄一份：
 //    - 三种状态三块纯色（常态 / 悬停 / 按下），1px 硬边框，无圆角、无阴影、无渐变；
 //    - 内容整体居中；带图标时把「图标 + 间隔 + 文字」当一个整体居中；
@@ -49,6 +51,8 @@ impl ButtonState {
 #[derive(Clone)]
 pub(crate) enum ButtonContent {
     Text(String),
+    /// 图标 + 文字：眼下没有按钮这么用（文本编辑器那排是纯图标），先保留这个能力。
+    #[allow(dead_code)]
     IconText(IconKind, String),
     /// 只画一个图标（编辑器按钮栏那种方按钮）：宽高都是 cells(2)。
     Icon(IconKind),
@@ -131,7 +135,9 @@ impl StockApp {
         pressed: bool,
         tip: &str,
     ) -> bool {
-        let resp = ui.allocate_rect(rect, egui::Sense::click());
+        // UI工程测试：按钮也算一块元素（按它自己那块矩形当网格原点判对齐）。
+        self.probe(&format!("按钮 {}", content.label()), rect);
+        let resp = interact_rect(ui, rect, egui::Sense::click());
         let state = if pressed || resp.is_pointer_button_down_on() {
             ButtonState::Pressed
         } else if resp.hovered() {
@@ -195,7 +201,8 @@ impl StockApp {
     /// 悬停便签：排在整帧最后画（浮动面板都压不住它）。便签是一块 1px 硬边的小牌子：
     /// 默认开在按钮下方，上沿正好压在按钮下沿那条网格线上（和按钮下边框共用那 1px，
     /// 绝不叠成 2px）；下面放不下就翻到按钮上方（下沿压在按钮上沿那条线上）。
-    /// 左右吸到竖网格线上，整块夹在窗口里。
+    /// 横向跟着按钮的左沿 1px 1px 地走（按钮在 1px 1px 挪 / 缩的窗口里，便签也得跟上 -
+    /// 拿 9px 网格去吸的话，窗口挪 1px 时便签会赖在原地、要满一格才跟一次），整块夹在窗口里。
     pub(crate) fn paint_tooltip(&mut self, painter: &egui::Painter, layout: egui::Rect) {
         let Some((anchor, text)) = self.tooltip.take() else {
             return;
@@ -205,7 +212,8 @@ impl StockApp {
         }
         let w = snap_cells_up(self.text_width(&text) + 2.0 * TEXT_PAD_X);
         let h = cells(TEXT_ROWS);
-        let x = clamp_soft(grid_snap(anchor.min.x), layout.min.x, layout.max.x - w);
+        // 便签是压在整帧最上层的浮块：横向跟住按钮左沿（1px 精度），整块夹在窗口里。
+        let x = clamp_soft(anchor.min.x, layout.min.x, layout.max.x - w);
         let below = anchor.max.y - LINE_W;
         let y = if below + h <= layout.max.y - LINE_W {
             below

@@ -32,6 +32,9 @@ use std::cell::Cell;
 pub(crate) const C_TITLE_BG: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
 pub(crate) const C_MENU_BG: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
 pub(crate) const C_WORK_BG: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
+// 主窗口的「桌面」底色（功能区那块底，几块子窗口浮在它上面）：取 Windows 常见窗口底色的灰度。
+// #F0F0F0 不满足「每通道是同一个十六进制数字重复两遍」这条铁律，吸到最接近的 #EEEEEE。
+pub(crate) const C_DESKTOP_BG: egui::Color32 = egui::Color32::from_rgb(0xEE, 0xEE, 0xEE);
 pub(crate) const C_STATUS_BG: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
 pub(crate) const C_BTN_FACE: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
 pub(crate) const C_BTN_HOVER: egui::Color32 = egui::Color32::from_rgb(0xEE, 0xEE, 0xEE);
@@ -42,10 +45,15 @@ pub(crate) const C_LINE: egui::Color32 = egui::Color32::from_rgb(0x99, 0x99, 0x9
 // 所有控件边框的默认色：统一 #999999（默认值；以后每个控件再各自配自己的边框色）。
 // 边框只落在网格线格里，所以全界面任何一条边框都只有 1px，相邻控件共用同一条线。
 pub(crate) const C_CTRL_BORDER: egui::Color32 = egui::Color32::from_rgb(0x99, 0x99, 0x99);
-// 网格测试叠层（右栏「网格测试」按钮打开）：把 9px 网格线整个铺满窗口，用来核对各控件的
-// 边框有没有落在网格线上 - 对齐的边框会被它盖住，没对齐的会露在它旁边。用一个界面里
-// 不会出现的颜色，和边框色 / 各底色都分得开。
-pub(crate) const C_GRID_TEST: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0xFF);
+// UI 工程测试叠层（右栏「UI工程测试」按钮打开）：把 9px 网格线整个铺满窗口，用来核对各控件的
+// 边框有没有落在网格线上 - 对齐的边框会被它盖住，没对齐的会露在它旁边。
+// 网格线是灰色点状线（每 2px 一个点，见 grid 的 hline_dotted / vline_dotted）：和边框
+//（经典皮肤 #999999 / 暗色皮肤 #CC0000）都分得开，铺在画面上也不抢眼。
+pub(crate) const C_GRID_TEST: egui::Color32 = egui::Color32::from_rgb(0x66, 0x66, 0x66);
+// UI 工程测试工具的三色（对齐 / 没对齐 / 鼠标格）：两套皮肤同色 - 调试叠层不跟着皮肤走。
+pub(crate) const C_GRID_OK: egui::Color32 = egui::Color32::from_rgb(0x00, 0xAA, 0x00);
+pub(crate) const C_GRID_BAD: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x88, 0x00);
+pub(crate) const C_GRID_CURSOR: egui::Color32 = egui::Color32::from_rgb(0x00, 0xCC, 0xCC);
 
 // 图表：绘图区白底、右侧价格轴灰底；A 股习惯是涨红跌绿；刻度参考线用浅灰。
 pub(crate) const C_CHART_BG: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
@@ -66,10 +74,20 @@ pub(crate) const C_CROSS_LABEL: egui::Color32 = egui::Color32::from_rgb(0xEE, 0x
 
 // 两栏布局与控制面板：分割条灰、面板灰、按钮深灰硬边、按下态更暗。
 pub(crate) const C_SPLITTER: egui::Color32 = egui::Color32::from_rgb(0xAA, 0xAA, 0xAA);
+// 滚动条：槽和把手必须分得开（把手亮一档，一眼看得出滚到哪儿了）。
+pub(crate) const C_SCROLL_TRACK: egui::Color32 = egui::Color32::from_rgb(0xAA, 0xAA, 0xAA);
+pub(crate) const C_SCROLL_THUMB: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
 pub(crate) const C_PANEL_BG: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
 pub(crate) const C_BTN_PRESS: egui::Color32 = egui::Color32::from_rgb(0xAA, 0xAA, 0xAA);
-// 文本编辑器里选区的高亮底色：浅蓝紫，黑字压在上面照样看得清（经典皮肤）。
-pub(crate) const C_SEL_BG: egui::Color32 = egui::Color32::from_rgb(0x99, 0x99, 0xCC);
+// 文本编辑器里选区的高亮底色：浅灰，黑字压在上面照样看得清，又不会和控件边框的 #999999 混。
+pub(crate) const C_SEL_BG: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
+
+// 源码编辑器里的语法着色（用户点名要的几个色）：关键字（let / fn / impl 等）蓝 #0000FF，
+// 注释绿 #009900，字符串品红 #FF00FF；其余代码文字（变量名 / 数字 / 标点等）走默认文字色。
+// 三个值都是「同一个十六进制数字重复两遍」，满足 #aabbcc 色值铁律。
+pub(crate) const C_SYN_CODE: egui::Color32 = egui::Color32::from_rgb(0x00, 0x00, 0xFF);
+pub(crate) const C_SYN_COMMENT: egui::Color32 = egui::Color32::from_rgb(0x00, 0x99, 0x00);
+pub(crate) const C_SYN_STRING: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0xFF);
 
 // 指标区：0 轴那条参考线。DIF / DEA 两条线的颜色归这套皮肤统一管（见 Theme::dif / dea）。
 pub(crate) const C_IND_ZERO: egui::Color32 = egui::Color32::from_rgb(0x99, 0x99, 0x99);
@@ -154,12 +172,18 @@ pub(crate) struct Theme {
     pub(crate) menu_bg: egui::Color32,
     /// 功能区底色（图表工作区、浮动面板本体）。
     pub(crate) work_bg: egui::Color32,
+    /// 主窗口的默认底色（功能区那块「桌面」）：图表子窗口 / 按钮面板 / 浮动窗都浮在它上面。
+    pub(crate) desktop_bg: egui::Color32,
     /// 状态栏。
     pub(crate) status_bg: egui::Color32,
-    /// 右栏控制面板 / 源码窗行号区 / 滚动条槽。
+    /// 右栏控制面板 / 源码窗行号区 / 下拉面板的行号区这类「面板底」。
     pub(crate) panel_bg: egui::Color32,
     /// 分割条 / 横向拖拽条本体。
     pub(crate) splitter: egui::Color32,
+    /// 滚动条的槽（把手在里面滑的那条轨道）。
+    pub(crate) scroll_track: egui::Color32,
+    /// 滚动条的把手：比槽亮一档，滚到哪儿一眼看得出来。
+    pub(crate) scroll_thumb: egui::Color32,
 
     // ---- 控件 ----
     /// 按钮常态底色。
@@ -182,6 +206,13 @@ pub(crate) struct Theme {
     pub(crate) text: egui::Color32,
     /// 彩底上的反白文字（关闭键的叉、色相把手）。
     pub(crate) text_white: egui::Color32,
+    /// 源码编辑器里「关键字」的颜色（let / fn / impl 等，见 ui::editor 的着色）。
+    /// 变量名 / 标点 / 数字这些不属于任何一类的代码文字走默认的 text 色。
+    pub(crate) syn_code: egui::Color32,
+    /// 源码编辑器里「注释」的颜色。
+    pub(crate) syn_comment: egui::Color32,
+    /// 源码编辑器里「字符串」的颜色。
+    pub(crate) syn_string: egui::Color32,
 
     // ---- 图表区（可指向系统级配色；用户也可以在颜色面板里单独改 K 线涨跌色）----
     /// 绘图区底色。
@@ -222,9 +253,15 @@ pub(crate) struct Theme {
     pub(crate) ma: [egui::Color32; 6],
     pub(crate) ema: [egui::Color32; 6],
 
-    // ---- 调试叠层 ----
-    /// 9px 网格测试线（调试用，两套皮肤同色）。
+    // ---- 调试叠层（UI工程测试工具用：见 ui::grid 那一套）----
+    /// 9px UI工程测试线。
     pub(crate) grid_test: egui::Color32,
+    /// UI工程测试：这块元素四条边都落在网格线上（对齐了）。
+    pub(crate) grid_ok: egui::Color32,
+    /// UI工程测试：这块元素有边没落在网格线上（要盯的就是它）。
+    pub(crate) grid_bad: egui::Color32,
+    /// UI工程测试：鼠标底下那一格 / 光标位置标记。
+    pub(crate) grid_cursor: egui::Color32,
 }
 
 impl Theme {
@@ -234,9 +271,12 @@ impl Theme {
         title_bg: C_TITLE_BG,
         menu_bg: C_MENU_BG,
         work_bg: C_WORK_BG,
+        desktop_bg: C_DESKTOP_BG,
         status_bg: C_STATUS_BG,
         panel_bg: C_PANEL_BG,
         splitter: C_SPLITTER,
+        scroll_track: C_SCROLL_TRACK,
+        scroll_thumb: C_SCROLL_THUMB,
         btn_face: C_BTN_FACE,
         btn_hover: C_BTN_HOVER,
         btn_press: C_BTN_PRESS,
@@ -246,6 +286,9 @@ impl Theme {
         line: C_LINE,
         text: C_TEXT,
         text_white: C_TEXT_WHITE,
+        syn_code: C_SYN_CODE,
+        syn_comment: C_SYN_COMMENT,
+        syn_string: C_SYN_STRING,
         chart_bg: C_CHART_BG,
         axis_bg: C_AXIS_BG,
         tick: C_TICK,
@@ -267,6 +310,9 @@ impl Theme {
         ma: C_MA_CLASSIC,
         ema: C_EMA_CLASSIC,
         grid_test: C_GRID_TEST,
+        grid_ok: C_GRID_OK,
+        grid_bad: C_GRID_BAD,
+        grid_cursor: C_GRID_CURSOR,
     };
 
     /// 暗色（大智慧那种）皮肤：黑 / 灰底、红色线框（#CC0000）、白字；
@@ -276,20 +322,29 @@ impl Theme {
         title_bg: egui::Color32::from_rgb(0x33, 0x33, 0x33),
         menu_bg: egui::Color32::from_rgb(0x22, 0x22, 0x22),
         work_bg: egui::Color32::from_rgb(0x00, 0x00, 0x00),
+        desktop_bg: egui::Color32::from_rgb(0x11, 0x11, 0x11),
         status_bg: egui::Color32::from_rgb(0x33, 0x33, 0x33),
         panel_bg: egui::Color32::from_rgb(0x22, 0x22, 0x22),
         splitter: egui::Color32::from_rgb(0x44, 0x44, 0x44),
+        // 滚动条：槽用分割条那档灰，把手亮一档（#444444 的槽配 #444444 的把手是看不见的）。
+        scroll_track: egui::Color32::from_rgb(0x44, 0x44, 0x44),
+        scroll_thumb: egui::Color32::from_rgb(0x66, 0x66, 0x66),
         btn_face: egui::Color32::from_rgb(0x44, 0x44, 0x44),
         btn_hover: egui::Color32::from_rgb(0x55, 0x55, 0x55),
         btn_press: egui::Color32::from_rgb(0x33, 0x33, 0x33),
-        // 选区：暗蓝，白字压在上面看得清。
-        sel_bg: egui::Color32::from_rgb(0x33, 0x33, 0x66),
+        // 选区：中灰，白字压在上面看得清（黑底上不刺眼，也和红边框分得开）。
+        sel_bg: egui::Color32::from_rgb(0x66, 0x66, 0x66),
         close_hover: egui::Color32::from_rgb(0xCC, 0x00, 0x00),
         // 线框一律红色（用户指定）。
         ctrl_border: egui::Color32::from_rgb(0xCC, 0x00, 0x00),
         line: egui::Color32::from_rgb(0xCC, 0x00, 0x00),
         text: egui::Color32::from_rgb(0xFF, 0xFF, 0xFF),
         text_white: egui::Color32::from_rgb(0xFF, 0xFF, 0xFF),
+        // 语法着色：黑底上把关键字 / 字符串提亮一档（名字蓝 / 字符串品红）；
+        // 注释绿两套皮肤同色（用户点名 #009900），暗底上也照样看得清。
+        syn_code: egui::Color32::from_rgb(0x88, 0x88, 0xFF),
+        syn_comment: C_SYN_COMMENT,
+        syn_string: egui::Color32::from_rgb(0xFF, 0x88, 0xFF),
         chart_bg: egui::Color32::from_rgb(0x00, 0x00, 0x00),
         axis_bg: egui::Color32::from_rgb(0x22, 0x22, 0x22),
         // 刻度参考线在黑底上用暗灰，才不至于糊一片红。
@@ -312,6 +367,9 @@ impl Theme {
         ma: C_MA_DARK,
         ema: C_EMA_DARK,
         grid_test: C_GRID_TEST,
+        grid_ok: C_GRID_OK,
+        grid_bad: C_GRID_BAD,
+        grid_cursor: C_GRID_CURSOR,
     };
 
     /// 按编号取皮肤。
@@ -339,18 +397,20 @@ impl Theme {
     }
 
     /// 这张表里的所有色值（编译期自检查每一套皮肤用）。
-    pub(crate) const fn colors(&self) -> [egui::Color32; 46] {
+    pub(crate) const fn colors(&self) -> [egui::Color32; 55] {
         [
-            self.title_bg, self.menu_bg, self.work_bg, self.status_bg, self.panel_bg,
-            self.splitter, self.btn_face, self.btn_hover, self.btn_press, self.sel_bg,
+            self.title_bg, self.menu_bg, self.work_bg, self.desktop_bg, self.status_bg, self.panel_bg,
+            self.splitter, self.scroll_track, self.scroll_thumb,
+            self.btn_face, self.btn_hover, self.btn_press, self.sel_bg,
             self.close_hover,
-            self.ctrl_border, self.line, self.text, self.text_white, self.chart_bg,
+            self.ctrl_border, self.line, self.text, self.text_white, self.syn_code,
+            self.syn_comment, self.syn_string, self.chart_bg,
             self.axis_bg, self.tick, self.cross, self.cross_label, self.ind_zero,
             self.candle_up, self.candle_down, self.text_up, self.text_down, self.dif,
             self.dea, self.kdj_k, self.kdj_d, self.kdj_j, self.rsi_1, self.rsi_2,
             self.rsi_3, self.ma[0], self.ma[1], self.ma[2], self.ma[3], self.ma[4],
             self.ma[5], self.ema[0], self.ema[1], self.ema[2], self.ema[3], self.ema[4],
-            self.ema[5], self.grid_test,
+            self.ema[5], self.grid_test, self.grid_ok, self.grid_bad, self.grid_cursor,
         ]
     }
 }

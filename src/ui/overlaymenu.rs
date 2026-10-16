@@ -104,7 +104,8 @@ impl StockApp {
             // 名字让开左边那一格标记：落点还是踩在内容格上（多让 1 格）。
             app.text(
                 painter,
-                egui::pos2(text_left_x(row.min.x) + PITCH, row.center().y),
+                // 文字的吸附原点 = 这块下拉面板自己那套网格（面板左边那条线）。
+                egui::pos2(text_left_x(row.min.x, panel.min.x) + PITCH, row.center().y),
                 egui::Align2::LEFT_CENTER,
                 &item.label,
                 theme().text,
@@ -124,15 +125,9 @@ impl StockApp {
             return;
         }
 
-        // 点面板和「叠加」按钮以外的地方 -> 收起菜单。
-        let anchor = self.overlay_menu_anchor;
-        let outside = ui.ctx().input(|i| {
-            i.pointer.primary_clicked()
-                && i.pointer
-                    .interact_pos()
-                    .is_some_and(|p| !panel.contains(p) && !anchor.contains(p))
-        });
-        if outside {
+        // 鼠标一移出面板和它所在的那条图表栏（图表自己的菜单栏）就收起 - 和主窗口的菜单栏
+        // 一个规矩（见 ui::menu::pointer_left）；点面板和那条栏以外的地方同样收起。
+        if pointer_left(ui, &[panel, self.overlay_menu_bar]) {
             self.overlay_menu = None;
         }
     }

@@ -12,7 +12,9 @@
 //    icon      像素图标（16x16 PNG 读进来再自绘）
 //    button    按钮（文字 / 图标 + 悬浮便签）
 //    menu      菜单栏 + 下拉面板（主窗口、编辑器、图表上那些菜单共用）
-//    floatwin  浮动窗口外壳（颜色设置 / 源码编辑等共用）
+//    floatwin  窗口外壳（窗口区里的子窗口 + 颜色面板共用；源码编辑窗也走它）
+//    winmgr    窗口区（桌面）的窗口管理器：层级 / 自由位置尺寸 / 最小化 / 新增堆叠
+//              窗口区里的每一块子窗口都归它管：图表窗 / 控制面板 / 源码编辑窗（同级）
 //    textbuf   文本缓冲（行 + 光标 + 选区 + 撤销栈）
 //    textbox   单行输入框
 //    editor    多行文本编辑器（菜单栏 + 按钮栏 + 行号区 + 代码区）
@@ -30,3 +32,4 @@ pub(crate) mod source;
 pub(crate) mod textbox;
 pub(crate) mod textbuf;
 pub(crate) mod titlebar;
+pub(crate) mod winmgr;

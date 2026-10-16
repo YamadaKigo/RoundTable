@@ -48,7 +48,7 @@ impl StockApp {
         self.status_msg = format!("Pane{} 换成：{}", pane + 1, name);
         // 编辑窗正开着这个 Pane：它手里的缓冲区还是旧指标的，得整份换成新指标那一份
         // （保存是按当前指标的 path() 写盘的，不换就会把旧文字写进新文件里）。
-        if self.source.win.open && self.source.pane == pane {
+        if self.win_mgr.source_open() && self.source.pane == pane {
             self.reload_source(pane);
         }
     }
@@ -69,7 +69,8 @@ impl StockApp {
         let clicked = menu.ui_rows(self, ui, &painter, |app, painter, j, row| {
             app.text(
                 painter,
-                egui::pos2(text_left_x(row.min.x), row.center().y),
+                // 文字的吸附原点 = 这块下拉面板自己那套网格（面板左边那条线）。
+                egui::pos2(text_left_x(row.min.x, panel.min.x), row.center().y),
                 egui::Align2::LEFT_CENTER,
                 &names[j],
                 theme().text,
@@ -82,15 +83,10 @@ impl StockApp {
             return;
         }
 
-        // 点面板和「切换」按钮以外的地方 -> 收起面板。
-        let anchor = self.pane_menu_anchor;
-        let outside = ui.ctx().input(|i| {
-            i.pointer.primary_clicked()
-                && i.pointer
-                    .interact_pos()
-                    .is_some_and(|p| !panel.contains(p) && !anchor.contains(p))
-        });
-        if outside {
+        // 鼠标一移出面板和它所在的那条图表栏（卡片自己的菜单栏）就收起 - 和主窗口的菜单栏
+        // 一个规矩（见 ui::menu::pointer_left，两边共用这一份）。
+        // 点面板和那条栏以外的地方同样收起（面板浮在上面，点哪儿都不该留在那儿）。
+        if pointer_left(ui, &[panel, self.pane_menu_bar]) {
             self.pane_menu = None;
         }
     }

@@ -36,12 +36,14 @@ use eframe::egui;
 //      轨道 17 格 + 间隔 1 格 + 数值 5 格」分格，轨道和把手都贴在竖网格线上（把手 1 格宽）。
 //      数值那 5 格里文字右对齐、右边正好留 1 格空档（铁律），"255" 这类最长也就是 3 格。
 //    - 窗口外壳（底色 / 标题栏 / 标题栏下沿那条线 / 1px 外框 / 拖动 / 关闭键）走 ui::floatwin
-//      的 FloatWindow：和源码查看窗同一套，位置永远落在窗口的 9px 网格线上（拖动一格格地走）。
+//      的 Win：和源码编辑窗、窗口区里的子窗口同一套 - 1px 跟手地挪、整块夹在主窗口里，
+//      只是颜色面板改了尺寸也没意义，所以不给缩放。
 //    - 每一处边框都只落在网格线格上、只有 1px：相邻控件共用同一条线，绝不可能叠成 2px。
 //    - 面板只管「调一个颜色」：编辑目标在打开时由外面的按钮定（设置涨色 / 设置跌色），
 //      面板里不再有切换目标的色块 - 这块面板将来说不定还要拿来调别的东西的颜色。
-//    - 面板位置存 struct 字段；静止时左上角吸在窗口的 9px 栅格线上（i*9），这样面板自己的
-//      边框、内部各段的分隔线才和窗口的网格线重合；拖动则平滑跟手，松手再归位到网格。
+//    - 面板位置存 struct 字段，自由像素（左上是默认值 50*9 / 11*9，拖动中 1px 1px 地挪）。
+//      面板里所有元素都按「这块面板自己的左上角」那套 9px 网格排（grid 的吸附入口传 origin），
+//      所以面板挪到哪一列像素上，里头的边框、文字与面板的相对位置都不变。
 //      拖动只认标题栏那一段。
 //  交互一律走 ui.allocate_rect(rect, Sense::click() / drag())，外观全部 painter 手绘：
 //  纯色矩形 + 1px 硬边，没有圆角、没有阴影、没有平滑渐变（渐变都用 1px 竖条拼）。
@@ -123,11 +125,11 @@ pub(crate) const CP_TRACK_W: f32 = cells(CP_TRACK_COLS);
 /// 轨道内容宽（去掉左右各 1px 边框）：9 * 轨道格数 - 1 - 1px 渐变竖条铺这么宽。
 pub(crate) const CP_TRACK_INNER_W: i32 = 9 * CP_TRACK_COLS - 1;
 
-/// 把手：1 格宽（cells(1) = 10px），左边缘永远落在竖网格线上、右边缘就是下一条竖网格线。
-/// 能停的位置数 = 轨道格数（每格一条竖网格线），可走距离 = (轨道格数 - 1) 个格 = 9 的倍数。
+/// 把手：1 格宽（cells(1) = 10px），在轨道里 1px 1px 地滑（铁律 4：滑块不受 9px 网格约束，
+/// 网格管的是「排版对齐」，不是「不许挪一格不到的距离」）。
+/// 可走距离 = 轨道宽 - 把手宽：把手左边缘从轨道左边那条线一路滑到右边那条线。
 pub(crate) const CP_HANDLE_W: f32 = cells(1);
-pub(crate) const CP_HANDLE_STEPS: i32 = CP_TRACK_COLS - 1;
-pub(crate) const CP_HANDLE_TRAVEL: f32 = grid_line(CP_HANDLE_STEPS);
+pub(crate) const CP_HANDLE_TRAVEL: f32 = CP_TRACK_W - CP_HANDLE_W;
 
 /// 色相条把手：同样 1 格宽、贴着竖网格线停；整条色相条横跨 26 格，能停 26 个位置。
 pub(crate) const HUE_STEPS: i32 = CP_COLS - 1;
@@ -172,8 +174,9 @@ const _: () = assert!(
 );
 const _: () = assert!(CP_TRACK_W > CP_HANDLE_W);
 const _: () = assert!((CP_TRACK_W as i32 - 1) % 9 == 0 && (CP_HANDLE_W as i32 - 1) % 9 == 0);
-const _: () = assert!(CP_HANDLE_TRAVEL == 9.0 * CP_HANDLE_STEPS as f32);
-const _: () = assert!(CP_HANDLE_STEPS > 0 && HUE_STEPS > 0);
+// 可走距离必须是整像素（把手左边缘永远落在整像素列上），而且得走得动。
+const _: () = assert!(CP_HANDLE_TRAVEL > 0.0 && CP_HANDLE_TRAVEL % 1.0 == 0.0);
+const _: () = assert!(HUE_STEPS > 0);
 // 每一段的上沿都落在 9 的倍数上。
 const _: () = assert!((CP_Y_SV as i32) % 9 == 0 && (CP_Y_HUE as i32) % 9 == 0);
 const _: () = assert!((CP_Y_RGB as i32) % 9 == 0 && (CP_Y_HSV as i32) % 9 == 0);
@@ -284,14 +287,10 @@ pub(crate) fn bar_value(i: i32, max: i32) -> i32 {
     (i as f32 * max as f32 / (CP_TRACK_INNER_W - 1) as f32).round() as i32
 }
 
-/// 当前值落在轨道第几个把手位置（0..=CP_HANDLE_STEPS）：比例吸到最近的格。
-pub(crate) fn handle_step(ratio: f32) -> i32 {
-    (ratio * CP_HANDLE_STEPS as f32).round().clamp(0.0, CP_HANDLE_STEPS as f32) as i32
-}
-
-/// 把手左边缘落在哪一列像素：轨道起点（在竖网格线上）+ 整数个格 * 9 - 永远落在网格线上。
+/// 把手左边缘落在哪一列像素：轨道起点 + 比例 * 可走距离，落到整像素上（1px 1px 地滑，
+/// 不吸网格 - 铁律 4）。轨道起点在竖网格线上，比例 0 / 1 时正好贴两端。
 pub(crate) fn handle_left(track_min_x: f32, ratio: f32) -> f32 {
-    track_min_x + grid_line(handle_step(ratio))
+    track_min_x + (ratio.clamp(0.0, 1.0) * CP_HANDLE_TRAVEL).round()
 }
 
 /// SV 调色板：第 col 列（0..25）对应的饱和度，26 列从 0 铺到 255。
@@ -354,7 +353,7 @@ impl ColorTarget {
 }
 
 /// 面板里正在拖的东西：没在拖 / 拖 SV 调色板 / 拖色相条。
-/// （拖面板本身归窗口外壳管，见 `win.drag` - 那不是面板内的控件。）
+/// （拖面板本身归窗口外壳管，见 ui::floatwin 的 Win::drag_title - 那不是面板内的控件。）
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ColorDrag {
     None,
@@ -368,8 +367,8 @@ pub(crate) enum ColorDrag {
 /// 绝不让换算来回倒（倒一遍就会掉 1 个色阶，拖滑块时把手会左右抖）。
 #[derive(Clone)]
 pub(crate) struct ColorPanel {
-    /// 窗口外壳：底色 / 标题栏 / 标题栏下沿那条线 / 1px 外框 / 按格拖动 / 关闭键，全在里面。
-    pub(crate) win: FloatWindow,
+    /// 窗口外壳：底色 / 标题栏 / 标题栏下沿那条线 / 1px 外框 / 1px 跟手拖动 / 关闭键，全在里面。
+    pub(crate) win: Win,
     pub(crate) target: ColorTarget,
     /// 当前编辑中的颜色：HSV 侧（h 0..=360，s / v 0..=255）。
     pub(crate) h: u16,
@@ -392,7 +391,8 @@ pub(crate) struct ColorPanel {
 impl ColorPanel {
     pub(crate) fn new() -> Self {
         Self {
-            win: FloatWindow::new(CP_DEFAULT_X, CP_DEFAULT_Y, CP_W, CP_H),
+            // 颜色面板和别的窗口同一套外壳，只是改了尺寸也没意义 -> 不给缩放（resizable 保持 false）。
+            win: Win::new(WIN_ID_COLOR, CP_DEFAULT_X, CP_DEFAULT_Y, CP_W, CP_H),
             target: ColorTarget::Up,
             h: 0,
             s: 0,
@@ -450,7 +450,7 @@ impl ColorPanel {
     /// 取消：一个字段都不写回（struct 里的颜色一直是打开时的值），顺手清掉焦点和拖动会话。
     pub(crate) fn close_cancelled(&mut self) {
         self.win.open = false;
-        self.win.drag = false;
+        self.win.end_sessions();
         self.drag = ColorDrag::None;
     }
 }
@@ -473,20 +473,29 @@ impl StockApp {
 
     /// 涨跌颜色面板：主窗口里的一块自绘浮动面板，每帧最后画（压在窗口里所有东西之上）。
     /// 面板状态整份搬到本地变量上改，最后再写回字段 - 中途要调 self.text(...)，那会借走整个 self。
-    pub(crate) fn ui_color_panel(&mut self, ui: &mut egui::Ui, layout: egui::Rect) {
+    /// work = 主窗口的窗口区（标题栏 / 菜单栏 / 状态栏之外的那块）：浮动面板也只能待在里面，
+    /// 拖不出窗口区（见 ui() 里传的那个矩形）。
+    pub(crate) fn ui_color_panel(&mut self, ui: &mut egui::Ui, work: egui::Rect) {
         let mut cp = self.color_panel.clone();
         if !cp.win.open {
             return;
         }
 
-        // 0) 窗口外壳：底色 + 标题栏（左文字 / 右关闭键 / 下沿那条线）+ 拖动，全在 FloatWindow 里；
-        //    它还把整块面板登记成「只吃事件、不画东西」的矩形（本函数是每帧最后跑的，
-        //    底下的绘图区、控制面板都抢不到这块地方 - 在面板空白处按下不会把 K 线拖走）。
-        let shell = cp.win.begin(self, ui, layout, "颜色设置");
-        let FloatShell::Open(panel) = shell else {
+        // 0) 窗口外壳：底色 + 标题栏（左文字 / 右关闭键 / 下沿那条线）+ 1px 跟手拖动，
+        //    全在 ui::floatwin 的 Win 里；它还把整块面板登记成「只吃事件、不画东西」的矩形
+        //    （本函数是每帧最后跑的，底下的绘图区、控制面板都抢不到这块地方 -
+        //    在面板空白处按下不会把 K 线拖走）。
+        let out = cp.win.begin(self, ui, work, "颜色设置", WinKeys::CloseOnly);
+        // UI工程测试：颜色面板整块报一笔（它自己左上角那套网格）。
+        self.probe("颜色面板", cp.win.rect());
+        if out.close {
             cp.close_cancelled();
             self.color_panel = cp;
             self.status_msg = "颜色面板：已取消，颜色没变".to_owned();
+            return;
+        }
+        // 颜色面板不缩放，所以 begin 一定给得出整块面板。
+        let Some(panel) = out.panel else {
             return;
         };
 
@@ -714,7 +723,7 @@ impl StockApp {
             egui::vec2(CP_HALF_W, btn_band.height()),
         );
         let apply_text = ButtonContent::Text("应用".to_owned());
-        if self.draw_button(ui, &painter, apply_rect, &apply_text, false, "应用并关闭") {
+        if self.draw_button(ui, &painter, apply_rect, &apply_text, false, "") {
             // 应用 = 把当前编辑中的颜色写回它自己那一路（面板一次只编辑一个颜色，由打开它的按钮定），
             // 然后关面板。另一路一个字节都不动。
             // 用户自己定过色就不再「指向系统级配色」：以后切皮肤不动这两个颜色
@@ -730,7 +739,7 @@ impl StockApp {
             self.status_msg = format!("已应用：{}色 {}（图表配色改为自定义）", cp.target.name(), hex_of(rgb));
         }
         let cancel_text = ButtonContent::Text("取消".to_owned());
-        if self.draw_button(ui, &painter, cancel_rect, &cancel_text, false, "放弃修改") {
+        if self.draw_button(ui, &painter, cancel_rect, &cancel_text, false, "") {
             // 取消 = 放弃修改，什么都不写回（struct 里的还是打开时那两个颜色）。
             cp.close_cancelled();
             self.status_msg = "颜色面板：已取消，颜色没变".to_owned();
@@ -758,7 +767,8 @@ impl StockApp {
                 theme().ctrl_border,
             );
         }
-        cp.win.end(&painter);
+        // 外壳后半：颜色面板不缩放，所以这儿只有标题栏下沿那条线和最外圈那 1px 硬边框。
+        cp.win.end(ui);
 
         // 9) SV 当前位置：选中的那一块，四周那圈线改成对比色（排在段线之后，才盖得住）。
         border_hard(&painter, sel, contrast_on(cp.rgb));
@@ -781,7 +791,7 @@ impl StockApp {
             hex_edge,
         );
 
-        // 11) 收尾：松手就清掉面板里的拖动会话（拖窗口本身在 FloatWindow::begin 里按鼠标状态收）。
+        // 11) 收尾：松手就清掉面板里的拖动会话（拖窗口本身由 Win::update_geometry 按鼠标状态收）。
         //     这一帧有控件改过颜色就把 Hex 文本重写一遍，让 RGB / HSV / Hex 三边始终一致
         //     （Hex 输入框自己改的不算 - 那边以文本为准）。
         if !down {
@@ -816,7 +826,7 @@ impl StockApp {
         );
         self.text(
             painter,
-            egui::pos2(text_left_x(row.min.x), row.center().y),
+            egui::pos2(text_left_x(row.min.x, row.min.x), row.center().y),
             egui::Align2::LEFT_CENTER,
             label,
             theme().text,
@@ -848,23 +858,21 @@ impl StockApp {
             painter.rect_filled(bar, egui::CornerRadius::ZERO, rgb32(grad(i)));
         }
 
-        // 拖动：鼠标在轨道上按下就算数（按住不放、拖出轨道也继续跟），按 x 反算停在哪个格。
+        // 拖动：鼠标在轨道上按下就算数（按住不放、拖出轨道也继续跟），按 x 反算把手停在哪个像素 -
+        // 1px 1px 地滑（铁律 4），不吸 9px 网格，所以把手能停在任意一列像素上。
         let resp = ui.allocate_rect(track, egui::Sense::click_and_drag());
-        let drag_step = if resp.is_pointer_button_down_on() {
+        let drag_x = if resp.is_pointer_button_down_on() {
             ui.input(|i| i.pointer.latest_pos()).map(|p| {
-                let rel = (p.x - track.min.x).clamp(0.0, CP_HANDLE_TRAVEL);
-                (rel / PITCH).round() as i32
+                (p.x - track.min.x).round().clamp(0.0, CP_HANDLE_TRAVEL)
             })
         } else {
             None
         };
 
-        // 把手左边缘 = 轨道起点 + 整数个格 * 9：轨道起点在竖网格线上，落点自然也在网格线上，
-        // 把手左右两条边框各占一条网格线，永远只有 1px、绝不会和轨道边框叠厚。
-        // 正在拖就按鼠标反算的格来（跟手），否则按当前值的比例吸到最近的格。
-        let (step, hx) = match drag_step {
-            Some(s) => (s, track.min.x + grid_line(s)),
-            None => (handle_step(ratio), handle_left(track.min.x, ratio)),
+        // 把手左边缘 = 轨道起点 + 比例 * 可走距离（整像素）。正在拖就跟手走，否则按当前值的比例摆。
+        let hx = match drag_x {
+            Some(x) => track.min.x + x,
+            None => handle_left(track.min.x, ratio),
         };
         let handle = egui::Rect::from_min_size(
             egui::pos2(hx, row.min.y),
@@ -883,7 +891,7 @@ impl StockApp {
             theme().ctrl_border,
         );
 
-        // 返回值也按同一个格反算：把手停在第几格，通道值就是那一格对应的整数。
-        drag_step.map(|_| (step as f32 / CP_HANDLE_STEPS as f32 * max as f32).round() as i32)
+        // 返回值按同一个像素反算：把手停在那一列，通道值就是那一列对应的整数。
+        drag_x.map(|x| (x / CP_HANDLE_TRAVEL * max as f32).round() as i32)
     }
 }

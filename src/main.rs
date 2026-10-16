@@ -15,7 +15,9 @@
 //     改的就是这张表。切皮肤走 theme.rs 的 set_theme（面板「切换主题」按钮 -> StockApp::switch_theme）。
 //  2. 尺寸：内容格 8px（GRID）+ 网格线格 1px（LINE_W），节距 PITCH = 9px。
 //     控件的宽/高都是 cells(n) = 9n + 1（跨 n 个内容格，含两端各 1px 网格线格）；
-//     所有坐标都落在网格线上（i * PITCH），窗口尺寸也必须满足 cells(n)。
+//     主窗口骨架 / 静态控件的坐标都落在网格线上（i * PITCH），尺寸都满足 cells(n)。
+//     【例外】「自由尺寸」的那几处不许被网格捆住（窗口区里的子窗口、滑块、滚动条、
+//     图表区缩放 ...） - 一律 1px 1px 地走，多出来的零头由弹性段吃掉，详见铁律 14。
 //     完整的布局模型见第二节，动任何布局之前先读那一节。
 //  3. 外观：不用任何 egui 自带控件的默认外观，全部用 Painter 手绘
 //     （纯色矩形 + 1px 硬边，无圆角、无阴影、无渐变、无抗锯齿）。
@@ -40,6 +42,8 @@
 //     落点也要踩在内容格上（内容格起点 = 9k + 1，网格线格在最左那 1px）：横向落点全工程只有
 //     grid.rs 的 text_left_x / text_right_x 两个入口 - 左对齐传左边那条网格线（区块外框的
 //     min.x、或它 shrink(LINE_W) 出来的内框都行，会吸到同一条线上），右对齐传右边那条网格线；
+//     两个入口都还要一个 origin = 当前这套网格的原点（见铁律 4 之后那条：每块窗口自带一套网格），
+//     通常是所在区块（标题栏 / 面板 / 状态带 / 编辑器正文区）的左边那条线；
 //     居中文字在 cells(n) 盒子里居中之后也正好落在 10px 上（n = 文字格数 + 2）。
 //     【铁律】全界面从元素尺寸到文字落点都必须踩在 9px 网格上 - 只有图表内部那几处随行情动态
 //     走的文字（时间轴 / 纵轴刻度 / 十字光标数值牌）没法预先对齐，这些也得把宽度约束在自己那一列
@@ -72,11 +76,54 @@
 //     白色 #ffffff 是「跟随皮肤文字色」的墨迹。改图标直接改这些 PNG，不用动代码。
 // 11. 控件抽象：按钮只有 ui::button 的 Button / ButtonContent 一份（文字 / 图标 / 图标 + 文字三种
 //     内容 + 悬停便签 + 量好的宽度），菜单栏与下拉面板只有 ui::menu 一份（主窗口菜单栏和编辑器
-//     菜单栏共用同一套绘制），浮动窗外壳只有 ui::floatwin 一份。要加新控件先看能不能套进这几个
+//     菜单栏共用同一套绘制），窗口外壳只有 ui::floatwin 一份（Win：窗口区里的子窗口、源码
+//     编辑窗、颜色面板 - 连「子窗口的子窗口」都是它）。要加新控件先看能不能套进这几个
 //     类，别各写一份外观；按钮一律左对齐排，右对齐的排法不做了（主窗口和编辑器一致）。
-// 12. 悬停便签：鼠标停在按钮 / 菜单项上时弹一块文字便签说明含义 - 按钮把 (矩形, 文字) 记进
+//     菜单栏一律左对齐，主窗口 / 编辑器 / 以后别的窗口都走 ui::menu::ui_menu_bar + ui_menu_popup
+//     这一份；下拉面板属于「当前窗口的最上层」，必须排在窗口里所有内容之后画（这样才盖得住、
+//     不会透出别的元素），而且整块夹在这块窗口里 - 绝不越出子窗口的边。
+// 12. 悬停便签：鼠标停在按钮上时弹一块文字便签说明含义 - 按钮把 (矩形, 文字) 记进
 //     StockApp::tooltip，由 ui() 结尾统一画在整帧最上层（ui::button 的 paint_tooltip），
-//     浮动窗也压不住它；便签的上 / 下沿压在被悬停控件的那条边框线上，同样只有 1px。
+//     浮动窗也压不住它；便签的上 / 下沿压在被悬停控件的那条边框线上，同样只有 1px，
+//     横向则跟住按钮的左沿 1px 1px 地走（按钮在自由尺寸的窗口里也跟得上）。
+//     便签是 opt-in 的：只有明确要提示的按钮才传 tip，目前只有文本编辑器的快捷按钮弹。
+// 13. 输入法（中文）：只有拿到焦点的那个控件才收 IME 事件，候选串（Preedit）画在光标处、
+//     上屏（Commit）才写进缓冲区；候选窗位置靠 PlatformOutput::ime 报给系统。焦点已经是
+//     自己的时候**不许再每帧 request_focus** - 它内部会 interrupt_ime()，egui-winit 会因此
+//     每帧 set_ime_allowed(false)/(true) 把输入法组合重置掉（表相：「输入法弹出来了，拼音
+//     却永远上不了屏」）。报给系统的 should_interrupt_composition 永远为 false。
+// 14. 【网格是排版用的，不是枷锁】8px 网格（+1px 线格）存在的意义是让界面整齐好看 - 能对齐
+//     网格的必须对齐（静态骨架、控件、文字落点，见铁律 4 / 7 / 9），而「本来该自由」的地方
+//     必须能自由控制，绝不许拿网格当绝对限制。下面这些一律 1px 1px 地走，不吸 9px 网格：
+//       a) 窗口区（桌面）里那些子窗口的位置与尺寸：拖标题栏 1px 跟手地挪、
+//          拖右 / 下 / 右下角 1px 跟手地缩（只有这三处能改尺寸，鼠标压上去给对应方向的箭头）；
+//       b) 图表区（那几块子窗口的绘图区）跟着窗口变大变小，尺寸不必是 8 的倍数；
+//       c) 颜色面板那种左右滑块：把手在轨道里 1px 1px 地滑（离散的调色板格 / 色相块不在此列 -
+//          它们本来就是一块一块的）；
+//       d) 代码编辑器的滚动条：把手按比例落在任意一列像素上；
+//       e) 十字光标那根跟着鼠标走的竖线（本来就不吸附）。
+//     自由尺寸带来的零头（窗口不是 cells(n) 时多出来的那 0..8px）不许乱窜，规矩是：
+//       - 固定尺寸的东西（最小化键 / 关闭键 / 状态带 / 时间带）永远钉在右边 / 下边，一个像素不变；
+//       - 零头只许落进「弹性段」：标题栏的标题区（右边两个键之前那一段）、图表区的绘图区 -
+//         所以零头原则上落在右边和下方，而且落在装得下它的地方；
+//       - 这就是主窗口那套「溢出空间」逻辑，入口是 grid 的 free_band / free_tail，
+//         窗口区那一整套在 ui::winmgr（窗口管理器是一切 UI 逻辑的地基）。
+//     【每块窗口自带一套网格、自己就是一套坐标系】窗口可以 1px 1px 地挪 / 缩，所以它跟主窗口
+//     的网格不再重合：这块窗口的左上角就是「窗口里所有元素」的坐标原点 - 窗口里的元素一律按
+//     这个原点排（grid 的吸附入口都带 origin 参数，传的就是这块窗口 / 这个区块自己的原点），
+//     文字落点一律走 text_left_x / text_right_x。于是窗口挪 1px，里头的东西跟着挪 1px、
+//     相对位置一个像素都不变（不会在窗口里来回漂）。
+//     【窗口是铁板一块】拖动 / 缩放的几何必须在动笔之前算完（见 ui::floatwin 的 update_geometry）：
+//     标题栏、内容、外框一律取自同一个矩形。要是先按旧矩形画内容、外框又按新矩形画，拖的时候
+//     标题栏就慢半拍、外框和内容错位、错位那条缝里露出窗口区底色（一块白色的错位带），
+//     连本该重合的两条 1px 线也会错开成 2px（铁律 7d 禁的就是这个）。
+//     【靠边的东西按 1px 跟着窗口的边，不许拿网格去吸窗口的边】窗口既然能 1px 1px 地缩，
+//     靠右 / 靠下的元素（纵轴刻度数字、十字光标那两块浮动小牌子、标题栏右侧那几个按钮 ...）
+//     就必须 1px 1px 地跟着那条边挪；写成「拿窗口的边去 grid_floor / grid_snap」的话，
+//     窗口宽 1px 地变时它们要等满一格才跳一次，看上去就是「窗口缩放时里头的元素 8px 8px 地动」。
+//     所以这类落点一律写成「窗口那条边加减固定的像素数」（样板见 ui::chart 的 axis_tick_x）；
+//     9px 网格只用来定「从窗口左上角起算」的坐标（origin + 9k）和跟着鼠标走的那些标签
+//     （那种标签的吸附原点仍然是窗口原点，窗口一动它就跟着动）。
 // ===========================================================================
 
 // ===========================================================================
@@ -87,7 +134,11 @@
 //            文字按网格排版（16px 点阵字：汉字 2 格 / ASCII 1 格）+ 两套皮肤（经典 / 暗色）可切换；
 //            按钮 / 菜单栏 / 悬停便签各抽象成一份（ui::button / ui::menu），图标是 16x16 PNG；
 //            指标源码编辑器（ui::editor + ui::source）：菜单栏 / 按钮栏 / 行号 / 滚动条 / 光标 /
-//            选区 / 撤销 / 中文输入法一整套。
+//            选区 / 撤销 / 中文输入法一整套，滚动条能滚轮也能拖；
+//            窗口区（桌面）的窗口管理器（ui::winmgr）：图表窗可以 1px 1px 地挪 / 缩（不吸网格）、
+//            点标题栏抬层级、最小化堆到左上角（那条标题栏上的键画「还原」）、按钮面板一键新增
+//            图表窗（最多 8 块，按 Windows 那套往下 2 格再往右 2 格地堆叠）；
+//            源码编辑窗和图表窗 / 控制面板同级，一样归窗口管理器管（也能最小化）。
 //  文件结构（一个模块一个文件，都在 crate 内可见）：
 //    main.rs            程序入口 + 单元测试（铁律的开头那份说明也在这儿，改代码前先读它）
 //    grid.rs            度量常数 + 像素级绘制工具（算尺寸 / 算坐标只有这一个入口）
@@ -102,12 +153,14 @@
 //    ui/button.rs       全工程唯一的按钮（文字 / 图标 / 图标 + 文字 + 悬停便签）
 //    ui/icon.rs         像素图标：assets/icons/<名字>.png 的 16x16 PNG 读进来再自绘
 //    ui/chart.rs        图表区（K 线 / 成交量 / 指标 / 时间轴 / 十字光标），三块同一种「图表」
-//    ui/panel.rs        两栏布局、分割条、右侧控制面板
+//    ui/panel.rs        按钮面板的内容（一列自绘按钮）+ 停靠布局 / 保留备用的拖拽条
 //    ui/colorpanel.rs   涨跌颜色与自绘颜色面板
 //    ui/panemenu.rs     图表标题栏「切换」的下拉面板（换指标）
 //    ui/overlaymenu.rs  图表标题栏「叠加」的下拉面板（MA / EMA 开关）
 //    ui/floatwin.rs     浮动窗外壳（底色 / 标题栏 / 关闭键 / 按格拖动），子窗口都套它
-//    ui/source.rs       源码编辑窗：外壳 + 保存 / 编译 + 状态栏回显
+//    ui/winmgr.rs       窗口区（桌面）的窗口管理器：层级 / 自由位置尺寸 / 最小化 / 新增堆叠
+//    ui/source.rs       源码编辑窗的内容：编辑器本体 + 保存 / 编译 + 状态栏回显
+//                       （窗口外壳 / 位置尺寸 / 最小化归 ui::winmgr - 它和图表窗同级）
 //    ui/editor.rs       自绘可编辑文本编辑器（菜单栏 / 按钮栏 / 行号 / 光标 / 输入法）
 //    ui/textbuf.rs      文本缓冲区（行 + 字符索引光标 + 选区 + 撤销栈，纯逻辑）
 //    ui/textbox.rs      通用自绘单行输入框（颜色面板的 Hex 框用它，以后输入框都走这儿）
@@ -118,9 +171,11 @@
 //    * 界面层 ui/ 只负责「把 StockApp 的状态画成像素 + 把鼠标键盘变成动作」，不碰行情数据；
 //      指标层 indicator/ 只产数据坐标的 DrawCmd，对齐 / 落点全在 ui 层现算（replay）；
 //    * 跨帧状态一律放 StockApp 的字段里（egui 是即时模式），窗口 / 面板各自的状态放各自的
-//      struct（FloatWindow / TextEditor / ColorPanel ...），ui() 每帧按固定顺序驱动；
-//    * 每帧的绘制顺序：骨架 -> 标题栏 / 菜单栏 -> 功能区 -> 面板 -> 浮动窗 -> 下拉面板 ->
-//      悬停便签（最上层）。要让某样东西压住别的，改的是这个顺序，不是 Z 值。
+//      struct（Win / TextEditor / ColorPanel ...），ui() 每帧按固定顺序驱动；
+//    * 每帧的绘制顺序：骨架 -> 标题栏 / 菜单栏 -> 窗口区的窗口（图表窗 / 控制面板 / 源码编辑窗，
+//      从下往上，见 ui::winmgr）-> 区域分隔线 -> 下拉面板 -> 外圈轮廓 ->
+//      浮动面板（颜色面板 / 指标切换 / 叠加）-> 悬停便签（最上层）。
+//      要让某样东西压住别的，改的是这个顺序，不是 Z 值。
 // ===========================================================================
 //  窗口策略：无边框，开机 cells(125) x cells(102) = 1126x919；尺寸在启动时定死，不做拖动缩放，
 //  也没有最大化（系统的模态缩放循环里 egui 一帧都不重绘，画面会被 DWM 整块拉伸，新露出的区域
@@ -183,18 +238,28 @@ use crate::grid::*;
 fn main() -> eframe::Result {
     // ViewportBuilder 描述原生窗口。尺寸是「逻辑点」，而本工程强制 pixels_per_point = 1.0，
     // 所以逻辑点 == 物理像素。
+    // 开机按主显示器的工作区排（任务栏那条让出来）：窗口是无边框的，客户区就是整个窗口，
+    // 所以位置 + 尺寸直接给工作区就正好，不会超到屏幕外、也不会压住任务栏。
+    // 故意不用 with_maximized：最大化时系统会给窗口加一圈看不见的「最大化边框」，
+    // 我们的窗口过程又把非客户区压成 0，结果客户区会溢到屏幕边上正好盖住任务栏那条。
+    let (win_x, win_y, win_w, win_h) = match win32::work_area() {
+        Some((x, y, w, h)) => (x as f32, y as f32, w as f32, h as f32),
+        None => (0.0, 0.0, WINDOW_W, WINDOW_H),
+    };
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             // 无边框：标题栏完全自绘（任务栏上仍显示这个标题）。
             .with_title(APP_NAME)
             .with_decorations(false)
-            .with_inner_size([WINDOW_W, WINDOW_H])
+            .with_position([win_x, win_y])
+            .with_inner_size([win_w, win_h])
             // 窗口尺寸不再钉死：布局按实际客户区排（见 ui()），下限就是两栏各自最小那一档。
             .with_min_inner_size([WINDOW_MIN_W, WINDOW_MIN_H])
             // 系统那条看不见的 WS_SIZEBOX 缩放边框照样每帧清掉（见 clear_window_frame）：
             // 在它上面按下会被系统当成「非客户区拖框」，进入系统的模态缩放循环，循环里
-            // egui 一帧都不重绘、画面被 DWM 整块拉伸。所以不做拖动缩放，也没有最大化按钮，
-            // 窗口尺寸就是启动时那一档。
+            // egui 一帧都不重绘、画面被 DWM 整块拉伸。所以不做拖动缩放，也没有最大化按钮。
+            // 屏幕尺寸不是整格数时多出来的零头由功能区那几块子窗口自己吸收，
+            // 状态栏 / 菜单栏 / 标题栏的高度和按钮都不受影响。
             .with_maximized(false),
         ..Default::default()
     };
@@ -280,6 +345,9 @@ mod tests {
     use crate::ui::colorpanel::*;
     use crate::ui::source::*;
     use crate::ui::chart::*;
+    use crate::ui::winmgr::*;
+    use crate::ui::titlebar::*;
+    use crate::ui::floatwin::*;
     use crate::theme::*;
     
     use crate::font::*;
@@ -371,7 +439,8 @@ mod tests {
             hsplit_grab: None,
             vsplit_grab: None,
             split_x: CHART_PANE_W,
-            split_grab: None,
+            win_mgr: WinMgr::with_default_windows(),
+            work_rect: egui::Rect::NOTHING,
             panel_buttons: Vec::new(),
             panel_press: None,
             up_color: UP_RGB_DEFAULT,
@@ -379,11 +448,17 @@ mod tests {
             chart_follows_theme: true,
             color_panel: ColorPanel::new(),
             show_grid: false,
+            grid_probes: Vec::new(),
+            grid_cursor: None,
+            grid_origin: egui::Pos2::ZERO,
+            win_cmd: None,
             pane_menu: None,
             pane_menu_anchor: egui::Rect::NOTHING,
+            pane_menu_bar: egui::Rect::NOTHING,
             overlay: indicator::Overlay::DEFAULT,
             overlay_menu: None,
             overlay_menu_anchor: egui::Rect::NOTHING,
+            overlay_menu_bar: egui::Rect::NOTHING,
             source: SourceView::new(),
         }
     }
@@ -730,8 +805,10 @@ mod tests {
         assert_eq!(bar_value(0, 255), 0);
         assert_eq!(bar_value(CP_TRACK_INNER_W - 1, 255), 255);
         assert_eq!(bar_value(CP_TRACK_INNER_W - 1, 360), 360);
-        assert_eq!(handle_step(0.0), 0);
-        assert_eq!(handle_step(1.0), CP_HANDLE_STEPS);
+        // 把手在轨道里 1px 1px 地滑：两端贴死、中途停在整像素上（不吸 9px 网格）。
+        assert_eq!(handle_left(0.0, 0.0), 0.0);
+        assert_eq!(handle_left(0.0, 1.0), CP_HANDLE_TRAVEL);
+        assert_eq!(handle_left(0.0, 0.5).fract(), 0.0, "把手落在了小数像素上");
     }
     /// 面板真画出来的样子：本体正好 235x325（最外圈那一圈像素是默认边框色），SV 调色板逐块点名
     /// （26x16 块、每块 8x8，块与块之间那条共用网格线只有 1px），色相条逐根点名
@@ -1034,7 +1111,11 @@ mod tests {
         assert_eq!(KLINE_H_DEFAULT as i32, 469, "图表1 默认 52 格 = cells(52)");
         assert_eq!(VOL_H_DEFAULT as i32, 190, "图表2 默认 21 格 = cells(21)");
         assert_eq!(IND_H_DEFAULT as i32, 190, "图表3 默认 21 格 = cells(21)");
-        assert_eq!(PANE_H_MIN as i32, 181, "三块图表统一下限 20 格 = cells(20)");
+        assert_eq!(
+            PANE_H_MIN as i32,
+            199,
+            "三块图表统一下限 22 格 = cells(22)（比原来多的是图表窗自己的状态栏 2 格）"
+        );
         assert_eq!(HSPLIT_H as i32, 10, "横向拖拽条 1 格 = cells(1) = 10px");
         assert_eq!(LEFT_FIXED_H as i32, 16, "固定开销 = 两条拖拽条 - 四条共用线");
 
@@ -1087,9 +1168,14 @@ mod tests {
         // 默认窗口高度下：三块各保持规格里的默认高度（52 / 21 / 21 格）。
         let mut app = blank_app();
         app.clamp_left_heights(work);
-        assert_eq!(app.kline_h, KLINE_H_DEFAULT);
-        assert_eq!(app.vol_h, VOL_H_DEFAULT);
-        assert_eq!(app.ind_h, IND_H_DEFAULT);
+        // 三块下限都涨到 22 格（多出来的是图表窗自己的状态栏），21 格的旧默认值被顶到下限上。
+        assert_eq!(app.vol_h, PANE_H_MIN);
+        assert_eq!(app.ind_h, PANE_H_MIN);
+        assert_eq!(
+            app.kline_h,
+            cells(WORK_ROWS) - LEFT_FIXED_H - 2.0 * PANE_H_MIN,
+            "图表1 拿剩下的全部高度"
+        );
     }
 
     /// 上下三块之间的线格：相邻两块共用边界那条线，永远只有 1px，既不缺一条也不叠成 2px；
@@ -1114,12 +1200,18 @@ mod tests {
         assert_eq!(px(time.min.y as usize), Some(C_LINE), "时间带上沿那条线不对");
         assert_eq!(px(time.min.y as usize + 1), Some(C_WORK_BG), "时间带没紧跟着那条线");
         assert_eq!(info.min.y, title.max.y - LINE_W, "状态带和标题栏没共用那条线");
-        assert_eq!(time.max.y, kline.max.y, "时间带没铺到图表底边");
+        // 时间带下面就是这块图表窗自己的状态栏（2 格），它的下沿才是图表底边。
+        let cbar = chart_bar(kline);
+        assert_eq!(time.max.y, cbar.min.y + LINE_W, "时间带和状态栏没共用那条线");
+        assert_eq!(cbar.max.y, kline.max.y, "图表窗状态栏没铺到图表底边");
+        assert_eq!(px(cbar.min.y as usize), Some(C_LINE), "状态栏上沿那条线不对");
+        assert_eq!(px(cbar.min.y as usize + 1), Some(C_STATUS_BG), "状态栏没紧跟着那条线");
 
         // 图表1 与上面那条拖拽条之间：上 1px 线 + 8px 本体 + 下 1px 线，然后立刻是图表2 的标题栏。
         let b1 = bar.min.y as usize;
         assert_eq!(bar.height() as usize, HSPLIT_H as usize, "拖拽条不是 1 格");
-        assert_eq!(px(b1 - 1), Some(C_WORK_BG), "图表1 下沿多画了一行");
+        // 拖拽条上面那一行是图表1 的状态栏（它自己的底色），不是又一条线。
+        assert_ne!(px(b1 - 1), Some(C_LINE), "图表1 下沿叠出了第二条线");
         assert_eq!(px(b1), Some(C_CTRL_BORDER), "图表1 / 拖拽条共用的上边线不对");
         for r in 1..(HSPLIT_H as usize - 1) {
             assert_eq!(px(b1 + r), Some(C_SPLITTER), "拖拽条第 {r} 行不是本体色");
@@ -1131,7 +1223,8 @@ mod tests {
         // 图表2 与下面那条拖拽条之间：同样上 1px + 8px + 下 1px，然后立刻是图表3 的标题栏。
         let b2 = bar2.min.y as usize;
         assert_eq!(bar2.height() as usize, HSPLIT_H as usize, "下面那条拖拽条不是 1 格");
-        assert_eq!(px(b2 - 1), Some(C_CHART_BG), "图表2 下沿多画了一行");
+        // 拖拽条上面那一行是图表2 的状态栏（它自己的底色），不是又一条线。
+        assert_ne!(px(b2 - 1), Some(C_LINE), "图表2 下沿叠出了第二条线");
         assert_eq!(px(b2), Some(C_CTRL_BORDER), "图表2 / 拖拽条共用的上边线不对");
         for r in 1..(HSPLIT_H as usize - 1) {
             assert_eq!(px(b2 + r), Some(C_SPLITTER), "下面那条拖拽条第 {r} 行不是本体色");
@@ -1316,12 +1409,17 @@ mod tests {
         base_app.clamp_left_heights(a[2]);
         let mut big_app = blank_app();
         big_app.clamp_left_heights(b[2]);
-        assert_eq!(base_app.kline_h, KLINE_H_DEFAULT, "默认窗口下图表1 应该是 52 格");
-        assert_eq!(base_app.vol_h, VOL_H_DEFAULT, "图表2 默认 21 格");
-        assert_eq!(base_app.ind_h, IND_H_DEFAULT, "图表3 默认 21 格");
+        // 三块下限都涨到 22 格（多出来的是图表窗自己的状态栏），21 格的旧默认值被顶到下限上。
+        assert_eq!(base_app.vol_h, PANE_H_MIN, "图表2 的高度下限是 22 格");
+        assert_eq!(base_app.ind_h, PANE_H_MIN, "图表3 的高度下限是 22 格");
+        assert_eq!(
+            base_app.kline_h,
+            cells(WORK_ROWS) - LEFT_FIXED_H - 2.0 * PANE_H_MIN,
+            "默认窗口下图表1 应该拿剩下的全部高度"
+        );
         assert_eq!((big_app.kline_h as i32 - 1) % 9, 0, "图表1 高度不是整数格");
-        assert_eq!(big_app.vol_h, VOL_H_DEFAULT, "图表2 不该被窗口高度改掉");
-        assert_eq!(big_app.ind_h, IND_H_DEFAULT, "图表3 不该被窗口高度改掉");
+        assert_eq!(big_app.vol_h, PANE_H_MIN, "图表2 不该被窗口高度改掉（下限 22 格）");
+        assert_eq!(big_app.ind_h, PANE_H_MIN, "图表3 不该被窗口高度改掉（下限 22 格）");
         assert!(
             big_app.kline_h > base_app.kline_h,
             "窗口拉高后图表1 没跟着变高：{} -> {}",
@@ -1589,7 +1687,14 @@ mod tests {
         assert!(on_grid(status.min.y, kline), "状态带上沿没落在网格线上");
         assert!(on_grid(main.min.y - LINE_W, kline), "绘图区上沿没落在网格线上");
         assert!(on_grid(time.min.y, kline), "时间带上沿没落在网格线上");
-        assert_eq!(time.max.y, kline.max.y, "时间带没铺到面板底边（底下不该留白条）");
+        // 时间带下面那条是图表窗自己的状态栏：它的下沿才是面板底边（底下不留白条）。
+        assert_eq!(time.max.y, chart_bar(kline).min.y + LINE_W, "时间带和状态栏没共用那条线");
+        assert_eq!(
+            chart_bar(kline).max.y,
+            kline.max.y,
+            "图表窗状态栏没铺到面板底边"
+        );
+        assert!(on_grid(chart_bar(kline).min.y, kline), "状态栏上沿没落在网格线上");
         println!(
             "图表1 {}px = 标题栏 cells(2) + 状态带 cells(2) + 绘图区 {} + 时间带 cells(2)",
             kline.height(),
@@ -1600,7 +1705,16 @@ mod tests {
         let (vtitle, vstatus, vmain, vtime) = chart_rows(volume, crate::indicator::ChartLayout::NONE);
         assert!(vstatus.is_none() && vtime.is_none());
         assert_eq!(vtitle.max.y, vmain.min.y, "标题栏和绘图区没共用那条线");
-        assert_eq!(vmain.max.y, volume.max.y, "绘图区没铺到面板底边");
+        assert_eq!(
+            vmain.max.y,
+            chart_bar(volume).min.y,
+            "绘图区和状态栏没共用那条线"
+        );
+        assert_eq!(
+            chart_bar(volume).max.y,
+            volume.max.y,
+            "图表窗状态栏没铺到面板底边"
+        );
         println!(
             "图表2 {}px = 标题栏 cells(2) + 绘图区 {}",
             volume.height(),
@@ -1610,7 +1724,16 @@ mod tests {
         let (_, mstatus, mmain, mtime) =
             chart_rows(indicator, chart_rows_layout_with_status());
         assert!(mstatus.is_some() && mtime.is_none());
-        assert_eq!(mmain.max.y, indicator.max.y, "绘图区没铺到面板底边");
+        assert_eq!(
+            mmain.max.y,
+            chart_bar(indicator).min.y,
+            "绘图区和状态栏没共用那条线"
+        );
+        assert_eq!(
+            chart_bar(indicator).max.y,
+            indicator.max.y,
+            "图表窗状态栏没铺到面板底边"
+        );
         println!(
             "图表3 {}px = 标题栏 + 状态带 + 绘图区 {}px",
             indicator.height(),
@@ -1659,6 +1782,38 @@ mod tests {
             buttons[0].width(),
             PANE_BTN_H
         );
+    }
+
+    /// 标题栏下沿那条线 = Pane 标题栏（「代码」「切换」「叠加」那几个按钮）的上边框：同一条线、
+    /// 只有 1px（铁律 7d：不许出现「按钮上方 1px + 标题栏下方 1px」错开成 2px 的堆叠）。
+    /// 窗口是 1px 1px 挪 / 缩的，所以这儿故意用一块非整格的窗口验一遍。
+    #[test]
+    fn the_window_title_seam_is_a_single_line() {
+        let win = egui::Rect::from_min_size(egui::pos2(13.0, 5.0), egui::vec2(443.0, 233.0));
+        assert!(win.width() % 9.0 != 1.0, "这块窗口得是「非整格」的");
+        // 窗口标题栏（2 格）的下沿那一行就是外壳画的那条线：
+        // 标题栏高 = cells(2) = 19（0..18 行），线占第 18 行。
+        let seam = win.min.y + grid_line(WIN_TITLE_ROWS);
+        assert_eq!(seam, win.min.y + WIN_TITLE_H - LINE_W, "标题栏下沿那一行算不对");
+
+        // 内容区从那条线起 -> Pane 标题栏 / 那几个按钮全都压在这同一条线上。
+        let body = ManagedWin::body(win);
+        assert_eq!(body.min.y, seam, "Pane 标题栏没压在窗口标题栏下沿那条线上");
+        let (title, _, _, _) = chart_rows(body, crate::indicator::ChartLayout::new(2, 2));
+        assert_eq!(title.min.y, seam);
+        assert_eq!(PANE_TITLE_H, WIN_TITLE_H, "Pane 标题栏和窗口标题栏得一样高");
+        assert_eq!(PANE_BTN_H, WIN_TITLE_H, "那几个按钮和标题栏得一样高");
+        for b in StockApp::pane_button_rects(title, &pane_btn_widths()) {
+            assert_eq!(b.min.y, seam, "按钮上边框没和标题栏下沿重合（会错成 2px）");
+            assert_eq!(
+                b.max.y - LINE_W,
+                title.max.y - LINE_W,
+                "按钮下边框没和 Pane 标题栏下沿重合"
+            );
+        }
+        // 那条线的上下各留一行「面」（标题栏底 / 按钮顶）：所以它只能是 1px，绝不可能是两条线。
+        assert!(seam - LINE_W > win.min.y, "那条线贴着窗口顶边，上下没留出面");
+        assert!(seam + LINE_W < title.max.y - LINE_W, "那条线上下没留出面，成了 2px");
     }
 
     /// 指标切换下拉面板：列的就是 builtin() 的名字（顺序一致）；点某一项就把那个指标换到 Pane 上
@@ -1792,7 +1947,7 @@ mod tests {
         assert_eq!((panel.max.x - OVERLAY_MENU_W - kline.min.x) % 9.0, 0.0, "面板左边不在网格线上");
 
         // 每一行：左边 1 格是色块标记、右边是名字 - 最长那行（EMA250）左右都还留得下 1 格空档。
-        let text_x = text_left_x(panel.min.x) + PITCH;
+        let text_x = text_left_x(panel.min.x, panel.min.x) + PITCH;
         assert!(text_x - (panel.min.x + LINE_W) >= GRID, "颜色标记那 1 格放不下");
         let longest = crate::font::text_width("EMA250") as f32;
         assert!(
@@ -1812,9 +1967,9 @@ mod tests {
         assert!(!app.panes[PANE_VOLUME].indicator.supports_overlay(), "成交量不该认叠加");
     }
 
-    /// 源码窗：源码就是指标自己那个文件（include_str! 整份嵌进来，所以连 include_str! 那一行
-    /// 本身也在里面）、能看见的行数、总行数、滚动上限；画一帧之后面板四条边框 / 标题栏底色 /
-    /// 行号区那条竖线都落在窗口的网格线上。
+    /// 源码编辑窗：源码就是指标自己那个文件（include_str! 整份嵌进来，所以连 include_str! 那一行
+    /// 本身也在里面）、能看见的行数、总行数、滚动上限；画一帧之后窗口四条边框 / 标题栏底色 /
+    /// 行号区那条竖线都落在窗口的网格线上。它和别的子窗口同级，是窗口管理器管的一块窗口。
     #[test]
     fn source_window_shows_the_whole_own_file() {
         let ctx = egui::Context::default();
@@ -1822,8 +1977,9 @@ mod tests {
         ctx.set_pixels_per_point(1.0);
         let mut app = blank_app();
         app.text_engine = HardText::new(&ctx);
-        app.open_source(PANE_CANDLE);
-        assert!(app.source.win.open && app.source.pane == PANE_CANDLE);
+        app.bars = data::random_walk::generate(BAR_SEED, 64, BAR_START);
+        app.open_source_window(PANE_CANDLE);
+        assert!(app.win_mgr.source_open() && app.source.pane == PANE_CANDLE);
         let visible = SRC_VISIBLE_LINES;
         let total = app.source.editor.buf.lines.len();
         assert_eq!(visible, 27, "正文区一屏应该放得下 27 行（54 格 / 每行 2 格）");
@@ -1853,7 +2009,7 @@ mod tests {
         let mut raw = egui::RawInput::default();
         raw.screen_rect = Some(layout);
         let mut out = ctx.run_ui(raw, |ui| {
-            app.ui_source_window(ui, layout);
+            app.draw_frame(ui);
         });
         let shapes = std::mem::take(&mut out.shapes);
         absorb_textures(&mut out.textures_delta);
@@ -1889,31 +2045,68 @@ mod tests {
         assert_eq!(grid[empty_y][x0 + 300], Some(C_WORK_BG), "代码区底色不对");
     }
 
-    /// 源码窗的位置与滚动：位置每帧吸到窗口的 9px 网格线上（拖动中也是一格格地动，松手不需要
-    /// 再归位 - 和颜色面板同一套 FloatWindow 外壳）；滚动按整数行、夹在 [0, 总行数 - 一屏行数]。
+    /// 源码编辑窗的位置与滚动：它和窗口区里的子窗口同一套（1px 跟手、不吸主窗口的 9px 网格，
+    /// 整块夹在窗口区里）；滚动按整数行、夹在 [0, 总行数 - 一屏行数]。
+    /// 「里头的东西不随窗口乱动」的根就在这儿：位置可以是任意像素，文字 / 控件按这块窗口
+    /// 自己那套网格排（原点 = 它自己的左上角），所以窗口挪到哪儿，里头的相对位置都不变。
     #[test]
-    fn source_window_position_and_scroll_follow_the_grid() {
+    fn source_window_moves_by_pixels_and_keeps_its_own_grid() {
         assert_eq!(SRC_W as i32, 721, "面板宽 = cells(80)");
         assert_eq!(SRC_H as i32, 550, "面板高 = cells(61)");
         assert_eq!(SRC_VISIBLE_LINES, 27, "一屏 27 行 = 54 格 / 每行 2 格");
         let layout = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
-        let mut sv = SourceView::new();
-        sv.editor.buf.lines = (0..100).map(|i| format!("{i}")).collect();
-        assert_eq!(sv.editor.max_scroll(), 100 - 27);
+        let mut app = blank_app();
+        app.open_source_window(PANE_CANDLE);
+        let i = app
+            .win_mgr
+            .wins
+            .iter()
+            .position(|w| w.kind == WinKind::Source)
+            .expect("源码编辑窗没建出来");
+        app.source.editor.buf.lines = (0..100).map(|k| format!("{k}")).collect();
+        assert_eq!(app.source.editor.max_scroll(), 100 - 27);
 
-        // 开局位置就落在网格线上（198 = 22*9、99 = 11*9）。
-        assert_eq!(sv.win.pos, egui::pos2(SRC_DEFAULT_X, SRC_DEFAULT_Y));
+        // 开局位置（198 = 22*9、99 = 11*9，落在主窗口网格上 - 但那只是默认值，不是约束）。
+        assert_eq!(
+            app.win_mgr.wins[i].w.pos,
+            egui::pos2(SRC_DEFAULT_X, SRC_DEFAULT_Y)
+        );
 
-        // 拖动中每帧都吸格：203.4 / 97.6 吸到最近的网格线（23*9 = 207、11*9 = 99）。
-        sv.win.pos = egui::pos2(203.4, 97.6);
-        sv.win.snap_pos(layout);
-        assert_eq!(sv.win.pos, egui::pos2(23.0 * PITCH, 11.0 * PITCH));
+        // 1px 跟手：203.4 / 97.6 就是 203.4 / 97.6，一个像素都不会被吸走。
+        app.win_mgr.wins[i].w.pos = egui::pos2(203.4, 97.6);
+        app.win_mgr.wins[i].w.clamp_into(layout);
+        assert_eq!(
+            app.win_mgr.wins[i].w.pos,
+            egui::pos2(203.4, 97.6),
+            "窗口位置被吸网格了"
+        );
 
-        // 拖出窗口就整块夹回来：左边 / 上边贴 0，右边 / 下边贴窗口上离它最近的网格线。
-        sv.win.pos = egui::pos2(-40.0, WINDOW_H + 40.0);
-        sv.win.snap_pos(layout);
-        assert_eq!(sv.win.pos, egui::pos2(0.0, WINDOW_H - SRC_H));
-        assert_eq!((WINDOW_H - SRC_H) % PITCH, 0.0, "夹回来的下边界也得在网格线上");
+        // 拖出主窗口就整块夹回来：左边 / 上边贴 0，右边 / 下边贴主窗口右下角。
+        app.win_mgr.wins[i].w.pos = egui::pos2(-40.0, WINDOW_H + 40.0);
+        app.win_mgr.wins[i].w.clamp_into(layout);
+        assert_eq!(
+            app.win_mgr.wins[i].w.pos,
+            egui::pos2(0.0, WINDOW_H - SRC_H)
+        );
+        // 尺寸也不许大过主窗口。
+        app.win_mgr.wins[i].w.size = egui::vec2(WINDOW_W + 500.0, WINDOW_H + 500.0);
+        app.win_mgr.wins[i].w.clamp_into(layout);
+        assert_eq!(app.win_mgr.wins[i].w.size, egui::vec2(WINDOW_W, WINDOW_H));
+
+        // 窗口自己那套网格：文字左边离窗口左边永远是 1 格空档（TEXT_INSET_X = 10px），
+        // 跟窗口停在哪一列像素上无关。
+        app.win_mgr.wins[i].w.pos = egui::pos2(203.4, 97.6);
+        for k in 0..9 {
+            let band = egui::Rect::from_min_size(
+                app.win_mgr.wins[i].w.pos + egui::vec2(k as f32, 0.0),
+                egui::vec2(SRC_W, WIN_TITLE_H),
+            );
+            assert_eq!(
+                text_left_x(band.min.x, band.min.x) - band.min.x,
+                TEXT_INSET_X,
+                "窗口里的文字没跟着窗口自己那套网格走"
+            );
+        }
     }
 
     /// 源码窗里的文字也要守铁律：行号右对齐到行号区那条线上、代码从它的右边 1 格起排，
@@ -1925,12 +2118,12 @@ mod tests {
 
         // 行号：3 位数（最长的行号）右对齐之后，左边离面板边框还有 1 格以上。
         let num_w = text_width("999") as f32;
-        let num_left = text_right_x(gutter_line) - num_w;
+        let num_left = text_right_x(gutter_line, 0.0) - num_w;
         assert_eq!(((num_left - LINE_W) as i32) % PITCH as i32, 0, "行号左边没落在内容格上");
         assert!(num_left - LINE_W >= GRID, "行号左边只剩不到 1 格空档");
 
         // 代码：起点在行号区右边那条线往右 1 格，可用宽度是整数格，右边还留 1 格。
-        let code_x = text_left_x(gutter_line);
+        let code_x = text_left_x(gutter_line, 0.0);
         assert_eq!(((code_x - LINE_W) as i32) % PITCH as i32, 0, "代码起点没落在内容格上");
         assert_eq!((code_x - gutter_line as f32) as i32, (LINE_W + PITCH) as i32);
         let code_w = bar_line - GRID - code_x;
@@ -2385,10 +2578,23 @@ mod tests {
     #[test]
     fn right_aligned_and_floating_labels_land_on_content_cells() {
         // 落点工具本身：左对齐吸到左边那条线，右对齐停在那条线左边 1 格。
-        assert_eq!(text_left_x(0.0), TEXT_INSET_X);
-        assert_eq!(text_left_x(LINE_W), TEXT_INSET_X, "shrink 过 1px 的内框也得吸到同一条线");
-        assert_eq!(text_left_x(PITCH), PITCH + TEXT_INSET_X);
-        assert_eq!(text_right_x(9.0 * 89.0), 9.0 * 89.0 - GRID);
+        // 原点就是当前这套网格的左边那条线（0 号原点 = 主窗口那套）。
+        assert_eq!(text_left_x(0.0, 0.0), TEXT_INSET_X);
+        assert_eq!(
+            text_left_x(LINE_W, 0.0),
+            TEXT_INSET_X,
+            "shrink 过 1px 的内框也得吸到同一条线"
+        );
+        assert_eq!(text_left_x(PITCH, 0.0), PITCH + TEXT_INSET_X);
+        assert_eq!(text_right_x(9.0 * 89.0, 0.0), 9.0 * 89.0 - GRID);
+        // 换一套原点（= 另一块窗口自己的网格）：结果整体跟着平移，格内相对位置一模一样。
+        let ox = 203.4;
+        assert_eq!(text_left_x(ox, ox) - ox, TEXT_INSET_X);
+        assert_eq!(
+            text_left_x(ox + 3.0 * PITCH, ox) - ox,
+            3.0 * PITCH + TEXT_INSET_X
+        );
+        assert_eq!(text_right_x(ox + 2.0 * PITCH, ox) - ox, 2.0 * PITCH - GRID);
 
         let ctx = egui::Context::default();
         configure_tessellation(&ctx);
@@ -2431,7 +2637,7 @@ mod tests {
             // 时间带的索引牌：牌子左边落在网格线上，整块夹在绘图区里。
             for (cx, s) in [(plot.min.x, "123"), (plot.center().x, "12"), (plot.max.x, "1234")] {
                 let w = app.cross_label_w(s);
-                let x0 = StockApp::cross_time_label_x(plot, cx, w) as i32;
+                let x0 = StockApp::cross_time_label_x(plot, cx, w, area.min.x) as i32;
                 assert_eq!(x0 % PITCH as i32, 0, "索引牌左边不在网格线上：{x0}");
                 assert!(x0 >= plot.min.x as i32 - LINE_W as i32, "索引牌跑出绘图区左边：{x0}");
                 assert!(x0 + w as i32 <= plot.max.x as i32, "索引牌顶出绘图区右边");
@@ -2444,13 +2650,19 @@ mod tests {
             egui::vec2(CP_W, CP_H),
         );
         let hex_band = cp_band(panel, CP_ROW_HEX, CP_HEX_ROWS);
-        let hex_text = text_left_x(hex_band.min.x) as i32;
+        // 输入框里的文字按外框左边那条线落点：左边正好留 1 格空档（面板里的东西一律按面板
+        // 自己那套网格排，面板挪到哪一列像素上都一样）。
+        let hex_text = text_left_x(hex_band.min.x, panel.min.x) as i32;
         assert_eq!(
-            (hex_text - LINE_W as i32) % PITCH as i32,
-            0,
-            "Hex 文字没压在内容格上：{hex_text}"
+            hex_text as f32 - hex_band.min.x,
+            TEXT_INSET_X,
+            "Hex 文字左边不是 1 格空档：{hex_text}"
         );
-        assert_eq!(text_left_x(hex_band.shrink(LINE_W).min.x) as i32, hex_text);
+        assert_eq!(
+            (hex_text - panel.min.x as i32 - LINE_W as i32) % PITCH as i32,
+            0,
+            "Hex 文字没压在这块面板的内容格上：{hex_text}"
+        );
     }
     /// 纵轴刻度数字也守同一条铁律：字号换成按格算（每字 9px）之后，轴里最长的那个数值
     /// 还得放得下并且左右各留 1 格 - 轴就 8 格宽，数值一长最先顶出来。
@@ -2578,8 +2790,8 @@ mod tests {
         absorb_textures(&mut out.textures_delta);
         assert!(app.crosshair.is_some(), "松开拖拽条之后十字光标该恢复");
 
-        // 正在拖浮动面板（颜色面板 / 源码窗）的时候也一样：鼠标扫过绘图区不该冒十字线。
-        app.color_panel.win.drag = true;
+        // 正在拖浮动面板（颜色面板）的时候也一样：鼠标扫过绘图区不该冒十字线。
+        app.color_panel.win.set_dragging(true);
         let mut raw = egui::RawInput::default();
         raw.screen_rect = Some(screen);
         raw.events = vec![egui::Event::PointerMoved(target)];
@@ -2588,8 +2800,15 @@ mod tests {
         });
         absorb_textures(&mut out.textures_delta);
         assert!(app.crosshair.is_none(), "拖浮动窗口时不该响应图表区的十字光标");
-        app.color_panel.win.drag = false;
-        app.source.win.drag = true;
+        app.color_panel.win.set_dragging(false);
+        // 拖窗口区里的子窗口（窗口管理器那套拖动）也一样。
+        let win_i = app
+            .win_mgr
+            .wins
+            .iter()
+            .position(|w| w.kind == WinKind::Chart)
+            .expect("窗口区里没有图表窗");
+        app.win_mgr.wins[win_i].w.set_dragging(true);
         let mut raw = egui::RawInput::default();
         raw.screen_rect = Some(screen);
         raw.events = vec![egui::Event::PointerMoved(target)];
@@ -2597,8 +2816,8 @@ mod tests {
             app.update_crosshair(ui, &plots);
         });
         absorb_textures(&mut out.textures_delta);
-        assert!(app.crosshair.is_none(), "拖源码窗时不该响应图表区的十字光标");
-        app.source.win.drag = false;
+        assert!(app.crosshair.is_none(), "拖子窗口时不该响应图表区的十字光标");
+        app.win_mgr.wins[win_i].w.set_dragging(false);
         let mut raw = egui::RawInput::default();
         raw.screen_rect = Some(screen);
         raw.events = vec![egui::Event::PointerMoved(target)];
@@ -2685,6 +2904,7 @@ mod tests {
             return;
         }
         app.fps = 60.4;
+        app.status_msg = "状态栏测试".to_owned();
         app.bars = data::random_walk::generate(BAR_SEED, 80, BAR_START);
         app.visible = 80;
         let layout = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
@@ -2705,7 +2925,7 @@ mod tests {
             sx += w - LINE_W;
             first = false;
         }
-        assert!(want.len() >= 2, "状态栏至少要有几条分割线才测得出");
+        assert!(want.len() >= 1, "状态栏至少要有几条分割线才测得出");
 
         let mut raw = egui::RawInput::default();
         raw.screen_rect = Some(layout);
@@ -2858,45 +3078,31 @@ mod tests {
             let areas = split_areas(layout);
             app.paint_skeleton(&painter, layout, areas);
             app.ui_titlebar(ui, areas[0], Some(layout));
-            let menubar_state = app.menu;
+            let menubar_state = app.menu.clone();
             let (_, menubar_state) = ui_menu_bar(app, ui, areas[1], &TOP_TABS, menubar_state);
             app.menu = menubar_state;
-            app.clamp_split(areas[2]);
-            let [left, splitter, panel] = StockApp::work_columns(areas[2], app.split_x);
-            app.clamp_left_heights(left);
-            let [chart1, hsplit, chart2, vsplit, chart3] =
-                StockApp::left_rows(left, app.kline_h, app.vol_h);
-            let areas_3 = [chart1, chart2, chart3];
-            let mut plots = [egui::Rect::NOTHING; 3];
-            for (i, area) in areas_3.iter().enumerate() {
-                let l = app.panes[i].indicator.layout();
-                let (_, _, main, _) = chart_rows(*area, l);
-                plots[i] = frame_rects(main).0;
-                app.panes[i].height = main.height() as i32;
+            // 窗口区：和 ui() 一样交给窗口管理器（层级 / 位置尺寸 / 最小化都在它那儿）。
+            app.work_rect = areas[2];
+            let mut mgr = app.win_mgr.take();
+            mgr.plan(app, ui, areas[2]);
+            app.win_mgr = mgr;
+            let plots = app.win_mgr.plots.clone();
+            app.chart_interact(ui, &plots, &[]);
+            let plot_w = app.win_mgr.plot_w_max;
+            if plot_w > 0.0 {
+                app.clamp_view(plot_w);
             }
-            app.sync_pane_palette();
-            for i in 0..app.panes.len() {
-                app.ensure_pane_computed(i);
-            }
-            app.clamp_view(plots[0].width());
-            if pointer.is_some() {
-                let bars = [hsplit, vsplit, splitter];
-                app.chart_interact(ui, &plots, &bars);
-                app.update_crosshair(ui, &plots);
-            }
-            app.ui_chart(ui, PANE_CANDLE, chart1);
-            app.ui_chart(ui, PANE_VOLUME, chart2);
-            app.ui_chart(ui, PANE_MACD, chart3);
-            app.ui_hsplitter(ui, hsplit, left, LeftSplit::Volume);
-            app.ui_hsplitter(ui, vsplit, left, LeftSplit::Indicator);
-            app.ui_splitter(ui, splitter, areas[2]);
-            app.ui_panel(ui, panel);
+            app.update_crosshair(ui, &plots);
+            let mut mgr = app.win_mgr.take();
+            mgr.draw(app, ui, areas[2]);
+            app.win_mgr = mgr;
+            app.run_win_cmd();
             app.paint_separators(&painter, layout, areas);
             border_hard(&painter, layout, C_CTRL_BORDER);
             // 两个下拉面板和 ui() 一样排在最上层（没开的时候它们什么都不画）。
             app.ui_pane_menu(ui);
             app.ui_overlay_menu(ui);
-            // 网格测试叠层（调试用）：和 ui() 一样排在最上层，控件边框落在网格线上就会被它盖住。
+            // UI工程测试叠层（调试用）：和 ui() 一样排在最上层，控件边框落在网格线上就会被它盖住。
             if app.show_grid {
                 app.paint_grid_test(&painter, layout);
             }
@@ -2943,6 +3149,111 @@ mod tests {
         std::fs::write(path, out).expect("写 BMP 失败");
     }
 
+    /// 靠右的元素按 1px 跟着窗口的右沿挪：窗口宽 1px 1px 地变，纵轴刻度数字、十字光标那两块
+    /// 浮动小牌子就 1px 1px 地跟着走。要是拿 9px 网格去吸窗口的边，它们就得等满一格才跳一次 -
+    /// 看上去正是「窗口缩放时里头的元素 8px 8px 地动」。
+    #[test]
+    fn right_anchored_labels_follow_the_window_edge_by_one_pixel() {
+        // 一块「非整格」的图表：宽 302（(302-1) % 9 != 0）。
+        let axis = egui::Rect::from_min_size(egui::pos2(700.0, 40.0), egui::vec2(302.0, 400.0));
+        let wider = egui::Rect::from_min_size(axis.min, axis.size() + egui::vec2(1.0, 0.0));
+
+        let tick = StockApp::axis_tick_x(axis);
+        assert_eq!(
+            StockApp::axis_tick_x(wider) - tick,
+            1.0,
+            "窗口宽 1px，纵轴刻度数字没跟着挪 1px"
+        );
+
+        let w = cells(4);
+        let tag = StockApp::cross_axis_label_x(axis, w);
+        assert_eq!(
+            StockApp::cross_axis_label_x(wider, w) - tag,
+            1.0,
+            "窗口宽 1px，纵轴里那块数值牌没跟着挪 1px"
+        );
+
+        // 时间带那块索引牌贴到右边时也一样（夹紧用的那条边按 1px 算）。
+        let plot = egui::Rect::from_min_size(egui::pos2(0.0, 40.0), egui::vec2(690.0, 400.0));
+        let wider_plot = egui::Rect::from_min_size(plot.min, plot.size() + egui::vec2(1.0, 0.0));
+        let time = StockApp::cross_time_label_x(plot, plot.max.x, w, plot.min.x);
+        assert_eq!(
+            StockApp::cross_time_label_x(wider_plot, wider_plot.max.x, w, wider_plot.min.x) - time,
+            1.0,
+            "窗口宽 1px，时间带那块索引牌没跟着挪 1px"
+        );
+    }
+
+    /// 拖着窗口的那一刻也得是「铁板一块」：几何在动笔之前就定下来（见 ui::floatwin 的
+    /// update_geometry），所以拖动的那一帧里标题栏 / 内容 / 外框全在同一个矩形上。
+    /// 反过来（内容先按旧矩形画、外框又按新矩形画）就是：标题栏慢半拍、外框和内容错位、
+    /// 错位那条缝里露出窗口区底色（一块白色的错位带），本该重合的 1px 线错开成 2px。
+    /// 判据：拖动那一帧的窗口矩形里，逐像素等于「窗口就摆在那个位置、没有任何会话」的一帧。
+    #[test]
+    fn a_window_is_one_piece_while_being_dragged() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        app.bars = data::random_walk::generate(BAR_SEED, BAR_COUNT, BAR_START);
+        app.fps = 60.0;
+        app.visible = visible_bars(CHART_PANE_W - LINE_W - AXIS_W, BAR_SCALE_DEFAULT);
+        if app.panel_buttons.is_empty() {
+            app.build_panel_buttons();
+        }
+        let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(70)));
+        app.work_rect = work;
+        // 先按停靠布局摆一帧，再把图表窗缩成一块小窗、摆到右下角那块空地上（能往右下方挪）。
+        win_frame(&mut app, &ctx, work, vec![]);
+        let i = app
+            .win_mgr
+            .wins
+            .iter()
+            .position(|w| w.kind == WinKind::Chart)
+            .unwrap();
+        app.win_mgr.wins[i].w.size = egui::vec2(cells(40), cells(24));
+        app.win_mgr.wins[i].w.pos = work.min + egui::vec2(200.0, 200.0);
+        let before = app.win_mgr.wins[i].rect();
+        win_frame(&mut app, &ctx, work, vec![]);
+
+        // 真拖一次：按标题栏正中，然后往右下挪 3px（3 不是 9 的倍数）。
+        let handle = free_band(before, 0, WIN_TITLE_ROWS).center();
+        let press = vec![
+            egui::Event::PointerMoved(handle),
+            egui::Event::PointerButton {
+                pos: handle,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ];
+        let _ = win_frame(&mut app, &ctx, work, press);
+        let moved = handle + egui::vec2(3.0, 3.0);
+        let dragged = win_frame(&mut app, &ctx, work, vec![egui::Event::PointerMoved(moved)]);
+        let after = app.win_mgr.wins[i].rect();
+        assert_eq!(after.min, before.min + egui::vec2(3.0, 3.0), "拖动那一帧没跟手");
+
+        // 参考帧：窗口就摆在拖动后的位置上，没有任何会话。
+        app.win_mgr.wins[i].w.end_sessions();
+        let reference = win_frame(&mut app, &ctx, work, vec![]);
+
+        let (x, y) = (after.min.x as usize, after.min.y as usize);
+        let (w, h) = (after.width() as usize, after.height() as usize);
+        let mut diff = 0;
+        for dy in 0..h {
+            for dx in 0..w {
+                if dragged[y + dy][x + dx] != reference[y + dy][x + dx] {
+                    diff += 1;
+                }
+            }
+        }
+        assert_eq!(
+            diff, 0,
+            "拖动的这一帧里窗口不是铁板一块（{diff} 个像素和静止的同一位置对不上）"
+        );
+    }
+
     /// 整窗渲染结果落一份 BMP 到 target/ 供人工检查（默认忽略，手动 `--ignored` 跑）。
     #[test]
     #[ignore]
@@ -2971,20 +3282,919 @@ mod tests {
         app.up_color = UP_RGB_DEFAULT;
         app.down_color = DOWN_RGB_DEFAULT;
         app.mark_panes_dirty();
-        let work = left_work();
-        app.clamp_left_heights(work);
-        let [kline, _b0, _vol, _b1, _ind] = StockApp::left_rows(work, app.kline_h, app.vol_h);
-        let (_, _, main, _) = chart_rows(kline, app.panes[PANE_CANDLE].indicator.layout());
+        // 几何和 render_window_at 里那套一样：整窗 -> 功能区 -> 图表窗（第一帧就是停靠布局）。
+        let layout = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
+        // 图表窗的内容区 = 窗口本体再让开一条标题栏（见 ManagedWin::body）。
+        let chart = ManagedWin::body(StockApp::child_areas(split_areas(layout)[2])[0]);
+        let (_, _, main, _) = chart_rows(chart, app.panes[PANE_CANDLE].indicator.layout());
         let pos = frame_rects(main).0.center();
         let cross = render_window_at(&mut app, Some(pos));
         write_bmp("target/ui_crosshair.bmp", &cross);
-        // 再落一张开了「网格测试」叠层的：全界面的 9px 网格线（洋红）铺在最上层，
+        // 再落一张开了「UI工程测试」叠层的：全界面的 9px 网格线（灰色点状）铺在最上层，
         // 控件边框只要落在网格线上就会被它整条盖住，没盖住的会露在线旁边 - 肉眼核对对齐用。
         app.show_grid = true;
         let grid_on = render_window(&mut app);
         write_bmp("target/ui_grid.bmp", &grid_on);
         app.show_grid = false;
+
+        // 再落一张「窗口区摆了好几块窗口」的：新增 3 块图表窗（Windows 那套堆叠）、把第一块
+        // 挪到非整格的位置、缩成非整格的尺寸（零头落在弹性段里的样子）、再把一块最小化
+        // （堆到窗口区左上角） - 肉眼核对窗口标题栏 / 两个键 / 溢出空间。
+        let work = split_areas(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(WINDOW_W, WINDOW_H),
+        ))[2];
+        app.work_rect = work;
+        for _ in 0..3 {
+            app.add_chart_window();
+        }
+        let chart_i = app
+            .win_mgr
+            .wins
+            .iter()
+            .position(|w| w.kind == WinKind::Chart)
+            .unwrap();
+        app.win_mgr.wins[chart_i].w.pos = egui::pos2(work.min.x + 5.0, work.min.y + 5.0);
+        app.win_mgr.wins[chart_i].w.size = egui::vec2(500.0, 300.0);
+        // 最后那块（层级最上面那块）最小化：它应该压成一条标题栏、堆在窗口区左上角。
+        let last = app.win_mgr.wins.len() - 1;
+        app.win_mgr.wins[last].minimized = true;
+        let wins = render_window(&mut app);
+        write_bmp("target/ui_windows.bmp", &wins);
         set_theme(Theme::CLASSIC);
+    }
+
+    /// 窗口管理器的一帧（和 ui() 里那一段一模一样）：先摆好 / 收口 / 算绘图区，再画窗口。
+    fn win_frame(
+        app: &mut StockApp,
+        ctx: &egui::Context,
+        work: egui::Rect,
+        events: Vec<egui::Event>,
+    ) -> Vec<Vec<Option<egui::Color32>>> {
+        let mut raw = egui::RawInput::default();
+        raw.screen_rect = Some(work);
+        raw.events = events;
+        app.work_rect = work;
+        let mut out = ctx.run_ui(raw, |ui| {
+            let mut mgr = app.win_mgr.take();
+            mgr.plan(app, ui, work);
+            app.win_mgr = mgr;
+            let mut mgr = app.win_mgr.take();
+            mgr.draw(app, ui, work);
+            app.win_mgr = mgr;
+            // 和 ui() 一样：画完之后才执行这一帧记下的窗口命令（管理器的写回已经做完了）。
+            app.run_win_cmd();
+        });
+        absorb_textures(&mut out.textures_delta);
+        rasterize_into(
+            &ctx.tessellate(std::mem::take(&mut out.shapes), 1.0),
+            WINDOW_W as usize,
+            WINDOW_H as usize,
+        )
+    }
+
+    /// 窗口的移动与缩放（自由像素那一套）：拖标题栏 1px 跟手地挪、拖边 1px 跟手地缩，
+    /// 不吸 9px 网格；缩到最小尺寸就托住（窗口里的控件一个都不会被挤掉）、拖出去也出不了窗口区；
+    /// 松手结束会话。点标题栏还会把那块窗口抬到最上层。
+    #[test]
+    fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        if app.panel_buttons.is_empty() {
+            app.build_panel_buttons();
+        }
+        let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(60)));
+        let min = WinMgr::chart_min_size();
+        // 窗口在层级里会被抬来抬去（点标题栏 = 激活），按类型找下标，别写死 0 / 1。
+        let chart_i = |app: &StockApp| {
+            app.win_mgr
+                .wins
+                .iter()
+                .position(|w| w.kind == WinKind::Chart)
+                .expect("图表窗不见了")
+        };
+        let chart = |app: &StockApp| app.win_mgr.wins[chart_i(app)].rect();
+        let frame = |app: &mut StockApp, events: Vec<egui::Event>| win_frame(app, &ctx, work, events);
+        let press = |pos: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        let drag = |pos: egui::Pos2| vec![egui::Event::PointerMoved(pos)];
+        let release = |pos: egui::Pos2| {
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+
+        // 第一帧按停靠布局摆好：图表窗铺左栏、按钮面板钉在右列顶部。
+        frame(&mut app, vec![]);
+        let docked = StockApp::child_areas(work);
+        let first = chart(&app);
+        assert_eq!(first, docked[0], "图表窗没按停靠布局摆");
+        assert!(
+            app.win_mgr
+                .wins
+                .iter()
+                .any(|w| w.kind == WinKind::Panel && w.rect() == docked[1]),
+            "按钮面板没按停靠布局摆"
+        );
+
+        // 抓右边那条命中带往左狠拖：宽度缩到最小尺寸就停住（1px 精度的下限），左边那颗钉子一动不动。
+        let edge = egui::pos2(first.max.x - 1.0, first.center().y);
+        frame(&mut app, press(edge));
+        frame(&mut app, drag(egui::pos2(first.min.x + 10.0, first.center().y)));
+        let shrunk = chart(&app);
+        assert_eq!(shrunk.width(), min.x, "缩过头了：最小尺寸没托住");
+        assert_eq!(shrunk.min.x, first.min.x, "拖右边不该动左边");
+        assert!(shrunk.width() >= min.x);
+        frame(&mut app, release(egui::pos2(work.max.x, work.max.y)));
+
+        // 纵向：抓下边那条带往上狠拖 - 高度停在最小高度上，上边那颗钉子一动不动。
+        let bottom = egui::pos2(shrunk.center().x, shrunk.max.y - 1.0);
+        frame(&mut app, press(bottom));
+        frame(&mut app, drag(egui::pos2(bottom.x, shrunk.min.y + 10.0)));
+        let tall = chart(&app);
+        assert_eq!(tall.height(), min.y, "缩过头了：最小高度没托住");
+        assert_eq!(tall.min.y, shrunk.min.y, "拖下边不该动上边");
+        assert!(tall.max.y <= work.max.y, "窗口越出窗口区了");
+        frame(&mut app, release(egui::pos2(work.max.x, work.max.y)));
+        assert!(
+            !app.win_mgr.wins[chart_i(&app)].w.resizing() && !app.win_mgr.drag_active(),
+            "松手之后会话没结束"
+        );
+
+        // 右下角：等于同时拖右边和下边，长宽一起变（1px 跟手，左上角那颗钉子一动不动）。
+        let corner = chart(&app);
+        let grab = corner.max;
+        frame(&mut app, press(grab));
+        frame(&mut app, drag(grab + egui::vec2(90.0, 40.0)));
+        let grown = chart(&app);
+        assert_eq!(grown.min, corner.min, "拖右下角不该动左上角");
+        assert_eq!(grown.width(), corner.width() + 90.0, "拖右下角没做到 1px 跟手");
+        assert_eq!(grown.height(), corner.height() + 40.0, "拖右下角没做到 1px 跟手");
+        frame(&mut app, release(egui::pos2(work.max.x, work.max.y)));
+
+        // 左边那条带也能缩（四条边 + 四个角全算）：抓左边往右拖 - 右边那颗钉子一动不动，
+        // 宽度按 1px 跟手地缩；再往左狠拖，贴到窗口区左边那条边框上。
+        // 按在边框线上（偏移 = 0）：之后那条边就跟鼠标 1px 对 1px。
+        frame(&mut app, press(egui::pos2(grown.min.x, grown.center().y)));
+        frame(&mut app, drag(egui::pos2(grown.min.x + 60.0, grown.center().y)));
+        let from_left = chart(&app);
+        assert_eq!(from_left.max.x, grown.max.x, "拖左边不该动右边");
+        assert_eq!(from_left.min.x, grown.min.x + 60.0, "拖左边没做到 1px 跟手");
+        assert_eq!(from_left.width(), grown.width() - 60.0, "拖左边没做到 1px 跟手");
+        frame(&mut app, drag(egui::pos2(work.min.x - 300.0, grown.center().y)));
+        assert_eq!(chart(&app).min.x, work.min.x, "往左拖没贴到窗口区左边框");
+        frame(&mut app, release(egui::pos2(work.max.x, work.max.y)));
+
+        // 上边那条带：抓上边往下拖 - 下边那颗钉子一动不动；再往上狠拖，贴到窗口区顶边那条边框上。
+        let top_edge = egui::pos2(grown.center().x, grown.min.y);
+        frame(&mut app, press(top_edge));
+        frame(&mut app, drag(egui::pos2(top_edge.x, grown.min.y + 30.0)));
+        let lower = chart(&app);
+        assert_eq!(lower.max.y, grown.max.y, "拖上边不该动下边");
+        assert_eq!(lower.min.y, grown.min.y + 30.0, "拖上边没做到 1px 跟手");
+        frame(&mut app, drag(egui::pos2(top_edge.x, work.min.y - 300.0)));
+        assert_eq!(chart(&app).min.y, work.min.y, "往上拖没贴到窗口区顶边框");
+        frame(&mut app, release(egui::pos2(work.max.x, work.max.y)));
+
+        // 左上角：等于同时拖左边和上边（和右下角对称），长宽一起变，右下角那颗钉子一动不动。
+        let before_tl = chart(&app);
+        let tl = before_tl.min;
+        frame(&mut app, press(tl));
+        frame(&mut app, drag(tl + egui::vec2(40.0, 20.0)));
+        let shrunk_tl = chart(&app);
+        assert_eq!(shrunk_tl.max, before_tl.max, "拖左上角不该动右下角");
+        assert_eq!(shrunk_tl.width(), before_tl.width() - 40.0, "拖左上角没做到 1px 跟手");
+        assert_eq!(shrunk_tl.height(), before_tl.height() - 20.0, "拖左上角没做到 1px 跟手");
+        frame(&mut app, release(egui::pos2(work.max.x, work.max.y)));
+
+        // 拖标题栏：1px 跟手地挪（位移不是 9 的整数倍，吸过网格就对不上），出不去窗口区；
+        // 点标题栏还把这扇窗抬到了最上层（就在列表末尾）。
+        let before = chart(&app);
+        let handle = free_band(before, 0, WIN_TITLE_ROWS).center();
+        let walk = egui::vec2(37.0, 23.0);
+        frame(&mut app, press(handle));
+        assert_eq!(chart_i(&app), app.win_mgr.wins.len() - 1, "点标题栏没把窗口抬到最上层");
+        frame(&mut app, drag(handle + walk));
+        let moved = chart(&app);
+        assert_eq!(moved.min, before.min + walk, "拖标题栏没做到 1px 跟手");
+        assert_eq!(moved.size(), before.size(), "拖窗口不该改尺寸");
+        // 拖到窗口区右边缘之后再往前拖是不算数的（位置被夹住，右边框和主窗口那条边框重叠）；
+        // 往回拉必须立刻跟手 - 位置每帧都按「鼠标 - 按下时的固定偏移」现算，不攒增量，
+        // 所以没有「先拉回一段空距离」这回事。
+        let drag_y = handle.y + walk.y;
+        frame(&mut app, drag(egui::pos2(work.max.x + 300.0, drag_y)));
+        let at_edge = chart(&app);
+        assert_eq!(at_edge.max.x, work.max.x, "往右拖出窗口区了 / 右边框没贴到窗口区右边框");
+        frame(&mut app, drag(egui::pos2(work.max.x - 20.0, drag_y)));
+        let pulled = chart(&app);
+        assert!(pulled.max.x < work.max.x, "往回拉之后窗口还钉在边缘上没动");
+        frame(&mut app, drag(egui::pos2(work.max.x - 60.0, drag_y)));
+        assert_eq!(
+            chart(&app).min.x,
+            pulled.min.x - 40.0,
+            "往回拉没做到 1px 跟手（中间夹了一段空距离）"
+        );
+        frame(&mut app, release(moved.center()));
+
+        // 拖出窗口区也出不去：往左上狠拖，整块停在窗口区左上角。
+        let now = chart(&app);
+        frame(&mut app, press(free_band(now, 0, WIN_TITLE_ROWS).center()));
+        frame(&mut app, drag(egui::pos2(work.min.x - 500.0, work.min.y - 500.0)));
+        assert_eq!(chart(&app).min, work.min, "窗口拖出窗口区了");
+        frame(&mut app, release(moved.center()));
+
+        // 下边拖到窗口区下沿同样贴齐那条边框（鼠标到不了显示器外面，不贴的话永远差 1px）。
+        let at = chart(&app);
+        frame(&mut app, press(egui::pos2(at.center().x, at.max.y - 1.0)));
+        frame(&mut app, drag(egui::pos2(at.center().x, work.max.y + 300.0)));
+        assert_eq!(chart(&app).max.y, work.max.y, "下边没贴到窗口区下边框");
+        frame(&mut app, release(egui::pos2(work.max.x, work.max.y)));
+
+        // 谁能改尺寸：图表窗 / 按钮面板 / 源码窗都行，颜色面板改了也没意义，关掉。
+        assert!(!app.color_panel.win.resizable, "颜色面板不该能改尺寸");
+        assert_eq!(
+            app.win_mgr
+                .wins
+                .iter()
+                .find(|w| w.kind == WinKind::Panel)
+                .map(|w| w.w.min_size),
+            Some(app.panel_min_size()),
+            "按钮面板的尺寸下限不对"
+        );
+        // 源码编辑窗也是窗口区里的一块子窗口：能拉右 / 下 / 右下角，下限就是它的自然尺寸
+        //（标题栏 + 菜单栏 + 按钮栏 + 一屏行号 + 代码区都得放得下）。
+        let src = app.win_mgr.show_source(work);
+        assert!(app.win_mgr.wins[src].w.resizable);
+        assert_eq!(app.win_mgr.wins[src].w.min_size, egui::vec2(SRC_W, SRC_H));
+    }
+
+    /// 溢出空间（自由尺寸窗口那套）：窗口尺寸不是 cells(n) 时，多出来的零头一个像素都不许
+    /// 铁律（每块窗口自带一套网格）：窗口 1px 1px 地挪 / 缩，不吸主窗口的 9px 网格，所以里头
+    /// 所有元素必须按「这块窗口自己的左上角」那套网格排 - 窗口动一格，里头的东西跟着动一格，
+    /// 相对位置一个像素都不变（不许在窗口里来回漂）。
+    /// 验证方式最实在：同一块窗口摆在两个只差 1px 的位置上各渲染一遍整窗，窗口那块区域的
+    /// 像素必须整体平移 1px 之后一模一样。
+    #[test]
+    fn window_contents_travel_with_the_window_by_one_pixel() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        app.bars = data::random_walk::generate(BAR_SEED, BAR_COUNT, BAR_START);
+        if app.panel_buttons.is_empty() {
+            app.build_panel_buttons();
+        }
+        let layout = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
+        let work = split_areas(layout)[2];
+        app.work_rect = work;
+        // 先按停靠布局摆一帧，再把图表窗挪到一块空地上（避开右上角的控制面板）。
+        win_frame(&mut app, &ctx, work, vec![]);
+        let i = app
+            .win_mgr
+            .wins
+            .iter()
+            .position(|w| w.kind == WinKind::Chart)
+            .unwrap();
+        // 缩到一块小尺寸、摆到右下方那块空地上：既不越出窗口区，也不跟右上角的控制面板打架。
+        app.win_mgr.wins[i].w.size = egui::vec2(NEW_WIN_W, NEW_WIN_H);
+        app.win_mgr.wins[i].w.pos = work.min + egui::vec2(200.0, 300.0);
+        let start = app.win_mgr.wins[i].rect().min;
+        let size = app.win_mgr.wins[i].w.size;
+        let a = render_window(&mut app);
+
+        // 挪 1px（1 不是 9 的倍数：谁要吸网格，这一比立刻露馅）。
+        app.win_mgr.wins[i].w.pos = start + egui::vec2(1.0, 1.0);
+        let b = render_window(&mut app);
+
+        let (x, y) = (start.x as usize, start.y as usize);
+        let (w, h) = (size.x as usize, size.y as usize);
+        assert!(x + w + 1 < WINDOW_W as usize && y + h + 1 < WINDOW_H as usize, "窗口别贴边");
+        let mut diff = 0;
+        for dy in 0..h {
+            for dx in 0..w {
+                if a[y + dy][x + dx] != b[y + dy + 1][x + dx + 1] {
+                    diff += 1;
+                }
+            }
+        }
+        assert_eq!(diff, 0, "窗口挪 1px 之后里头的元素没跟着一起挪（{diff} 个像素对不上）");
+    }
+
+    /// 溢出空间（自由尺寸窗口那套）：窗口尺寸不是 cells(n) 时，多出来的零头一个像素都不许
+    /// 落到「尺寸固定的东西」上 - 窗口标题栏 / 图表栏 / 状态带 / 时间带的高度、右边那两个键、
+    /// 面板那一列按钮盒，尺寸全是死的；零头只许落进弹性段（图表区的绘图区 / 标题栏的标题区），
+    /// 也就是原则上落在右边和下方。
+    #[test]
+    fn window_overflow_lands_in_the_elastic_bands() {
+        // 一块故意不是整格的图表窗：900x500（(900-1) % 9 != 0、(500-1) % 9 != 0）。
+        let win = egui::Rect::from_min_size(egui::pos2(7.0, 4.0), egui::vec2(900.0, 500.0));
+        assert!(win.width() % 9.0 != 1.0 && win.height() % 9.0 != 1.0, "这块窗口得是「非整格」的");
+
+        // 竖向：标题栏 / 图表栏 / 状态带 / 时间带全是死的，零头全在绘图区里。
+        let title = free_band(win, 0, WIN_TITLE_ROWS);
+        assert_eq!(title.height(), WIN_TITLE_H, "窗口标题栏高度被零头改了");
+        assert_eq!(title.min.y, win.min.y);
+        let body = ManagedWin::body(win);
+        let layout = indicator::ChartLayout::new(2, 2);
+        let (bar, status, main, time) = chart_rows(body, layout);
+        let (status, time) = (status.unwrap(), time.unwrap());
+        assert_eq!(bar.height(), PANE_TITLE_H, "图表栏高度被零头改了");
+        assert_eq!(status.height(), cells(2), "状态带高度被零头改了");
+        assert_eq!(time.height(), cells(2), "时间带高度被零头改了");
+        // 时间带下面那条是图表窗自己的状态栏：状态栏的下沿才钉死在窗口下沿。
+        assert_eq!(
+            time.max.y,
+            chart_bar(body).min.y + LINE_W,
+            "时间带和状态栏没共用那条线"
+        );
+        assert_eq!(chart_bar(body).max.y, win.max.y, "图表窗状态栏没钉死在窗口下沿");
+        assert_eq!(main.max.y, time.min.y, "绘图区和时间带没共用那条线");
+        assert_eq!(status.max.y, main.min.y, "状态带和绘图区没共用那条线");
+        // 零头 = 整格窗口和这块自由窗口的高度差，它必须整份落在绘图区里。
+        let snap = egui::Rect::from_min_size(
+            win.min,
+            egui::vec2(snap_cells_up(win.width()), snap_cells_up(win.height())),
+        );
+        let (_, _, main_snap, _) = chart_rows(ManagedWin::body(snap), layout);
+        assert_eq!(
+            main_snap.height() - main.height(),
+            snap.height() - win.height(),
+            "竖向零头没落在绘图区（弹性段）里"
+        );
+
+        // 横向：右边那条纵轴和右边那两个键都是死的，零头落在绘图区 / 标题栏的标题区里。
+        let (plot, axis) = frame_rects(main);
+        assert_eq!(axis.width(), AXIS_W, "纵轴宽度被零头改了");
+        assert_eq!(axis.max.x, win.max.x, "纵轴没钉死在窗口右边");
+        assert_eq!(plot.min.x, win.min.x + LINE_W);
+        let (plot_snap, _) = frame_rects(main_snap);
+        assert_eq!(
+            plot_snap.width() - plot.width(),
+            snap.width() - win.width(),
+            "横向零头没落在绘图区（弹性段）里"
+        );
+        let keys = sys_button_rects(title);
+        for k in keys {
+            assert_eq!(k.size(), egui::vec2(SYS_BTN_W, SYS_BTN_H), "右边那几个键被零头改了尺寸");
+        }
+        assert_eq!(keys[2].max.x, title.max.x, "关闭键没钉在窗口右边");
+        assert_eq!(keys[2].min.y, win.min.y, "关闭键没压在窗口标题栏上");
+        // 三个键从左往右是 最小化 / 最大化 / 关闭，相邻两个共用中间那条线。
+        assert_eq!(keys[1].min.x, keys[0].max.x - LINE_W, "最大化没夹在最小化和关闭中间");
+        assert_eq!(keys[2].min.x, keys[1].max.x - LINE_W, "关闭没挨着最大化");
+    }
+
+    /// 窗口标题栏那两个键 + 点标题栏抬层级（真按真放的跨帧点击）：点标题栏把这扇窗抬到最上层、
+    /// 点最小化键压成一条小标题栏（再点一次还原）、点关闭键把它关掉（布局菜单里能再摆回来）。
+    #[test]
+    fn window_title_keys_raise_minimize_and_close() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        if app.panel_buttons.is_empty() {
+            app.build_panel_buttons();
+        }
+        let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(60)));
+        let chart_i = |app: &StockApp| {
+            app.win_mgr
+                .wins
+                .iter()
+                .position(|w| w.kind == WinKind::Chart)
+                .expect("图表窗不见了")
+        };
+        let click = |pos: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        let release = |pos: egui::Pos2| {
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        // 一帧摆好停靠布局，再开一块新图表窗压在最上层（层级：新窗口一定在最上面）。
+        win_frame(&mut app, &ctx, work, vec![]);
+        app.add_chart_window();
+        win_frame(&mut app, &ctx, work, vec![]);
+        let new_id = app.win_mgr.wins.last().unwrap().w.id;
+        assert!(app.win_mgr.wins.last().unwrap().kind == WinKind::Chart, "新增的不是图表窗");
+
+        // 1) 点老图表窗的标题栏（不是两个键）-> 它被抬到最上层。
+        let old = chart_i(&app);
+        let old_id = app.win_mgr.wins[old].w.id;
+        assert!(old_id != new_id);
+        let title = free_band(app.win_mgr.wins[old].rect(), 0, WIN_TITLE_ROWS);
+        let keys = sys_button_rects(title);
+        let handle = egui::pos2((title.min.x + keys[0].min.x) / 2.0, title.center().y);
+        win_frame(&mut app, &ctx, work, click(handle));
+        win_frame(&mut app, &ctx, work, release(handle));
+        assert_eq!(
+            app.win_mgr.wins.last().unwrap().w.id,
+            old_id,
+            "点标题栏没抬到最上层"
+        );
+
+        // 2) 点它的最小化键 -> 压成一条小标题栏堆在窗口区左上角；再点一次还原。
+        let i = app.win_mgr.wins.iter().position(|w| w.w.id == old_id).unwrap();
+        let before = app.win_mgr.wins[i].rect();
+        let min_key = sys_button_rects(free_band(before, 0, WIN_TITLE_ROWS))[0].center();
+        win_frame(&mut app, &ctx, work, click(min_key));
+        win_frame(&mut app, &ctx, work, release(min_key));
+        let i = app.win_mgr.wins.iter().position(|w| w.w.id == old_id).unwrap();
+        assert!(app.win_mgr.wins[i].minimized, "点最小化键没最小化");
+        assert_eq!(app.win_mgr.rect_of(i).min, work.min, "最小化之后没堆到左上角");
+        assert_eq!(app.win_mgr.rect_of(i).size(), egui::vec2(MINI_W, WIN_TITLE_H));
+        // 再点一次还原：这会儿它已经压成一条小标题栏堆在左上角了，
+        // 所以「还原键」得按那一条自己的位置算（[1] = 还原、[2] = 关闭）。
+        // （egui 的命中测试用的是上一帧的热区：刚最小化的那一帧还没画过小标题栏，先空跑一帧。）
+        win_frame(&mut app, &ctx, work, vec![]);
+        let mini = app.win_mgr.rect_of(i);
+        let restore_key = sys_button_rects(free_band(mini, 0, WIN_TITLE_ROWS))[1].center();
+        win_frame(&mut app, &ctx, work, click(restore_key));
+        win_frame(&mut app, &ctx, work, release(restore_key));
+        let i = app.win_mgr.wins.iter().position(|w| w.w.id == old_id).unwrap();
+        assert!(!app.win_mgr.wins[i].minimized, "再点一次没还原");
+        assert_eq!(app.win_mgr.wins[i].rect(), before, "还原之后没回到原位原尺寸");
+
+        // 3) 点关闭键 -> 这扇窗收起来（图表区的套数少一块，布局菜单里还能摆回来）。
+        //    （egui 的命中测试用的是上一帧的热区，刚还原出来的那一帧先空跑一帧，跟真人点两下一样。）
+        win_frame(&mut app, &ctx, work, vec![]);
+        let close_key = sys_button_rects(free_band(before, 0, WIN_TITLE_ROWS))[2].center();
+        let was = app.win_mgr.chart_count();
+        win_frame(&mut app, &ctx, work, click(close_key));
+        win_frame(&mut app, &ctx, work, release(close_key));
+        let i = app.win_mgr.wins.iter().position(|w| w.w.id == old_id).unwrap();
+        assert!(!app.win_mgr.wins[i].w.open, "点关闭键没把窗口关掉");
+        assert_eq!(app.win_mgr.chart_count(), was - 1, "关掉之后图表窗数没减");
+        // 关掉的窗口留下的 Pane 槽能复用：再开一块不会一直新建 Pane。
+        let panes_before = app.panes.len();
+        let closed_pane = app.win_mgr.wins[i].pane;
+        app.add_chart_window();
+        assert_eq!(app.panes.len(), panes_before, "关掉的窗口留下的 Pane 槽没复用");
+        assert_eq!(app.win_mgr.wins.last().unwrap().pane, closed_pane);
+    }
+
+    /// 窗口管理器：新增窗口从窗口区左上角起摆、被占了就往右下让（一条标题栏一步）；
+    /// 最多 8 块；点标题栏把窗口抬到最上层；最小化的压成一条标题栏堆在左上角、还原回原位。
+    #[test]
+    fn window_manager_cascades_minimizes_and_caps() {
+        let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(60)));
+        let mut app = blank_app();
+        app.work_rect = work;
+        app.win_mgr.work = work;
+        if app.panel_buttons.is_empty() {
+            app.build_panel_buttons();
+        }
+        let docked = StockApp::child_areas(work);
+        let chart = |app: &StockApp| {
+            app.win_mgr
+                .wins
+                .iter()
+                .position(|w| w.kind == WinKind::Chart)
+                .unwrap()
+        };
+        let panel = app
+            .win_mgr
+            .wins
+            .iter()
+            .position(|w| w.kind == WinKind::Panel)
+            .unwrap();
+        app.win_mgr.dock(chart(&app), docked[0]);
+        app.win_mgr.dock(panel, docked[1]);
+
+        // 新增图表窗：从窗口区左上角起摆。停靠布局那块图表窗正占着左上角，所以它让一步 -
+        // 往下一条标题栏、再往右一条标题栏；后面每一块再让一步（Windows 那套堆叠）。
+        app.add_chart_window();
+        assert_eq!(app.win_mgr.chart_count(), 2);
+        let a = app.win_mgr.wins.last().unwrap().rect();
+        assert_eq!(a.min, work.min + egui::vec2(CASCADE_STEP, CASCADE_STEP), "堆叠步进不对");
+        assert_eq!(a.size(), egui::vec2(NEW_WIN_W, NEW_WIN_H));
+        app.add_chart_window();
+        let b = app.win_mgr.wins.last().unwrap().rect();
+        assert_eq!(b.min, work.min + egui::vec2(2.0 * CASCADE_STEP, 2.0 * CASCADE_STEP));
+        app.add_chart_window();
+        let c = app.win_mgr.wins.last().unwrap().rect();
+        assert_eq!(c.min, work.min + egui::vec2(3.0 * CASCADE_STEP, 3.0 * CASCADE_STEP));
+        // 每一块都挂着自己的 Pane（互不共用），而且新窗口就在列表末尾 = 最上层。
+        assert_eq!(app.win_mgr.chart_panes().len(), 4);
+        assert_eq!(
+            app.win_mgr.chart_panes().iter().collect::<std::collections::HashSet<_>>().len(),
+            4,
+            "两块图表窗共用了同一个 Pane"
+        );
+
+        // 上限：一共最多 8 块图表窗，第 9 块拒绝。
+        for _ in 0..4 {
+            app.add_chart_window();
+        }
+        assert_eq!(app.win_mgr.chart_count(), MAX_CHART_WINS);
+        app.add_chart_window();
+        assert_eq!(app.win_mgr.chart_count(), MAX_CHART_WINS, "超过上限还往里加");
+        assert!(app.status_msg.contains("最多"), "到上限了没回显一句：{}", app.status_msg);
+
+        // 点标题栏 = 抬到最上层：把最底下那块（列表最前面那块图表窗）抬上来。
+        let bottom = chart(&app);
+        let bottom_id = app.win_mgr.wins[bottom].w.id;
+        app.win_mgr.activate(bottom);
+        assert_eq!(
+            app.win_mgr.wins.last().unwrap().w.id,
+            bottom_id,
+            "激活之后没排到最上层"
+        );
+
+        // 最小化：压成一条标题栏、堆在窗口区左上角，一条挨一条（还没有任务栏，先这么堆着）；
+        // 还原的时候回到原来的位置尺寸。
+        let i = chart(&app);
+        let before = app.win_mgr.wins[i].rect();
+        // 最小化那一条的宽按标题量（和 ui::winmgr 里走的是同一个入口）。
+        let title = app.win_mgr.wins[i].title.clone();
+        let w = WinMgr::mini_width(&mut app, &title);
+        app.win_mgr.minimize(i, w);
+        let mini = app.win_mgr.rect_of(i);
+        assert_eq!(mini.min, work.min, "最小化的窗口没堆在窗口区左上角");
+        assert_eq!(mini.size(), egui::vec2(MINI_W, WIN_TITLE_H), "最小化之后不是一条标题栏");
+        let j = app.win_mgr.wins.iter().position(|w| w.kind == WinKind::Panel).unwrap();
+        let title = app.win_mgr.wins[j].title.clone();
+        let w = WinMgr::mini_width(&mut app, &title);
+        app.win_mgr.minimize(j, w);
+        let second = app.win_mgr.rect_of(j);
+        assert_eq!(
+            second.min.y,
+            work.min.y + CASCADE_STEP,
+            "第二块最小化的窗口没叠在它下面一条"
+        );
+        // 那一条的宽按标题量（不是死的一格数）：标题整串（「控制面板」四个字）+ 左右各 1 格空档
+        // + 右端那两个键都得放得下 - 标题长的窗口缩成条之后照样看得见全名。
+        let need = app.text_width(&title) + 2.0 * TEXT_PAD_X + 2.0 * SYS_BTN_W - LINE_W;
+        assert!(
+            second.width() >= need,
+            "最小化那条太窄：标题 {title:?} 的整串文字放不下"
+        );
+        app.win_mgr.restore(i);
+        assert_eq!(app.win_mgr.wins[i].rect(), before, "还原之后没回到原位原尺寸");
+    }
+
+    /// 控制面板上的「新增图表」和菜单栏里的那一项必须一模一样：都能真开出一块图表窗。
+    /// 这个按钮是在画窗口的那一段里点的，而那时候 app.win_mgr 是空的（管理器被 take 走了，
+    /// 见 app::StockApp::run_win_cmd）- 当场改只会改到临时那副本上、写回时整份丢掉，
+    /// 表现就是「点了没反应」，所以它得先记一笔、等写回之后再执行。
+    #[test]
+    fn panel_add_chart_button_opens_a_window() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        app.bars = data::random_walk::generate(BAR_SEED, BAR_COUNT, BAR_START);
+        app.build_panel_buttons();
+        let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(60)));
+        let click = |pos: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        let release = |pos: egui::Pos2| {
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        win_frame(&mut app, &ctx, work, vec![]);
+
+        // 「新增图表」那个按钮摆在哪儿：和 ui_panel 的排法一致（左边距 1 格、上边距 1 格、
+        // 相邻两个共用中间那条网格线，步进 BTN_STEP）。
+        let k = app
+            .panel_buttons
+            .iter()
+            .position(|b| b.action == PanelAction::AddChart)
+            .expect("控制面板里没有「新增图表」按钮");
+        let panel_i = app
+            .win_mgr
+            .wins
+            .iter()
+            .position(|w| w.kind == WinKind::Panel)
+            .expect("控制面板不见了");
+        let panel = app.win_mgr.wins[panel_i].rect();
+        let body = ManagedWin::body(panel);
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(
+                body.min.x + grid_line(1),
+                body.min.y + grid_line(1) + BTN_STEP * k as f32,
+            ),
+            egui::vec2(app.panel_buttons[k].button.w, BTN_H),
+        );
+
+        let before = app.win_mgr.chart_count();
+        let p = rect.center();
+        // 点一下 = 激活 + 操作（和 Windows 的窗口管理器一样）：控制面板本来压在图表窗后面，
+        // 这一下既把它抬到最前面，也真按在「新增图表」那个按钮上 - 不用先点一下激活再点一下按钮。
+        win_frame(&mut app, &ctx, work, click(p));
+        // 激活是把它挪到列表末尾（最上层），所以下标要现查。
+        let panel_front = app
+            .win_mgr
+            .wins
+            .iter()
+            .position(|w| w.kind == WinKind::Panel)
+            .expect("控制面板不见了");
+        assert_eq!(
+            app.win_mgr.live_index(),
+            Some(panel_front),
+            "点一下没把控制面板抬到最前面"
+        );
+        win_frame(&mut app, &ctx, work, release(p));
+        assert_eq!(
+            app.win_mgr.chart_count(),
+            before + 1,
+            "点一下没做到「既激活又按下按钮」（控制面板上的「新增图表」）"
+        );
+    }
+
+    /// 主窗口菜单栏的弹出项：项与项之间有一条 1px 横线（和按钮那种共用线一个样子）；
+    /// 带子菜单的项点一下 / 压一下就往下开一级，三级子菜单点到底能真点中叶子项。
+    #[test]
+    fn menu_popup_has_dividers_and_three_level_submenus() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        let layout = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
+        let areas = split_areas(layout);
+        // 直接开「文件」这一项（第一项），指针先停在它的菜单项上。
+        let bar_rects = {
+            let mut widths = Vec::new();
+            for t in TOP_TABS.iter() {
+                widths.push(tab_width(&mut app, t.title));
+            }
+            menu_item_rects(areas[1], &widths, MenuAlign::Left)
+        };
+        let tab = bar_rects[0];
+        app.menu.open = Some(0);
+        let grid = render_window_at(&mut app, Some(tab.center()));
+        // 弹出面板：第一项和第二项之间那条横线落在两行共用的网格线上，且是 1px 的线色。
+        let panel = MenuPanel::bounded(tab, MENU_PANEL_W, TOP_TABS[0].items.len(), layout);
+        let seam = panel.row(0).max.y as usize - LINE_W as usize;
+        let col = (panel.rect.min.x + 3.0) as usize;
+        assert_eq!(grid[seam][col], Some(C_LINE), "弹出项之间没有 1px 横线");
+        assert_ne!(grid[seam - 1][col], Some(C_LINE), "那条横线不止 1px");
+
+        // 子菜单：压住「最近打开」-> 开第二级；再压「更多」-> 开第三级；点到底层的叶子项。
+        // 一个 ctx 一帧一帧地喂（和真窗口一样：指针先移过去，再按下、再松手）。
+        // （上面那次 dump 换过一个临时 ctx：字形图集挂在 ctx 上，这儿得把引擎重新挂回本测试的 ctx。）
+        app.text_engine = HardText::new(&ctx);
+        let recent = TOP_TABS[0]
+            .items
+            .iter()
+            .position(|n| n.label == "最近打开")
+            .expect("「最近打开」不见了");
+        // 一帧就画「骨架 + 标题栏 + 菜单栏 + 下拉面板」这几样（菜单逻辑都在这儿）；
+        // 点中的叶子项按 app.rs 里那套口径回显到状态栏。
+        let frame = |app: &mut StockApp, events: Vec<egui::Event>| {
+            let mut raw = egui::RawInput::default();
+            raw.screen_rect = Some(layout);
+            raw.events = events;
+            let mut out = ctx.run_ui(raw, |ui| {
+                let painter = ui.painter().clone();
+                app.paint_skeleton(&painter, layout, areas);
+                app.ui_titlebar(ui, areas[0], Some(layout));
+                let state = app.menu.clone();
+                let (open_anchor, state) = ui_menu_bar(app, ui, areas[1], &TOP_TABS, state);
+                app.menu = state;
+                if let Some((idx, anchor)) = open_anchor {
+                    let items = TOP_TABS[idx].items;
+                    let mut state = app.menu.clone();
+                    if let Some(label) =
+                        ui_menu_popup(app, ui, anchor, items, &mut state, layout, &[areas[1]])
+                    {
+                        app.status_msg = format!("你点击了：{label}");
+                    }
+                    app.menu = state;
+                }
+            });
+            // 字形贴图的增量得消化掉（不然 TexturesDelta 掉的时候会 debug_assert）。
+            absorb_textures(&mut out.textures_delta);
+        };
+        let hover = |pos: egui::Pos2| vec![egui::Event::PointerMoved(pos)];
+        let click = |pos: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        let release = |pos: egui::Pos2| {
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        // 指针压到「最近打开」上：第二级面板开出来，挂在那一行右边（左沿和父行共用那条线）。
+        let row2 = panel.row(recent).center();
+        frame(&mut app, hover(row2));
+        let sub2 = MenuPanel::flyout(panel.row(recent), MENU_PANEL_W, 3, layout);
+        assert_eq!(app.menu.path, vec![recent], "压住「最近打开」没开第二级子菜单");
+        assert_eq!(sub2.rect.min.x, panel.row(recent).max.x - LINE_W, "子菜单没挂在父行右边");
+        let more = TOP_TABS[0].items[recent].children
+            .iter()
+            .position(|n| n.label == "更多")
+            .expect("「更多」不见了");
+        // 再压到「更多」上：第三级开出来。
+        let row3 = sub2.row(more).center();
+        frame(&mut app, hover(row3));
+        assert_eq!(
+            app.menu.path,
+            vec![recent, more],
+            "压住「更多」没开第三级子菜单"
+        );
+        // 点第三级里的叶子项：状态栏回显它的名字，整块菜单收起来。
+        let sub3 = MenuPanel::flyout(sub2.row(more), MENU_PANEL_W, 2, layout);
+        let leaf = sub3.row(0).center();
+        frame(&mut app, click(leaf));
+        frame(&mut app, release(leaf));
+        assert_eq!(app.status_msg, "你点击了：三级示例 上证50", "三级子菜单没点到底");
+        assert_eq!(app.menu.open, None, "点中叶子项之后菜单没收起来");
+    }
+
+    /// 子窗口的最大化键（夹在最小化和关闭中间）：点一下铺满窗口区，
+    /// 最大化中拖标题栏 / 拉边都不许动它，再点一下还原回原来的位置尺寸。
+    #[test]
+    fn window_maximize_key_fills_the_work_area_and_restores() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        if app.panel_buttons.is_empty() {
+            app.build_panel_buttons();
+        }
+        let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(60)));
+        let press = |pos: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        let drag = |pos: egui::Pos2| vec![egui::Event::PointerMoved(pos)];
+        let release = |pos: egui::Pos2| {
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        win_frame(&mut app, &ctx, work, vec![]);
+        let i = app.win_mgr.live_index().expect("窗口区里一块窗口都没有");
+        let before = app.win_mgr.wins[i].rect();
+        assert_ne!(before, work, "这块窗口本来不该是铺满的");
+
+        // 点最大化键（三个键里中间那个）-> 铺满整块窗口区。
+        let key = sys_button_rects(free_band(before, 0, WIN_TITLE_ROWS))[1].center();
+        win_frame(&mut app, &ctx, work, press(key));
+        win_frame(&mut app, &ctx, work, release(key));
+        assert!(app.win_mgr.wins[i].w.maximized, "点最大化键没最大化");
+        assert_eq!(app.win_mgr.wins[i].rect(), work, "最大化之后没铺满窗口区");
+
+        // 最大化中：拖标题栏 / 拉边都不许改位置尺寸。
+        let handle = free_band(work, 0, WIN_TITLE_ROWS).center();
+        win_frame(&mut app, &ctx, work, press(handle));
+        win_frame(&mut app, &ctx, work, drag(handle + egui::vec2(40.0, 30.0)));
+        assert_eq!(app.win_mgr.wins[i].rect(), work, "最大化中还能拖窗口");
+        win_frame(&mut app, &ctx, work, release(handle));
+        let edge = egui::pos2(work.max.x - 1.0, work.center().y);
+        win_frame(&mut app, &ctx, work, press(edge));
+        win_frame(&mut app, &ctx, work, drag(egui::pos2(work.center().x, work.center().y)));
+        assert_eq!(app.win_mgr.wins[i].rect(), work, "最大化中还能拉边缩放");
+        win_frame(&mut app, &ctx, work, release(edge));
+
+        // 再点一下（这时键在窗口区右上角）-> 还原回原来的位置尺寸。
+        let key = sys_button_rects(free_band(work, 0, WIN_TITLE_ROWS))[1].center();
+        win_frame(&mut app, &ctx, work, press(key));
+        win_frame(&mut app, &ctx, work, release(key));
+        assert!(!app.win_mgr.wins[i].w.maximized, "再点一下没还原");
+        assert_eq!(app.win_mgr.wins[i].rect(), before, "还原之后没回到原位原尺寸");
+    }
+
+    /// 图表栏那两个下拉（叠加 / 切换）点开之后要一直开着：不许「闪一下就收回」。
+    /// 指针从按钮移进面板、在面板里待着，都不该把它收了。
+    #[test]
+    fn pane_menus_stay_open_after_the_click() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        app.bars = data::random_walk::generate(BAR_SEED, BAR_COUNT, BAR_START);
+        if app.panel_buttons.is_empty() {
+            app.build_panel_buttons();
+        }
+        let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(60)));
+        let press = |pos: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        let release = |pos: egui::Pos2| {
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        win_frame(&mut app, &ctx, work, vec![]);
+
+        // 图表栏（K 线图）那一排按钮：[叠加, 切换, 代码]。
+        let i = app.win_mgr.live_index().expect("窗口区里一块窗口都没有");
+        let pane = app.win_mgr.wins[i].pane;
+        let body = ManagedWin::body(app.win_mgr.rect_of(i));
+        let (title, _, _, _) = chart_rows(body, app.panes[pane].indicator.layout());
+        let tabs = ["叠加", "切换", "代码"];
+        let widths: Vec<f32> = tabs.iter().map(|t| tab_width(&mut app, t)).collect();
+        let buttons = StockApp::pane_button_rects(title, &widths);
+
+        // 点「切换」：指标面板开出来，之后几帧（指针还压在那个按钮上）不许自己收回。
+        let p = buttons[1].center();
+        win_frame(&mut app, &ctx, work, press(p));
+        win_frame(&mut app, &ctx, work, release(p));
+        assert_eq!(app.pane_menu, Some(pane), "点「切换」没开出指标面板");
+        for _ in 0..3 {
+            win_frame(&mut app, &ctx, work, vec![]);
+        }
+        assert_eq!(app.pane_menu, Some(pane), "指标面板闪一下就自己收回了");
+        // 指针移进面板里也照样开着。
+        let panel = app
+            .pane_menu_rect(indicator::builtin_names().len(), work.max.y)
+            .expect("面板没算出来");
+        win_frame(
+            &mut app,
+            &ctx,
+            work,
+            vec![egui::Event::PointerMoved(panel.center())],
+        );
+        assert_eq!(app.pane_menu, Some(pane), "指针移进面板就把面板收了");
+
+        // 「叠加」同理：点开之后也要一直开着。
+        let ov = buttons[0].center();
+        win_frame(&mut app, &ctx, work, press(ov));
+        win_frame(&mut app, &ctx, work, release(ov));
+        assert_eq!(app.overlay_menu, Some(pane), "点「叠加」没开出叠加菜单");
+        for _ in 0..3 {
+            win_frame(&mut app, &ctx, work, vec![]);
+        }
+        assert_eq!(app.overlay_menu, Some(pane), "叠加菜单闪一下就自己收回了");
     }
 
     /// 肉眼看浮动面板：颜色面板 + 源码窗各落一张 BMP - 用来核对面板里的文字有没有越出
@@ -3005,9 +4215,68 @@ mod tests {
         let mut app2 = blank_app();
         app2.text_engine = HardText::new(&ctx);
         app2.bars = data::random_walk::generate(BAR_SEED, BAR_COUNT, BAR_START);
-        app2.open_source(PANE_MACD);
+        app2.open_source_window(PANE_MACD);
         let grid2 = render_overlays(&mut app2);
         write_bmp("target/ui_source.bmp", &grid2);
+    }
+
+    /// 肉眼看这一轮的界面改动：菜单下拉（没有分割线、按最长那一项加宽）、UI 工程测试叠层
+    ///（灰色点状网格线 + 右下角读数牌）、暗色下的滚动条与注释绿、最小化那条标题栏上的还原图标、
+    /// 系统键的符号（正方形 / 还原双框）。各落一张 BMP，人工检查用，不做断言。
+    #[test]
+    #[ignore]
+    fn dump_ui_tweaks_for_visual_check() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+
+        // 1) 「文件」整条链都开出来：最宽的那一项在第三级（三级示例 上证50），面板得跟着加宽。
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        app.bars = data::random_walk::generate(BAR_SEED, BAR_COUNT, BAR_START);
+        app.fps = 60.0;
+        app.menu.open = Some(0);
+        app.menu.path = vec![2, 2];
+        let grid = render_overlays(&mut app);
+        write_bmp("target/ui_menu_wide.bmp", &grid);
+
+        // 2) 暗色 + 源码编辑窗：滚动条的槽 / 把手分得开、注释绿和浅色主题同色（#009900）。
+        set_theme(Theme::DARK);
+        app.menu.open = None;
+        app.menu.path.clear();
+        app.open_source_window(PANE_MACD);
+        app.source.editor.scroll = 20;
+        let grid = render_overlays(&mut app);
+        write_bmp("target/ui_dark_editor.bmp", &grid);
+        set_theme(Theme::CLASSIC);
+
+        // 3) 一块子窗口最小化（那条标题栏上的键应当是「还原」双框）、一块最大化（标题栏那个键
+        //    也应当是「还原」双框）、另一块正常（键是正方形）。
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        app.bars = data::random_walk::generate(BAR_SEED, BAR_COUNT, BAR_START);
+        app.open_source_window(PANE_CANDLE);
+        render_overlays(&mut app);
+        let work = app.work_rect;
+        let find = |app: &StockApp, kind: WinKind| {
+            app.win_mgr
+                .wins
+                .iter()
+                .position(|w| w.kind == kind)
+                .expect("窗口不见了")
+        };
+        let chart_i = find(&app, WinKind::Chart);
+        let src_i = find(&app, WinKind::Source);
+        let mini_w = WinMgr::mini_width(&mut app, WIN_CHART_TITLE);
+        app.win_mgr.minimize(chart_i, mini_w);
+        app.win_mgr.wins[src_i].w.toggle_maximize(work);
+        let grid = render_overlays(&mut app);
+        write_bmp("target/ui_window_keys.bmp", &grid);
+
+        // 4) UI 工程测试叠层：灰色点状网格线 + 每块元素的边界框 + 右下角的读数牌（4 行文字）。
+        app.show_grid = true;
+        let grid = render_overlays_at(&mut app, Some(egui::pos2(300.5, 400.5)));
+        write_bmp("target/ui_grid_test.bmp", &grid);
     }
 
     /// 肉眼看新指标（美国线 / KDJ / RSI）和「叠加」菜单：各落一张 BMP。
@@ -3051,24 +4320,56 @@ mod tests {
         set_theme(Theme::CLASSIC);
     }
 
-    /// 整窗 + 浮动层（颜色面板 / 源码窗）：只给 dump 用，正式那套流水线在 app.rs 的 ui() 里。
+    /// 整窗（含窗口区里的子窗口 / 浮动面板）：走 app.rs 的 draw_frame - 和运行时那条流水线
+    /// 一模一样（运行时只在它前后各加一段窗口句柄 / 帧统计的杂事）。
     fn render_overlays(app: &mut StockApp) -> Vec<Vec<Option<egui::Color32>>> {
+        render_overlays_at(app, None)
+    }
+
+    /// 同上，但塞一个鼠标位置进去（检查跟着鼠标走的东西：鼠标底下那一格 / 十字光标 / 悬停高亮）。
+    fn render_overlays_at(
+        app: &mut StockApp,
+        pointer: Option<egui::Pos2>,
+    ) -> Vec<Vec<Option<egui::Color32>>> {
+        let events = match pointer {
+            Some(p) => vec![egui::Event::PointerMoved(p)],
+            None => Vec::new(),
+        };
+        render_overlays_events(app, events)
+    }
+
+    /// 同上，但事件由调用方给（拖拽这类要按键 + 移动一串事件才演得出来）。
+    fn render_overlays_events(
+        app: &mut StockApp,
+        events: Vec<egui::Event>,
+    ) -> Vec<Vec<Option<egui::Color32>>> {
         let ctx = egui::Context::default();
         configure_tessellation(&ctx);
         ctx.set_pixels_per_point(1.0);
+        render_events_in(&ctx, app, events)
+    }
+
+    /// 上面几个的公共实现：ctx 由调用方给 - 多帧连演一段拖拽必须共用同一个 ctx
+    ///（egui 的命中判定 / 拖动状态都存在 ctx 里，一帧一个 ctx 的话按下的那一半就丢了）。
+    fn render_events_in(
+        ctx: &egui::Context,
+        app: &mut StockApp,
+        events: Vec<egui::Event>,
+    ) -> Vec<Vec<Option<egui::Color32>>> {
         // 字形图集挂在 ctx 上：这份 dump 用自己的 ctx，引擎就得重建在这个 ctx 上，
         // 否则光栅器收不到字形贴图，dump 出来的文字又变回一个个实心方块。
-        if let Some(engine) = HardText::new(&ctx) {
+        if let Some(engine) = HardText::new(ctx) {
             app.text_engine = Some(engine);
+        }
+        if app.panel_buttons.is_empty() {
+            app.build_panel_buttons();
         }
         let layout = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
         let mut raw = egui::RawInput::default();
         raw.screen_rect = Some(layout);
+        raw.events = events;
         let mut out = ctx.run_ui(raw, |ui| {
-            let painter = ui.painter().clone();
-            let areas = split_areas(layout);
-            app.paint_skeleton(&painter, layout, areas);
-            app.ui_source_window(ui, layout);
+            app.draw_frame(ui);
         });
         let shapes = std::mem::take(&mut out.shapes);
         absorb_textures(&mut out.textures_delta);
@@ -3115,9 +4416,24 @@ mod tests {
             }
             if let Some(t) = time {
                 assert_eq!((t.min.y - area.min.y) % 9.0, 0.0, "时间带上沿不在网格线上");
-                assert_eq!(t.max.y, area.max.y, "时间带没铺到图表底边");
+                // 时间带下面那条是图表窗自己的状态栏（2 格）；状态栏的下沿才是图表底边。
+                assert_eq!(
+                    t.max.y,
+                    chart_bar(*area).min.y + LINE_W,
+                    "时间带和状态栏没共用那条线"
+                );
+                assert_eq!(
+                    chart_bar(*area).max.y,
+                    area.max.y,
+                    "图表窗状态栏没铺到图表底边"
+                );
             } else {
-                assert_eq!(main.max.y, area.max.y, "绘图区没铺到图表底边");
+                assert_eq!(chart_bar(*area).min.y, main.max.y, "绘图区和状态栏没共用那条线");
+                assert_eq!(
+                    chart_bar(*area).max.y,
+                    area.max.y,
+                    "图表窗状态栏没铺到图表底边"
+                );
             }
         }
         // 顶上两处区域分隔线只有 1px：这一行是线、上一行还是干净底色（标题栏 / 菜单栏的灰底）。
@@ -3162,11 +4478,43 @@ mod tests {
                     assert_eq!(c % 17, 0, "{name}.png 里有没吸到 #aabbcc 形的颜色：{c:#04x}");
                 }
             }
-            assert!(
-                *set.get(kind) == IconImage::from_art(&kind.art()),
-                "{name}.png 读回来和内置点阵对不上"
+            assert!(!set.get(kind).is_blank(), "{name}.png 读回来是空的");
+        }
+        // 编解码本身要严丝合缝：内置点阵写盘再读回来（默认图标就是这么生成的）。
+        // 注意 assets/icons 下那几张是「可编辑的图标源」，用户会自己改（改完界面就跟着变），
+        // 所以这里不拿盘上的图和内置点阵比对 - 那两件事是分开的。
+        //
+        // 铁律：内置点阵的墨是「跟随皮肤」，落盘写白墨；PNG 读进来的颜色是写死的 - 白就是白，
+        // 绝不能再被当成「跟随皮肤」而变黑。所以两边不再逐像素相等，改成两条更硬的检查。
+        let dir = std::env::temp_dir().join("roundtable_icon_roundtrip");
+        let _ = std::fs::create_dir_all(&dir);
+        for kind in IconKind::ALL {
+            let art = IconImage::from_art(&kind.art());
+            let path = dir.join(format!("{}.png", kind.file_stem()));
+            crate::ui::icon::write_icon_png(&path, &art).expect("写图标 PNG");
+            let back = crate::ui::icon::decode_png(&std::fs::read(&path).expect("读回图标 PNG"))
+                .expect("解图标 PNG");
+            for y in 0..16 {
+                for x in 0..16 {
+                    let src = art.resolved(x, y);
+                    let got = back.resolved(x, y);
+                    assert_eq!(src.is_some(), got.is_some(), "{} 墨水位置走样", kind.file_stem());
+                    if src.is_some() {
+                        assert_eq!(got, Some(egui::Color32::WHITE), "白墨读回来变味了");
+                    }
+                }
+            }
+            // 写 -> 读 -> 再写：导出的字节必须一模一样，编解码本身严丝合缝。
+            let path2 = dir.join(format!("{}_again.png", kind.file_stem()));
+            crate::ui::icon::write_icon_png(&path2, &back).expect("再写图标 PNG");
+            assert_eq!(
+                std::fs::read(&path).expect("读第一次写的 PNG"),
+                std::fs::read(&path2).expect("读第二次写的 PNG"),
+                "{} 写盘再读回来走样了",
+                kind.file_stem()
             );
         }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 铁律（不许出现 2px 线叠加）：十字光标在时间轴上方那个索引牌，下边框必须正好压在绘图区
@@ -3176,13 +4524,10 @@ mod tests {
     fn crosshair_time_label_never_stacks_on_the_timeline_border() {
         let mut app = blank_app();
         app.bars = data::random_walk::generate(BAR_SEED, 64, BAR_START);
-        // 几何和 render_window_at 里那套完全一样（整窗 -> 功能区 -> 左栏三块）。
+        // 几何和 render_window_at 里那套完全一样（整窗 -> 功能区 -> 四块独立子窗口）。
         let layout = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
         let areas = split_areas(layout);
-        app.clamp_split(areas[2]);
-        let [left, _sp, _panel] = StockApp::work_columns(areas[2], app.split_x);
-        app.clamp_left_heights(left);
-        let [kline, _h1, _c2, _h2, _c3] = StockApp::left_rows(left, app.kline_h, app.vol_h);
+        let kline = ManagedWin::body(StockApp::child_areas(areas[2])[0]);
         let (_, _, main, time) = chart_rows(kline, app.panes[PANE_CANDLE].indicator.layout());
         let time = time.expect("蜡烛图有时间带");
         let plot = frame_rects(main).0;
@@ -3371,6 +4716,153 @@ mod tests {
         assert_eq!(buf.to_text(), "", "DeleteSurrounding 该把那个中文字删掉");
     }
 
+    /// 语法着色：一行源码切出来的片段拼起来还是原行，而且「代码 / 字符串 / 注释」分得对。
+    #[test]
+    fn editor_code_runs_split_strings_and_comments() {
+        use crate::ui::editor::{SynKind, code_runs, syn_color};
+        let line = "let x = \"a\"; // 注释 \"b\"";
+        let runs = code_runs(line);
+        let kinds: Vec<(&str, SynKind)> = runs.iter().map(|(s, k)| (s.as_str(), *k)).collect();
+        // 关键字 let 是蓝色；变量名 x / 标点 / 空白都是默认文字色。
+        assert_eq!(
+            kinds,
+            vec![
+                ("let", SynKind::Keyword),
+                (" x = ", SynKind::Plain),
+                ("\"a\"", SynKind::String),
+                ("; ", SynKind::Plain),
+                ("// 注释 \"b\"", SynKind::Comment),
+            ]
+        );
+        let joined: String = runs.iter().map(|(s, _)| s.as_str()).collect();
+        assert_eq!(joined, line, "着色片段拼起来必须和原行一字不差");
+        // 四类颜色都来自配色表：普通代码走默认文字色，关键字 / 注释 / 字符串各走配色表。
+        assert_eq!(syn_color(SynKind::Plain), theme().text);
+        assert_eq!(syn_color(SynKind::Keyword), theme().syn_code);
+        assert_eq!(syn_color(SynKind::Comment), theme().syn_comment);
+        assert_eq!(syn_color(SynKind::String), theme().syn_string);
+        assert_eq!(Theme::CLASSIC.syn_code, egui::Color32::from_rgb(0x00, 0x00, 0xFF));
+        assert_eq!(Theme::CLASSIC.syn_comment, egui::Color32::from_rgb(0x00, 0x99, 0x00));
+        assert_eq!(Theme::CLASSIC.syn_string, egui::Color32::from_rgb(0xFF, 0x00, 0xFF));
+        assert_ne!(Theme::CLASSIC.syn_code, Theme::CLASSIC.syn_comment);
+        assert_ne!(Theme::CLASSIC.syn_code, Theme::CLASSIC.syn_string);
+    }
+    /// 输入法（中文）：编辑器窗口里 Preedit 只挂在光标上、Commit 才上屏；而且打字期间绝不许
+    /// 再 request_focus - 它内部会 interrupt_ime()，egui-winit 会因此每帧 set_ime_allowed(false)
+    /// /(true) 重置输入法（表相就是「输入法弹出来了，拼音却永远上不了屏」）。报给系统的
+    /// IMEOutput.should_interrupt_composition 必须一直是 false。
+    #[test]
+    fn editor_ime_frames_never_interrupt_the_composition() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        if app.text_engine.is_none() {
+            return;
+        }
+        app.bars = data::random_walk::generate(BAR_SEED, 64, BAR_START);
+        app.open_source_window(PANE_CANDLE);
+        let layout = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
+        let inside = egui::pos2(SRC_DEFAULT_X + 40.0, SRC_DEFAULT_Y + SRC_BODY_TOP + 9.0);
+
+        let frame = |app: &mut StockApp, events: Vec<egui::Event>| {
+            let mut raw = egui::RawInput::default();
+            raw.screen_rect = Some(layout);
+            raw.events = events;
+            let mut out = ctx.run_ui(raw, |ui| {
+                app.draw_frame(ui);
+            });
+            absorb_textures(&mut out.textures_delta);
+            let _ = ctx.tessellate(std::mem::take(&mut out.shapes), 1.0);
+            out.platform_output
+        };
+        let press = |pos: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        let release = |pos: egui::Pos2| {
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![egui::Event::PointerMoved(inside)]);
+        frame(&mut app, press(inside));
+        frame(&mut app, release(inside));
+
+        // 候选串那一帧：报给系统的候选窗位置必须在，而且不许说「打断组合」。
+        let out = frame(
+            &mut app,
+            vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: "zhong".to_owned(),
+                active_range_chars: None,
+            })],
+        );
+        let ime = out.ime.expect("有焦点 + 光标可见时必须报输入法候选窗位置");
+        assert!(!ime.should_interrupt_composition, "候选串那一帧把输入法组合重置了");
+        // 上屏那一帧：commit 的中文进缓冲区，同样不许打断组合。
+        let out = frame(
+            &mut app,
+            vec![egui::Event::Ime(egui::ImeEvent::Commit("中".to_owned()))],
+        );
+        let ime = out.ime.expect("上屏那一帧也得报输入法候选窗位置");
+        assert!(!ime.should_interrupt_composition, "上屏那一帧把输入法组合重置了");
+        assert!(
+            app.source.editor.buf.to_text().contains('中'),
+            "上屏的中文没进编辑器缓冲区"
+        );
+    }
+
+    /// 铁律（不许 2px 线叠加）：最下面那块图表（MACD，没有时间带）的十字光标索引牌，下边框
+    /// 必须压在「图表区 / 窗口状态栏」那条共用边框线上，不能落到状态栏里那一行去 - 否则状态栏
+    /// 顶上就会多出一条 1px 横线，和边框线叠成 2px。
+    #[test]
+    fn crosshair_time_label_never_leaks_into_the_status_bar() {
+        let mut app = blank_app();
+        app.bars = data::random_walk::generate(BAR_SEED, 64, BAR_START);
+        let layout = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
+        let areas = split_areas(layout);
+        let macd = ManagedWin::body(StockApp::child_areas(areas[2])[0]);
+        let l = app.panes[PANE_MACD].indicator.layout();
+        assert_eq!(l.time_rows, 0, "这块图表的用例前提是「没有时间带」");
+        let (_, _, main, time) = chart_rows(macd, l);
+        assert!(time.is_none(), "MACD 不该有时间带");
+        let plot = frame_rects(main).0;
+        // 图表区和状态栏共用那条线 = 工作表最底下那一行（两段在那 1px 上重叠）。
+        let boundary = areas[3].min.y as usize;
+        assert_eq!(boundary, macd.max.y as usize - 1, "共用那条线的位置不对");
+
+        let grid = render_window_at(&mut app, Some(plot.center()));
+        app.crosshair.expect("鼠标在图里应该有十字光标");
+        let (x0, x1) = (plot.min.x as usize, plot.max.x as usize);
+        let longest = |row: usize| -> usize {
+            let (mut best, mut cur) = (0usize, 0usize);
+            for x in x0..x1 {
+                cur = if grid[row][x] == Some(C_LINE) { cur + 1 } else { 0 };
+                best = best.max(cur);
+            }
+            best
+        };
+        let label_top = boundary - (PITCH * CROSS_LABEL_ROWS as f32) as usize;
+        assert!(longest(label_top) >= 19, "图表下沿没看到索引牌的上边框");
+        assert!(
+            longest(boundary + 1) <= 1,
+            "索引牌的下边框漏进状态栏了（连排 {}px）",
+            longest(boundary + 1)
+        );
+    }
+
     /// 装载必须无损：磁盘上那份源码（行尾归一成 \n）和缓冲区里的一字不差。
     /// 保存就是拿缓冲区写回去的，装载时少一个字符就是悄悄改用户的文件 -
     /// 中文标点（、。「」（）之类）和全角符号全都得原样留着。
@@ -3456,7 +4948,7 @@ mod tests {
 
         let mut app = blank_app();
         assert_eq!(EDITOR_TABS.len(), 3, "编辑器菜单：文件 / 编辑 / 查看");
-        assert_eq!(EDITOR_BUTTONS.len(), 9, "按钮栏应该是 9 个图标按钮");
+        assert_eq!(EDITOR_BUTTONS.len(), 8, "按钮栏应该是 8 个图标按钮");
         for tab in EDITOR_TABS {
             let title = tab.title;
             let w = tab_width(&mut app, title);
@@ -3531,7 +5023,8 @@ mod tests {
     #[test]
     fn editor_sections_are_split_by_single_grid_lines() {
         let mut app = blank_app();
-        app.open_source(PANE_MACD);
+        app.bars = data::random_walk::generate(BAR_SEED, 64, BAR_START);
+        app.open_source_window(PANE_MACD);
         let grid = render_overlays(&mut app);
         let panel = egui::Rect::from_min_size(
             egui::pos2(SRC_DEFAULT_X, SRC_DEFAULT_Y),
@@ -3633,7 +5126,7 @@ mod tests {
             return;
         }
         app.bars = data::random_walk::generate(BAR_SEED, 64, BAR_START);
-        app.open_source(PANE_CANDLE);
+        app.open_source_window(PANE_CANDLE);
         let layout = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
         let id = egui::Id::new(EDITOR_ID);
         let inside = egui::pos2(SRC_DEFAULT_X + 40.0, SRC_DEFAULT_Y + SRC_BODY_TOP + 9.0);
@@ -3644,7 +5137,7 @@ mod tests {
             raw.screen_rect = Some(layout);
             raw.events = events;
             let mut out = ctx.run_ui(raw, |ui| {
-                app.ui_source_window(ui, layout);
+                app.draw_frame(ui);
             });
             absorb_textures(&mut out.textures_delta);
             let _ = ctx.tessellate(std::mem::take(&mut out.shapes), 1.0);
@@ -3705,7 +5198,7 @@ mod tests {
     #[test]
     fn switching_indicator_reloads_the_open_editor() {
         let mut app = blank_app();
-        app.open_source(PANE_MACD);
+        app.open_source_window(PANE_MACD);
         assert!(app.source.editor.buf.to_text().contains("struct Macd"));
         app.set_pane_indicator(PANE_MACD, 4);
         assert!(
@@ -3725,14 +5218,14 @@ mod tests {
     #[test]
     fn reopening_the_same_pane_keeps_the_edits() {
         let mut app = blank_app();
-        app.open_source(PANE_CANDLE);
+        app.open_source_window(PANE_CANDLE);
         app.source.editor.buf.insert_text("// 我改过", &char_allowed);
-        app.open_source(PANE_CANDLE);
+        app.open_source_window(PANE_CANDLE);
         assert!(
             app.source.editor.buf.to_text().contains("我改过"),
             "同一个 Pane 再点一次「代码」把改动冲掉了"
         );
-        app.open_source(PANE_MACD);
+        app.open_source_window(PANE_MACD);
         assert!(
             app.source.editor.buf.to_text().contains("struct Macd"),
             "换了 Pane 该重新灌一份源码"
@@ -3751,5 +5244,390 @@ mod tests {
         assert_eq!(mixed, "中文中文", "90px 放得下 4 个中文（72px）");
         let narrow = fit_line("中文中文", 60.0);
         assert_eq!(narrow, "中文中", "60px 只放得下 3 个中文");
+    }
+
+    // ---------------------------------------------------------------------
+    //  这一轮改的那几处（下拉菜单 / UI 工程测试 / 滚动条 / 系统键符号）
+    // ---------------------------------------------------------------------
+
+    /// 把一块 19x19 的系统键单独画出来，返回符号（C_TEXT 那些像素）的外接矩形。
+    /// 只画按钮本体 + 符号，不画整窗 - 量的就是符号在格子里怎么摆。
+    fn key_symbol_ink(
+        ctx: &egui::Context,
+        kind: SysButton,
+        maximized: bool,
+        keys: WinKeys,
+    ) -> (Vec<Vec<Option<egui::Color32>>>, egui::Rect) {
+        let canvas = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(140.0, 60.0));
+        let btn = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(SYS_BTN_W, SYS_BTN_H));
+        // 最小化那条小标题栏的那一份：整条标题栏画出来，量的是它右边那排键里左边那个（还原）。
+        let title = egui::Rect::from_min_size(btn.min, egui::vec2(MINI_W, WIN_TITLE_H));
+        let scan = match keys {
+            WinKeys::MinAndClose => sys_button_rects(title)[1],
+            _ => btn,
+        };
+        let mut raw = egui::RawInput::default();
+        raw.screen_rect = Some(canvas);
+        let mut out = ctx.run_ui(raw, |ui| {
+            let painter = ui.painter().clone();
+            match keys {
+                WinKeys::MinAndClose => {
+                    let mut app = blank_app();
+                    paint_title_bar(
+                        &mut app,
+                        ui,
+                        &painter,
+                        title,
+                        7,
+                        "图表",
+                        WinKeys::MinAndClose,
+                        false,
+                    );
+                }
+                _ => {
+                    painter.rect_filled(btn, egui::CornerRadius::ZERO, C_BTN_FACE);
+                    kind.paint_symbol_max(&painter, btn, C_TEXT, C_BTN_FACE, maximized);
+                }
+            }
+        });
+        absorb_textures(&mut out.textures_delta);
+        let grid = rasterize_into(
+            &ctx.tessellate(std::mem::take(&mut out.shapes), 1.0),
+            140,
+            60,
+        );
+        // 符号那一块：键的格子里凡是「文字色」的像素都算墨迹（符号一律走 theme().text）。
+        let mut ink = egui::Rect::NOTHING;
+        for y in scan.min.y as usize..scan.max.y as usize {
+            for x in scan.min.x as usize..scan.max.x as usize {
+                if grid[y][x] == Some(C_TEXT) {
+                    let p = egui::pos2(x as f32, y as f32);
+                    if ink == egui::Rect::NOTHING {
+                        ink = egui::Rect::from_min_max(p, p + egui::vec2(1.0, 1.0));
+                    } else {
+                        ink.min = ink.min.min(p);
+                        ink.max = ink.max.max(p + egui::vec2(1.0, 1.0));
+                    }
+                }
+            }
+        }
+        (grid, ink)
+    }
+
+    /// 系统键的符号：最大化 = 一个正方形（宽高相等、以内容正中为中心）；还原 = 两个正方形，
+    /// 一个往右上偏 2px、一个往左下偏 2px，合起来也以内容正中为中心；最小化之后那条标题栏上的
+    /// 最小化键画的是还原那个双框（图标必须是这个键点下去会干的事）。
+    #[test]
+    fn sys_key_symbols_are_squares_centered_in_the_key() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        set_theme(Theme::CLASSIC);
+        let btn = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(SYS_BTN_W, SYS_BTN_H));
+        let center = btn.min + egui::vec2(CELL_CENTER, CELL_CENTER);
+
+        // 最大化（没最大化）：9x9 正方形，正正中。
+        let (_, max) = key_symbol_ink(&ctx, SysButton::Maximize, false, WinKeys::MinMaxClose);
+        assert_eq!(max.width(), max.height(), "最大化那个符号不是正方形");
+        assert_eq!(max.width(), 9.0, "最大化那个正方形边长不对");
+        assert_eq!(max.center(), btn.center(), "最大化那个正方形没居中");
+
+        // 还原：11x11（两个 7x7 各偏 2px），同样正正中。
+        let (grid, restore) = key_symbol_ink(&ctx, SysButton::Maximize, true, WinKeys::MinMaxClose);
+        assert_eq!(restore.width(), 11.0, "还原那个双框的宽不对");
+        assert_eq!(restore.height(), 11.0, "还原那个双框的高不对");
+        assert_eq!(restore.center(), btn.center(), "还原那个双框没居中");
+        // 后框往右上偏、前框往左下偏：后框的左上角在前框右上方，前框的右下角在它左下方。
+        let (cx, cy) = (center.x as usize, center.y as usize);
+        assert_eq!(grid[cy - 5][cx - 1], Some(C_TEXT), "后框（右上）的左上角不在");
+        assert_eq!(grid[cy + 5][cx + 1], Some(C_TEXT), "前框（左下）的右下角不在");
+        // 前框盖住后框叠进来的那一角：那儿的像素是键底色，不是线。
+        assert_eq!(grid[cy + 1][cx - 1], Some(C_BTN_FACE), "前框没盖住后框");
+
+        // 最小化之后那条标题栏上的最小化键：画的是还原那个双框（不是一条横线）。
+        let (_, strip) = key_symbol_ink(&ctx, SysButton::Minimize, false, WinKeys::MinAndClose);
+        assert_eq!(strip.width(), 11.0, "最小化那条上的键画的不是还原双框");
+        assert_eq!(strip.height(), 11.0, "最小化那条上的键画的不是还原双框");
+    }
+
+    /// 滚动条：全工程的槽和把手必须分得开，把手比槽亮一档（暗色皮肤下两个色一样是看不见的）。
+    #[test]
+    fn scrollbar_thumb_is_brighter_than_its_track() {
+        for t in [Theme::CLASSIC, Theme::DARK] {
+            let (thumb, track) = (t.scroll_thumb, t.scroll_track);
+            assert_ne!(thumb, track, "{} 皮肤的滚动条和槽同色", t.name());
+            let lum = |c: egui::Color32| c.r() as i32 + c.g() as i32 + c.b() as i32;
+            assert!(lum(thumb) > lum(track), "{} 皮肤的滚动条比槽还暗", t.name());
+        }
+    }
+
+    /// 下拉面板的宽：默认 16 格；哪一行的字比它宽就按那一行加宽 - 文字连上箭头都摆得下，
+    /// 绝不许溢出边框（用户点名的那条）。整棵菜单树逐层核对。
+    #[test]
+    fn menu_panels_widen_for_long_items_and_never_clip_text() {
+        let mut app = blank_app();
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        app.text_engine = HardText::new(&ctx);
+        if app.text_engine.is_none() {
+            return;
+        }
+        // 逐层量：这一层最宽的那一行必须摆得下（文字左边 1 格空档 + 文字 + 右边 1 格空档，
+        // 带子菜单的行右边还要留 1 格给箭头）。整棵菜单树（含三级子菜单）逐层走一遍。
+        let mut levels: Vec<&[MenuNode]> = TOP_TABS.iter().map(|t| t.items).collect();
+        for tab in TOP_TABS.iter() {
+            for node in tab.items {
+                if !node.children.is_empty() {
+                    levels.push(node.children);
+                }
+                for child in node.children {
+                    if !child.children.is_empty() {
+                        levels.push(child.children);
+                    }
+                }
+            }
+        }
+        let mut widened = 0;
+        for level in levels {
+            let w = menu_panel_width(&mut app, level);
+            assert_eq!(w % PITCH, LINE_W, "面板宽不是 cells(n)");
+            assert!(w >= MENU_PANEL_W, "面板比默认宽还窄");
+            if w > MENU_PANEL_W {
+                widened += 1;
+            }
+            for node in level {
+                let arrow = if node.has_children() { PITCH } else { 0.0 };
+                let need = app.text_width(node.label) + 2.0 * TEXT_PAD_X + arrow;
+                assert!(
+                    w >= need,
+                    "「{}」摆不下：面板 {w} / 需要 {need}",
+                    node.label
+                );
+            }
+        }
+        assert!(widened > 0, "一条加宽的面板都没有 - 这条测试没测到东西");
+    }
+
+    /// UI 工程测试叠层（右栏那个按钮打开的调试视图）：
+    ///   1) 网格线是灰色点状线（不是原来那条洋红实线）；
+    ///   2) 右下角那块读数牌里每一行文字占 2 个内容格（一行一个格子的话字会被压扁）。
+    #[test]
+    fn grid_test_overlay_is_dotted_and_its_readout_uses_text_rows() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        set_theme(Theme::CLASSIC);
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        app.bars = data::random_walk::generate(BAR_SEED, BAR_COUNT, BAR_START);
+        app.show_grid = true;
+        let grid = render_overlays_at(&mut app, Some(egui::pos2(300.5, 400.5)));
+
+        // 1) 横网格线：点状 - 偶数像素是网格线的色、紧挨着那一列不是（实线的话一整排都同色）。
+        let y = grid_line(3) as usize;
+        let x = grid_line(4) as usize;
+        let dotted = grid[y][x] == Some(C_GRID_TEST) && grid[y][x + 1] != Some(C_GRID_TEST);
+        assert!(dotted, "UI 工程测试的网格线不是点状线");
+        assert_ne!(C_GRID_TEST, egui::Color32::from_rgb(0xFF, 0x00, 0xFF), "网格线还是洋红");
+
+        // 2) 读数牌：4 行文字 = 8 个内容格高，整块贴在窗口区右下角。
+        let work = app.work_rect;
+        let top = (work.max.y - cells(4 * TEXT_ROWS)) as usize;
+        let x = (work.max.x - 40.0) as usize;
+        assert_eq!(grid[top][x], Some(C_CTRL_BORDER), "读数牌上边框不对");
+        assert_eq!(grid[work.max.y as usize - 1][x], Some(C_CTRL_BORDER), "读数牌下边框不对");
+        // 行与行之间的分隔线落在「每行 2 格」的网格线上。
+        for i in 1..4 {
+            let line = top + grid_line(i * TEXT_ROWS) as usize;
+            assert_eq!(line % 9, 0, "读数牌第 {i} 行分隔线没落在网格线上");
+            assert_eq!(grid[line][x], Some(C_LINE), "读数牌少了一条行分隔线");
+        }
+    }
+
+    /// 下拉菜单项与项之间不再画那条横线（用户点名要去掉的）：条目那一行的底色一直铺到
+    /// 左右两边，只有 hover 高亮和边框，中间没有一道满宽的线。
+    #[test]
+    fn menu_items_have_no_separator_lines() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        set_theme(Theme::CLASSIC);
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        app.bars = data::random_walk::generate(BAR_SEED, 64, BAR_START);
+        app.menu.open = Some(0);
+        let grid = render_overlays(&mut app);
+        // 「文件」那一块面板：按菜单栏第一项的矩形算出来（和菜单栏自己那套摆法同源）。
+        let areas = split_areas(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(WINDOW_W, WINDOW_H),
+        ));
+        let anchor = menu_item_rects(
+            areas[1],
+            &[tab_width(&mut app, TOP_TABS[0].title)],
+            MenuAlign::Left,
+        )[0];
+        let layout = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
+        let panel = MenuPanel::bounded(anchor, MENU_PANEL_W, TOP_TABS[0].items.len(), layout);
+        for j in 0..panel.rows.saturating_sub(1) {
+            let y = (panel.row(j).max.y - LINE_W) as usize;
+            for x in [panel.rect.min.x + 2.0, panel.rect.max.x - 3.0] {
+                assert_ne!(grid[y][x as usize], Some(C_LINE), "第 {j} 项下面还有一条分隔线");
+            }
+        }
+    }
+
+    /// 图表栏（图表窗的菜单栏）上的下拉面板：鼠标一移出面板和那条栏就收回 - 和主窗口的
+    /// 菜单栏一个规矩；指针还在栏上 / 面板里的时候一直开着。
+    #[test]
+    fn pane_menus_collapse_when_the_pointer_leaves_the_bar() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        let mut app = blank_app();
+        app.text_engine = HardText::new(&ctx);
+        app.bars = data::random_walk::generate(BAR_SEED, 64, BAR_START);
+        // 先空跑一帧：窗口摆好、work_rect 填上。
+        render_events_in(&ctx, &mut app, vec![]);
+
+        let i = app.win_mgr.live_index().expect("窗口区里一块窗口都没有");
+        let pane = app.win_mgr.wins[i].pane;
+        let body = ManagedWin::body(app.win_mgr.rect_of(i));
+        let (title, _, plot, _) = chart_rows(body, app.panes[pane].indicator.layout());
+        let widths: Vec<f32> = StockApp::PANE_TABS_KLINE
+            .iter()
+            .map(|t| tab_width(&mut app, t))
+            .collect();
+        let switch = StockApp::pane_button_rects(title, &widths)[1];
+
+        // 面板开着、指针压在「切换」按钮上（面板是上一帧点开的）：留着。
+        app.pane_menu = Some(pane);
+        render_events_in(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(switch.center())],
+        );
+        assert_eq!(app.pane_menu, Some(pane), "指针还在图表栏上就把面板收了");
+
+        // 指针移到绘图区（离那条栏和面板都远）：这一帧就收回。
+        render_events_in(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(plot.center())],
+        );
+        assert_eq!(app.pane_menu, None, "鼠标移出图表栏之后面板没收");
+    }
+
+    /// 代码编辑器的滚动条：除了滚轮，还能按住把手拖 - 拖到哪儿滚到哪儿（把手跟手）。
+    #[test]
+    fn editor_scrollbar_can_be_dragged() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        let mut app = blank_app();
+        app.bars = data::random_walk::generate(BAR_SEED, 64, BAR_START);
+        app.open_source_window(PANE_MACD);
+        // 头几帧：把窗口摆好，也让 egui 登记上编辑器的滚动条热区（命中判定用的是上一帧的登记）。
+        render_events_in(&ctx, &mut app, vec![]);
+        let i = app
+            .win_mgr
+            .wins
+            .iter()
+            .position(|w| w.kind == WinKind::Source)
+            .expect("源码编辑窗没建出来");
+        let win = app.win_mgr.wins[i].w.rect();
+        assert_eq!(app.source.editor.scroll, 0, "刚打开该从第 1 行开始");
+
+        // 滚动条那一条：正文区上沿起、到窗口下边为止（见 ui::editor 的 ui_body）。
+        let body_top = win.min.y + SRC_BODY_TOP;
+        let track_h = (win.max.y - LINE_W) - body_top;
+        let rows = app.source.editor.rows as f32;
+        let total = app.source.editor.buf.line_count() as f32;
+        let handle_h = (track_h * rows / total)
+            .round()
+            .clamp(SRC_BAR_W, track_h.max(SRC_BAR_W));
+        let travel = (win.max.y - body_top - handle_h).max(1.0);
+        let bar_x = win.max.x - 5.0;
+        let grab = egui::pos2(bar_x, body_top + 2.0);
+        let press = |pos: egui::Pos2| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        let drag = |pos: egui::Pos2| vec![egui::Event::PointerMoved(pos)];
+        let release = |pos: egui::Pos2| {
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+
+        render_events_in(&ctx, &mut app, press(grab));
+        // 拖到行程 60% 的位置：滚动位置应当按同一个比例跟过来。
+        let target = egui::pos2(bar_x, body_top + handle_h / 2.0 + travel * 0.6);
+        render_events_in(&ctx, &mut app, drag(target));
+        let max_scroll = app.source.editor.max_scroll();
+        let want = (0.6 * max_scroll as f32).round() as usize;
+        assert!(
+            app.source.editor.scroll.abs_diff(want) <= 1,
+            "拖到 60% 没滚到 60%：{} / 期望 {want}",
+            app.source.editor.scroll
+        );
+        // 拖滚动条不该顺手在正文里画出选区 / 挪光标。
+        assert_eq!(app.source.editor.buf.cursor, (0, 0), "拖滚动条把光标挪走了");
+        render_events_in(&ctx, &mut app, release(target));
+
+        // 再拖回最上面：滚回第 1 行。这会儿把手已经滑到 60% 那儿了，得抓着它现在的位置。
+        let t = app.source.editor.scroll as f32 / max_scroll as f32;
+        let h = egui::pos2(bar_x, (body_top + travel * t).round() + handle_h / 2.0);
+        let top = egui::pos2(bar_x, body_top + handle_h / 2.0);
+        render_events_in(&ctx, &mut app, press(h));
+        render_events_in(&ctx, &mut app, drag(top));
+        assert_eq!(app.source.editor.scroll, 0, "拖回最上面没回到第 1 行");
+        render_events_in(&ctx, &mut app, release(top));
+    }
+
+    /// 源码编辑窗是窗口区里的一块子窗口（和图表窗 / 按钮面板同级）：能和别的子窗口一样
+    /// 最小化 - 压成一条标题栏堆在窗口区左上角，再还原回原位原尺寸。
+    #[test]
+    fn source_window_minimizes_like_any_other_child_window() {
+        let ctx = egui::Context::default();
+        configure_tessellation(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        let mut app = blank_app();
+        app.bars = data::random_walk::generate(BAR_SEED, 64, BAR_START);
+        app.open_source_window(PANE_MACD);
+        render_events_in(&ctx, &mut app, vec![]);
+        let i = app
+            .win_mgr
+            .wins
+            .iter()
+            .position(|w| w.kind == WinKind::Source)
+            .expect("源码编辑窗没建出来");
+        let work = app.work_rect;
+        let full = app.win_mgr.wins[i].w.rect();
+        assert!(work.contains(full.center()), "源码编辑窗没摆在窗口区里");
+        assert!(app.win_mgr.source_open(), "源码编辑窗没开着");
+
+        let title = app.source_title();
+        let mini_w = WinMgr::mini_width(&mut app, &title);
+        app.win_mgr.minimize(i, mini_w);
+        let strip = app.win_mgr.rect_of(i);
+        assert_eq!(strip.min, work.min, "最小化那条没堆到窗口区左上角");
+        assert_eq!(strip.width(), mini_w, "最小化那条的宽不对");
+        assert_eq!(strip.height(), WIN_TITLE_H, "最小化那条只有一条标题栏那么高");
+
+        app.win_mgr.restore(i);
+        assert_eq!(app.win_mgr.wins[i].w.rect(), full, "还原没回到原位原尺寸");
+        assert_eq!(app.source_title(), title, "源码编辑窗的标题变了");
     }
 }
