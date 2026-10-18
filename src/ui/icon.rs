@@ -1,61 +1,36 @@
-// ===========================================================================
-//  模块 ui::icon：像素图标（16x16，从 PNG 读进来再自绘）
-// ===========================================================================
-//  图标不再写死在代码里，而是一张一张的 16x16 PNG，放在 assets/icons/<名字>.png：
-//    - 换图标不用改代码：拿画图工具改盘上那张 PNG，重启就生效；
-//    - #ff00ff（洋红）是透明色，别的像素一律按它自己的颜色画；
-//    - 颜色统一吸到最近的 0x11 倍数（也就是 #aabbcc 形，和 theme 的色值规矩同一条）；
-//    - 白色墨迹（#ffffff）画的时候换成 theme().text，所以同一份图标在经典 / 暗色两套
-//      皮肤下都看得清；要固定颜色就在 PNG 里直接用别的色。
-//  「读图片」只读到「哪个像素有墨、什么颜色」为止，画出去还是一格一格 1px 的方块
-//  （整数像素、零抗锯齿）- 和全工程其它自绘元素一个口径。
-//  assets/icons 里那张不在 / 读不动 / 画出来是空的，就退回代码里那份内置点阵
-//  （IconKind::art，纯 ASCII 的 '#' 与 '.'），并把内置那份写回盘上，目录永远是齐的。
-//
-//  图标一律画在 16x16（2 格内容）的方框里、只用整数像素：没有抗锯齿，也不会有半像素落点。
-//  宽度常量和间隔常量也放在这儿：图标区 + 间隔凑成整数格，后面跟文字时才落在内容格起点上。
 use crate::grid::*;
-use crate::theme::*;
 use eframe::egui;
 
-
-/// 图标方框的边长：2 个内容格 = 16px。
 pub(crate) const ICON_W: f32 = 2.0 * GRID;
 
-/// 图标区高度：和宽度一样是 2 个内容格 = 16px（方框）。
 pub(crate) const ICON_H: f32 = ICON_W;
 
-/// 图标点阵的行列数。
 pub(crate) const ICON_PX: usize = 16;
 
-/// 图标和后面那串文字之间的间隔：图标 + 间隔凑成 3 格（27px），文字才会落在内容格起点上。
 pub(crate) const ICON_GAP: f32 = 3.0 * PITCH - ICON_W;
 
-/// 手绘图标表：都画在 16x16 的方框里，纯像素、无抗锯齿。
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IconKind {
-    /// 叉（关闭 / 删除 / 重置）。
     Cross,
-    /// 新建（一张纸 + 一个加号）。
+
     New,
-    /// 保存（软盘）。
+
     Save,
-    /// 编译（齿轮）。
+
     Compile,
-    /// 剪切（剪刀）。
+
     Cut,
-    /// 复制（两张纸）。
+
     Copy,
-    /// 粘贴（剪贴板）。
+
     Paste,
-    /// 撤销（向左的回转箭头）。
+
     Undo,
-    /// 查找（放大镜）。
+
     Find,
 }
 
 impl IconKind {
-    /// 全部图标：下标就是 index()，装图标 / 遍历都走它。
     pub(crate) const ALL: [IconKind; Self::COUNT] = [
         IconKind::Cross,
         IconKind::New,
@@ -68,10 +43,8 @@ impl IconKind {
         IconKind::Find,
     ];
 
-    /// 图标个数：数组长度和地方都取它，省得写死两处。
     pub(crate) const COUNT: usize = 9;
 
-    /// 在 ALL 里的下标（装进 IconSet 用的就是它）。
     pub(crate) fn index(self) -> usize {
         match self {
             IconKind::Cross => 0,
@@ -86,7 +59,6 @@ impl IconKind {
         }
     }
 
-    /// 对应的图片文件名（assets/icons/<名字>.png）。
     pub(crate) fn file_stem(self) -> &'static str {
         match self {
             IconKind::Cross => "cross",
@@ -100,175 +72,7 @@ impl IconKind {
             IconKind::Find => "find",
         }
     }
-    /// 图标长什么样：16 行、每行 16 个字符（'#' = 有墨、'.' = 空）。
-    pub(crate) fn art(self) -> [&'static str; ICON_PX] {
-        match self {
-            IconKind::Cross => [
-                "................",
-                "................",
-                "..##........##..",
-                "..###......###..",
-                "...###....###...",
-                "....###..###....",
-                ".....######.....",
-                "......####......",
-                "......####......",
-                ".....######.....",
-                "....###..###....",
-                "...###....###...",
-                "..###......###..",
-                "..##........##..",
-                "................",
-                "................",
-            ],
-            IconKind::New => [
-                "................",
-                "...##########...",
-                "...#........#...",
-                "...#...##...#...",
-                "...#...##...#...",
-                "...#..####..#...",
-                "...#..####..#...",
-                "...#...##...#...",
-                "...#...##...#...",
-                "...#........#...",
-                "...#........#...",
-                "...##########...",
-                "................",
-                "................",
-                "................",
-                "................",
-            ],
-            IconKind::Save => [
-                "................",
-                ".##############.",
-                ".#............#.",
-                ".#.####..####.#.",
-                ".#.####..####.#.",
-                ".#.####..####.#.",
-                ".#............#.",
-                ".#............#.",
-                ".#.##########.#.",
-                ".#.#........#.#.",
-                ".#.#........#.#.",
-                ".#.#........#.#.",
-                ".#.##########.#.",
-                ".#............#.",
-                ".##############.",
-                "................",
-            ],
-            IconKind::Compile => [
-                "................",
-                "....#......#....",
-                "....#.####.#....",
-                "....##....##....",
-                "...###....###...",
-                ".####..##..####.",
-                ".##..######..##.",
-                ".##..######..##.",
-                ".####..##..####.",
-                "...###....###...",
-                "....##....##....",
-                "....#.####.#....",
-                "....#......#....",
-                "................",
-                "................",
-                "................",
-            ],
-            IconKind::Cut => [
-                "................",
-                "..##........##..",
-                ".#..#......#..#.",
-                ".#..#......#..#.",
-                ".#..#......#..#.",
-                "..##.......###..",
-                "...##.....##....",
-                "....##...##.....",
-                ".....##.##......",
-                "......###.......",
-                "......###.......",
-                ".....##.##......",
-                "....##...##.....",
-                "...##.....##....",
-                "..##.......###..",
-                "................",
-            ],
-            IconKind::Copy => [
-                "................",
-                "................",
-                "..######..######",
-                "..#....#..#....#",
-                "..#....#..#....#",
-                "..#....#..#....#",
-                "..#....#..#....#",
-                "..#....#..#....#",
-                "..#....#..#....#",
-                "..#....#..#....#",
-                "..######..######",
-                "................",
-                "................",
-                "................",
-                "................",
-                "................",
-            ],
-            IconKind::Paste => [
-                "................",
-                ".....######.....",
-                ".....######.....",
-                "...##########...",
-                "...#........#...",
-                "...#........#...",
-                "...#........#...",
-                "...#........#...",
-                "...#........#...",
-                "...#........#...",
-                "...#........#...",
-                "...##########...",
-                "................",
-                "................",
-                "................",
-                "................",
-            ],
-            IconKind::Undo => [
-                "................",
-                "................",
-                "...###..........",
-                "..#####.........",
-                ".#######........",
-                "########........",
-                ".#######........",
-                "..#####.........",
-                "...###..######..",
-                "........#.....#.",
-                "........#.....#.",
-                "........#.....#.",
-                ".........#...#..",
-                "..........###...",
-                "................",
-                "................",
-            ],
-            IconKind::Find => [
-                "................",
-                "................",
-                ".....####.......",
-                "....#....#......",
-                "...##....##.....",
-                "...#......#.....",
-                "...##....##.....",
-                "....#....#......",
-                ".....####.##....",
-                "..........###...",
-                "...........###..",
-                "............###.",
-                ".............###",
-                "..............##",
-                "................",
-                "................",
-            ],
-        }
-    }
 
-    /// 图标的名字（状态栏回显 / 以后做悬浮提示用）。
     pub(crate) fn label(self) -> &'static str {
         match self {
             IconKind::Cross => "删除",
@@ -283,38 +87,19 @@ impl IconKind {
         }
     }
 }
-// ===========================================================================
-//  二、图标图片：16x16 点阵，从 PNG 读进来再自绘
-// ===========================================================================
 
-/// PNG 里的透明色：#ff00ff（洋红）。整张图里凡是这个颜色的像素都算没墨。
 pub(crate) const ICON_TRANSPARENT_RGB: (u8, u8, u8) = (0xFF, 0x00, 0xFF);
 
-/// 一个墨点是什么颜色。两种来源必须分得开，不然后面会出错：
-///   - 代码里的内置点阵（'#'）是「跟随皮肤文字色」，画的时候才去取当前皮肤的文字色；
-///   - PNG 里读进来的是写死的颜色，白色就是白色 - 绝不能再被当成「跟随皮肤」而变黑。
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Ink {
-    /// 跟随当前皮肤的文字色（只有内置点阵用）。
-    Theme,
-    /// 写死的颜色（PNG 里读进来的）。
-    Rgb(egui::Color32),
-}
-
-/// 一张 16x16 的图标：每个像素要么透明（None）、要么一个墨点。
-/// 颜色一律是 #aabbcc 形（每个通道都是 0x11 的倍数）。
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct IconImage {
-    px: [[Option<Ink>; ICON_PX]; ICON_PX],
+    px: [[Option<egui::Color32>; ICON_PX]; ICON_PX],
 }
 
-/// 把一个颜色通道吸到最近的 0x11 倍数（#aabbcc 规矩）：0x00 / 0x11 / ... / 0xFF 共十七档。
 pub(crate) fn snap_aabbcc_channel(v: u8) -> u8 {
     let step = ((v as u32 + 8) / 17).min(15);
     (step * 17) as u8
 }
 
-/// 一个颜色整体吸到 #aabbcc 形。
 fn snap_aabbcc(c: egui::Color32) -> egui::Color32 {
     egui::Color32::from_rgb(
         snap_aabbcc_channel(c.r()),
@@ -324,28 +109,12 @@ fn snap_aabbcc(c: egui::Color32) -> egui::Color32 {
 }
 
 impl IconImage {
-    /// 一张全透明的图标（数组初始化用）。
     pub(crate) fn blank() -> Self {
         Self {
             px: [[None; ICON_PX]; ICON_PX],
         }
     }
 
-    /// 由内置点阵建图：'#' 是墨迹（画的时候跟随主题文字色），别的字符都是没墨。
-    pub(crate) fn from_art(art: &[&str; ICON_PX]) -> Self {
-        let mut px = [[None; ICON_PX]; ICON_PX];
-        for (row, line) in art.iter().enumerate() {
-            for (col, ch) in line.chars().take(ICON_PX).enumerate() {
-                if ch == '#' {
-                    px[row][col] = Some(Ink::Theme);
-                }
-            }
-        }
-        Self { px }
-    }
-
-    /// 由一串 8 位像素建图：先按「#ff00ff / 半透明 = 透明」筛，剩下的颜色吸到 #aabbcc 形，
-    /// 再最近邻缩放到 16x16（源图不是 16x16 也收 - 缩着放进来，不挑食）。
     fn from_pixels(w: usize, h: usize, data: &[u8], channels: usize) -> Self {
         let mut px = [[None; ICON_PX]; ICON_PX];
         if w == 0 || h == 0 || channels == 0 {
@@ -361,81 +130,54 @@ impl IconImage {
                 _ => (get(0), get(1), get(2), get(3)),
             }
         };
-        for y in 0..ICON_PX {
-            for x in 0..ICON_PX {
+        for (y, row) in px.iter_mut().enumerate() {
+            for (x, cell) in row.iter_mut().enumerate() {
                 let sx = (x * w / ICON_PX).min(w - 1);
                 let sy = (y * h / ICON_PX).min(h - 1);
                 let (r, g, b, a) = at(sx, sy);
                 if a < 128 || (r, g, b) == ICON_TRANSPARENT_RGB {
                     continue;
                 }
-                px[y][x] = Some(Ink::Rgb(snap_aabbcc(egui::Color32::from_rgb(r, g, b))));
+                *cell = Some(snap_aabbcc(egui::Color32::from_rgb(r, g, b)));
             }
         }
         Self { px }
     }
 
-    /// 整张图一个墨点都没有（读到的图不能用时的判据）。
     pub(crate) fn is_blank(&self) -> bool {
         self.px.iter().all(|row| row.iter().all(|p| p.is_none()))
     }
 
-    /// 某个像素最终画出来是什么颜色（None = 透明）：内置点阵的墨迹取当前皮肤的文字色，
-    /// PNG 里读进来的颜色原样用它自己（白就是白）。
-    pub(crate) fn resolved(&self, x: usize, y: usize) -> Option<egui::Color32> {
-        match self.px[y][x]? {
-            Ink::Theme => Some(theme().text),
-            Ink::Rgb(c) => Some(c),
-        }
-    }
-
-    /// 画在给定矩形里：落点吸到整数像素，同一行相邻的同色像素并成一条 1px 长条
-    /// （比逐像素填方块省图形，画出来一模一样）。颜色一律过 resolved（见上）。
     pub(crate) fn paint(&self, painter: &egui::Painter, rect: egui::Rect) {
         let x0 = rect.min.x.round();
         let y0 = rect.min.y.round();
+        let mut mesh = egui::Mesh::default();
         for row in 0..ICON_PX {
             let mut col = 0usize;
             while col < ICON_PX {
-                let Some(color) = self.resolved(col, row) else {
+                let Some(px) = self.px[row][col] else {
                     col += 1;
                     continue;
                 };
                 let start = col;
-                while col < ICON_PX && self.resolved(col, row) == Some(color) {
+                while col < ICON_PX && self.px[row][col] == Some(px) {
                     col += 1;
                 }
-                painter.rect_filled(
+                mesh.add_colored_rect(
                     egui::Rect::from_min_size(
                         egui::pos2(x0 + start as f32, y0 + row as f32),
                         egui::vec2((col - start) as f32, LINE_W),
                     ),
-                    egui::CornerRadius::ZERO,
-                    color,
+                    px,
                 );
             }
         }
-    }
-
-    /// 导出成 PNG 用的 RGBA 像素：透明处写 #ff00ff（约定的透明色）；内置点阵的「跟随皮肤」
-    /// 墨迹写成白色（默认图标落盘就是白墨），PNG 读进来的颜色原样写回。
-    fn to_rgba(&self) -> Vec<u8> {
-        let (tr, tg, tb) = ICON_TRANSPARENT_RGB;
-        let mut out = Vec::with_capacity(ICON_PX * ICON_PX * 4);
-        for row in &self.px {
-            for cell in row {
-                match cell {
-                    Some(Ink::Theme) => out.extend_from_slice(&[0xFF, 0xFF, 0xFF, 255]),
-                    Some(Ink::Rgb(c)) => out.extend_from_slice(&[c.r(), c.g(), c.b(), 255]),
-                    None => out.extend_from_slice(&[tr, tg, tb, 255]),
-                }
-            }
+        if !mesh.is_empty() {
+            painter.add(egui::Shape::mesh(mesh));
         }
-        out
     }
 }
 
-/// 全部图标：开机装一次。先读 assets/icons/<名字>.png；读不到就把内置点阵写一份出去再用。
 #[derive(Clone)]
 pub(crate) struct IconSet {
     icons: [IconImage; IconKind::COUNT],
@@ -443,56 +185,386 @@ pub(crate) struct IconSet {
 
 impl Default for IconSet {
     fn default() -> Self {
-        Self::builtin()
+        Self::blank()
     }
 }
 
 impl IconSet {
-    /// 只用代码里那份内置点阵，不碰磁盘（测试用；读盘失败也退到这儿）。
-    pub(crate) fn builtin() -> Self {
-        let mut icons = [IconImage::blank(); IconKind::COUNT];
-        for kind in IconKind::ALL {
-            icons[kind.index()] = IconImage::from_art(&kind.art());
+    pub(crate) fn blank() -> Self {
+        Self {
+            icons: [IconImage::blank(); IconKind::COUNT],
         }
-        Self { icons }
     }
 
-    /// 开机装图标：assets/icons 里那张读得到就用它；读不到 / 是空的就按内置点阵写一份出来再用。
     pub(crate) fn load_or_create() -> Self {
-        let dir = icons_dir();
-        let _ = std::fs::create_dir_all(&dir);
+        let dir = crate::assets::icons_dir();
         let mut icons = [IconImage::blank(); IconKind::COUNT];
         for kind in IconKind::ALL {
             let path = dir.join(format!("{}.png", kind.file_stem()));
-            let from_disk = std::fs::read(&path).ok().and_then(|bytes| decode_png(&bytes));
+            let from_disk = std::fs::read(&path)
+                .ok()
+                .and_then(|bytes| decode_png(&bytes));
             let img = match from_disk {
                 Some(img) if !img.is_blank() => img,
-                _ => {
-                    let fallback = IconImage::from_art(&kind.art());
-                    let _ = write_icon_png(&path, &fallback);
-                    fallback
-                }
+                _ => IconImage::blank(),
             };
             icons[kind.index()] = img;
         }
         Self { icons }
     }
 
-    /// 取一张图标（下标就是 IconKind::index()）。
     pub(crate) fn get(&self, kind: IconKind) -> &IconImage {
         &self.icons[kind.index()]
     }
 }
 
-/// 图标目录：仓库根下的 assets/icons（和源码一个口径，看 CARGO_MANIFEST_DIR）。
-pub(crate) fn icons_dir() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("assets")
-        .join("icons")
+pub(crate) use crate::assets::APP_ICON_BYTES;
+
+#[cfg(test)]
+pub(crate) use crate::assets::{icons_dir, logo_dir};
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const APP_ICON_SIZES: [u32; 9] = [16, 32, 48, 64, 80, 96, 128, 256, 512];
+
+pub(crate) fn app_icon() -> egui::IconData {
+    std::fs::read(crate::assets::logo_dir().join("app.ico"))
+        .ok()
+        .and_then(|bytes| app_icon_from_ico(&bytes))
+        .or_else(|| app_icon_from_ico(APP_ICON_BYTES))
+        .unwrap_or_else(|| egui::IconData {
+            rgba: [0xCC, 0x00, 0x00, 0xFF].repeat(32 * 32),
+            width: 32,
+            height: 32,
+        })
 }
 
-/// 解一张 PNG：只认 8 位灰度 / 真彩（含 alpha）；调色板 / 低位深 / 16 位交给 png 自己展开。
-/// 读不动就 None（调用方退回内置点阵）。
+pub(crate) fn app_icon_from_ico(bytes: &[u8]) -> Option<egui::IconData> {
+    if bytes.len() < 6 || u16::from_le_bytes([bytes[0], bytes[1]]) != 0 {
+        return None;
+    }
+    let count = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
+    let mut best: Option<(u32, usize, usize)> = None;
+    for i in 0..count {
+        let at = 6 + i * 16;
+        let entry = bytes.get(at..at + 16)?;
+        let width = if entry[0] == 0 { 256 } else { entry[0] as u32 };
+        let height = if entry[1] == 0 { 256 } else { entry[1] as u32 };
+        let len = u32::from_le_bytes(entry[8..12].try_into().ok()?) as usize;
+        let off = u32::from_le_bytes(entry[12..16].try_into().ok()?) as usize;
+        let image = bytes.get(off..off.checked_add(len)?)?;
+        let (image_width, image_height) = if image.starts_with(b"\x89PNG\r\n\x1a\n") {
+            (width, height)
+        } else {
+            ico_dib_size(image)?
+        };
+        if image_width == image_height {
+            let area = image_width * image_height;
+            if best.is_none_or(|(a, _, _)| area > a) {
+                best = Some((area, off, len));
+            }
+        }
+    }
+    let (_, off, len) = best?;
+    let data = &bytes[off..off + len];
+    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        decode_png_rgba(data)
+    } else {
+        decode_ico_dib_rgba(data)
+    }
+}
+
+fn ico_dib_header(bytes: &[u8]) -> Option<(usize, u32, u32)> {
+    if bytes.len() < 40 {
+        return None;
+    }
+    let u16_at = |at: usize| -> Option<u16> {
+        Some(u16::from_le_bytes(bytes.get(at..at + 2)?.try_into().ok()?))
+    };
+    let u32_at = |at: usize| -> Option<u32> {
+        Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
+    };
+    let header = u32_at(0)? as usize;
+    let width = u32_at(4)?;
+    let doubled_height = u32_at(8)?;
+    let planes = u16_at(12)?;
+    let bpp = u16_at(14)?;
+    let compression = u32_at(16)?;
+    if header < 40
+        || width == 0
+        || doubled_height == 0
+        || doubled_height % 2 != 0
+        || planes != 1
+        || bpp != 32
+        || compression != 0
+    {
+        return None;
+    }
+    Some((header, width, doubled_height / 2))
+}
+
+pub(crate) fn ico_dib_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    let (_, width, height) = ico_dib_header(bytes)?;
+    Some((width, height))
+}
+
+pub(crate) fn decode_ico_dib_rgba(bytes: &[u8]) -> Option<egui::IconData> {
+    let (header, width, height) = ico_dib_header(bytes)?;
+    let row_bytes = usize::try_from(width).ok()?.checked_mul(4)?;
+    let pixels = row_bytes.checked_mul(height as usize)?;
+    let end = header.checked_add(pixels)?;
+    if end > bytes.len() {
+        return None;
+    }
+    let mut rgba = Vec::with_capacity(pixels);
+    for y in 0..height as usize {
+        let src_row = header + (height as usize - 1 - y) * row_bytes;
+        for px in bytes[src_row..src_row + row_bytes].chunks_exact(4) {
+            rgba.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+        }
+    }
+    Some(egui::IconData {
+        rgba,
+        width,
+        height,
+    })
+}
+
+pub(crate) fn decode_png_rgba(bytes: &[u8]) -> Option<egui::IconData> {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    decoder.set_transformations(png::Transformations::normalize_to_color8());
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buf).ok()?;
+    if info.bit_depth != png::BitDepth::Eight {
+        return None;
+    }
+    let mut rgba = Vec::with_capacity((info.width * info.height * 4) as usize);
+    match info.color_type {
+        png::ColorType::Rgba => rgba.extend_from_slice(&buf[..info.buffer_size()]),
+        png::ColorType::Rgb => {
+            for px in buf[..info.buffer_size()].chunks_exact(3) {
+                rgba.extend_from_slice(&[px[0], px[1], px[2], 0xFF]);
+            }
+        }
+        png::ColorType::GrayscaleAlpha => {
+            for px in buf[..info.buffer_size()].chunks_exact(2) {
+                rgba.extend_from_slice(&[px[0], px[0], px[0], px[1]]);
+            }
+        }
+        png::ColorType::Grayscale => {
+            for px in &buf[..info.buffer_size()] {
+                rgba.extend_from_slice(&[*px, *px, *px, 0xFF]);
+            }
+        }
+        png::ColorType::Indexed => return None,
+    }
+    Some(egui::IconData {
+        rgba,
+        width: info.width,
+        height: info.height,
+    })
+}
+
+pub(crate) const CURSOR_HOTSPOT: Option<[u16; 2]> = Some([0, 0]);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum CursorKind {
+    Normal,
+
+    Left,
+
+    Right,
+
+    Move,
+
+    ResizeH,
+
+    ResizeV,
+
+    ResizeNwSe,
+
+    ResizeNeSw,
+
+    Slider,
+
+    Wheel,
+
+    Text,
+}
+
+impl CursorKind {
+    pub(crate) const ALL: [CursorKind; Self::COUNT] = [
+        CursorKind::Normal,
+        CursorKind::Left,
+        CursorKind::Right,
+        CursorKind::Move,
+        CursorKind::ResizeH,
+        CursorKind::ResizeV,
+        CursorKind::ResizeNwSe,
+        CursorKind::ResizeNeSw,
+        CursorKind::Slider,
+        CursorKind::Wheel,
+        CursorKind::Text,
+    ];
+
+    pub(crate) const COUNT: usize = 11;
+
+    pub(crate) fn index(self) -> usize {
+        match self {
+            CursorKind::Normal => 0,
+            CursorKind::Left => 1,
+            CursorKind::Right => 2,
+            CursorKind::Move => 3,
+            CursorKind::ResizeH => 4,
+            CursorKind::ResizeV => 5,
+            CursorKind::ResizeNwSe => 6,
+            CursorKind::ResizeNeSw => 7,
+            CursorKind::Slider => 8,
+            CursorKind::Wheel => 9,
+            CursorKind::Text => 10,
+        }
+    }
+
+    pub(crate) fn file_stem(self) -> &'static str {
+        match self {
+            CursorKind::Normal => "normal",
+            CursorKind::Left => "left",
+            CursorKind::Right => "right",
+            CursorKind::Move => "move",
+            CursorKind::ResizeH => "resize_h",
+            CursorKind::ResizeV => "resize_v",
+            CursorKind::ResizeNwSe => "resize_nwse",
+            CursorKind::ResizeNeSw => "resize_nesw",
+            CursorKind::Slider => "slider",
+            CursorKind::Wheel => "wheel",
+            CursorKind::Text => "text",
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            CursorKind::Normal => "正常",
+            CursorKind::Left => "左键按下",
+            CursorKind::Right => "右键按下",
+            CursorKind::Move => "移动窗口",
+            CursorKind::ResizeH => "改尺寸（左右）",
+            CursorKind::ResizeV => "改尺寸（上下）",
+            CursorKind::ResizeNwSe => "改尺寸（右下）",
+            CursorKind::ResizeNeSw => "改尺寸（左下）",
+            CursorKind::Slider => "滑动滑块",
+            CursorKind::Wheel => "滚轮滚动",
+            CursorKind::Text => "文本输入",
+        }
+    }
+}
+
+pub(crate) struct CursorImage {
+    img: IconImage,
+
+    hot: [u16; 2],
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    cache: Option<std::sync::Arc<[u8]>>,
+}
+
+pub(crate) struct Cursors {
+    imgs: [CursorImage; CursorKind::COUNT],
+}
+
+impl CursorImage {
+    fn blank() -> Self {
+        Self::new(IconImage::blank())
+    }
+
+    fn new(img: IconImage) -> Self {
+        let hot = CURSOR_HOTSPOT.unwrap_or([0, 0]);
+        Self {
+            img,
+            hot,
+            cache: None,
+        }
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn rgba_for(&mut self) -> std::sync::Arc<[u8]> {
+        if let Some(rgba) = &self.cache {
+            return rgba.clone();
+        }
+        let mut buf = vec![0u8; ICON_PX * ICON_PX * 4];
+        for row in 0..ICON_PX {
+            for col in 0..ICON_PX {
+                let Some(px) = self.img.px[row][col] else {
+                    continue;
+                };
+                let i = (row * ICON_PX + col) * 4;
+                buf[i] = px.r();
+                buf[i + 1] = px.g();
+                buf[i + 2] = px.b();
+                buf[i + 3] = 0xFF;
+            }
+        }
+        let rgba: std::sync::Arc<[u8]> = buf.into();
+        self.cache = Some(rgba.clone());
+        rgba
+    }
+}
+
+impl Cursors {
+    pub(crate) fn hotspot(&self, kind: CursorKind) -> [u16; 2] {
+        self.imgs[kind.index()].hot
+    }
+
+    pub(crate) fn load() -> Self {
+        let dir = crate::assets::cursors_dir();
+        let mut imgs = std::array::from_fn(|_| CursorImage::blank());
+        for kind in CursorKind::ALL {
+            let path = dir.join(format!("{}.png", kind.file_stem()));
+            let img = std::fs::read(&path)
+                .ok()
+                .and_then(|bytes| decode_png(&bytes))
+                .filter(|img| !img.is_blank())
+                .unwrap_or_else(IconImage::blank);
+            imgs[kind.index()] = CursorImage::new(img);
+        }
+        Self { imgs }
+    }
+
+    pub(crate) fn is_blank(&self) -> bool {
+        self.imgs.iter().all(|c| c.img.is_blank())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn blank() -> Self {
+        Self {
+            imgs: std::array::from_fn(|_| CursorImage::blank()),
+        }
+    }
+
+    fn img(&self, kind: CursorKind) -> &IconImage {
+        let img = &self.imgs[kind.index()].img;
+        if img.is_blank() {
+            &self.imgs[CursorKind::Normal.index()].img
+        } else {
+            img
+        }
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn rgba(&mut self, kind: CursorKind) -> std::sync::Arc<[u8]> {
+        self.imgs[kind.index()].rgba_for()
+    }
+
+    pub(crate) fn paint(&self, painter: &egui::Painter, tip: egui::Pos2, kind: CursorKind) {
+        let [hx, hy] = self.hotspot(kind);
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(tip.x.round() - hx as f32, tip.y.round() - hy as f32),
+            egui::vec2(ICON_W, ICON_H),
+        );
+        self.img(kind).paint(painter, rect);
+    }
+}
+
 pub(crate) fn decode_png(bytes: &[u8]) -> Option<IconImage> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
@@ -507,7 +579,7 @@ pub(crate) fn decode_png(bytes: &[u8]) -> Option<IconImage> {
         png::ColorType::GrayscaleAlpha => 2,
         png::ColorType::Rgb => 3,
         png::ColorType::Rgba => 4,
-        // 展开之后不该再见到调色板：留着这一支只是为了 match 写全。
+
         png::ColorType::Indexed => return None,
     };
     Some(IconImage::from_pixels(
@@ -516,22 +588,4 @@ pub(crate) fn decode_png(bytes: &[u8]) -> Option<IconImage> {
         &buf,
         channels,
     ))
-}
-
-/// 把一张 IconImage 写成一个 16x16 的 PNG（默认图标就这么落盘的）。
-pub(crate) fn write_icon_png(path: &std::path::Path, img: &IconImage) -> std::io::Result<()> {
-    let file = std::fs::File::create(path)?;
-    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), ICON_PX as u32, ICON_PX as u32);
-    enc.set_color(png::ColorType::Rgba);
-    enc.set_depth(png::BitDepth::Eight);
-    let mut writer = enc
-        .write_header()
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
-    writer
-        .write_image_data(&img.to_rgba())
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
-    writer
-        .finish()
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
-    Ok(())
 }

@@ -1,104 +1,61 @@
-// ===========================================================================
-//  模块 theme：系统级配色表（皮肤 / 主题）
-// ===========================================================================
-//  全工程的颜色只允许从这儿取：界面代码一律走 theme()（当前皮肤），别处不许再写字面色值。
-//  一套皮肤 = 一张「系统级配色表」（struct Theme）：UI 里所有元素的颜色都在里面，一个不落 -
-//  以后要做皮肤自定义管理工具，改的就是这张表（每一项管哪儿见字段上的注释）。
-//
-//  当前提供两套：
-//    - 经典（CLASSIC）：Win9x 灰色系，白底黑字，全部纯色；
-//    - 暗色（DARK）   ：大智慧那种暗色风格，黑 / 灰底 + 红色线框（#CC0000）+ 白字，
-//                        K 线涨色不变（红），跌色改成青色（#00FFFF）。
-//  「图表区的颜色」是自定义的：这里把它做成「可指向系统级配色」- 见 Theme 里的图表区 / 涨跌
-//  那几项；界面按系统级配色走（切皮肤就整体变），用户也可以在颜色面板里单独改 K 线涨跌色。
-//
-//  切换皮肤：set_theme(Theme)（面板上的「切换主题」按钮走 StockApp::switch_theme）。
-//  图表区的 K 线涨跌色默认「指向系统级配色」（StockApp::chart_follows_theme = true），
-//  切皮肤就跟着换；用户在颜色面板里自己定过色之后指向断开，想跟回去点「图表配色跟随系统」
-//  （StockApp::follow_system_chart_colors）。
-//  界面每帧都从 theme() 读色，切完下一帧整屏就变了。
-//
-// 【色值规矩（铁律）】每通道必须是「两个相同的十六进制数字」（0x00 / 0x11 / ... / 0xFF，
-//  也就是 17 的整数倍）- 文件末尾对两套皮肤逐项做编译期自检，写错格式直接编译不过。
 use eframe::egui;
+use serde::Deserialize;
 use std::cell::Cell;
 
-// ===========================================================================
-//  一、经典皮肤的色值常量（也是「经典」那张表的定义；单元测试拿它们当参照色）
-// ===========================================================================
+pub(crate) const C_TITLE_BG: egui::Color32 = egui::Color32::from_rgb(0xBB, 0xBB, 0xBB);
 
-// 经典 Win9x 灰色系，全部纯色：无渐变、无圆角、无阴影。
-// 每个字节都是「重复的同一个十六进制数字」，严格满足 #aabbcc 规则（见开头铁律）。
-pub(crate) const C_TITLE_BG: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
-pub(crate) const C_MENU_BG: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
+pub(crate) const C_MENU_BG: egui::Color32 = egui::Color32::from_rgb(0xDD, 0xDD, 0xDD);
+
 pub(crate) const C_WORK_BG: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
-// 主窗口的「桌面」底色（功能区那块底，几块子窗口浮在它上面）：取 Windows 常见窗口底色的灰度。
-// #F0F0F0 不满足「每通道是同一个十六进制数字重复两遍」这条铁律，吸到最接近的 #EEEEEE。
+
 pub(crate) const C_DESKTOP_BG: egui::Color32 = egui::Color32::from_rgb(0xEE, 0xEE, 0xEE);
 pub(crate) const C_STATUS_BG: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
 pub(crate) const C_BTN_FACE: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
-pub(crate) const C_BTN_HOVER: egui::Color32 = egui::Color32::from_rgb(0xEE, 0xEE, 0xEE);
+
+pub(crate) const C_BTN_HOVER: egui::Color32 = egui::Color32::from_rgb(0xDD, 0xDD, 0xDD);
 pub(crate) const C_CLOSE_HOVER: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0x00);
+pub(crate) const C_BORDER_RED: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0x00);
 pub(crate) const C_TEXT: egui::Color32 = egui::Color32::from_rgb(0x00, 0x00, 0x00);
 pub(crate) const C_TEXT_WHITE: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
 pub(crate) const C_LINE: egui::Color32 = egui::Color32::from_rgb(0x99, 0x99, 0x99);
-// 所有控件边框的默认色：统一 #999999（默认值；以后每个控件再各自配自己的边框色）。
-// 边框只落在网格线格里，所以全界面任何一条边框都只有 1px，相邻控件共用同一条线。
+
 pub(crate) const C_CTRL_BORDER: egui::Color32 = egui::Color32::from_rgb(0x99, 0x99, 0x99);
-// UI 工程测试叠层（右栏「UI工程测试」按钮打开）：把 9px 网格线整个铺满窗口，用来核对各控件的
-// 边框有没有落在网格线上 - 对齐的边框会被它盖住，没对齐的会露在它旁边。
-// 网格线是灰色点状线（每 2px 一个点，见 grid 的 hline_dotted / vline_dotted）：和边框
-//（经典皮肤 #999999 / 暗色皮肤 #CC0000）都分得开，铺在画面上也不抢眼。
-pub(crate) const C_GRID_TEST: egui::Color32 = egui::Color32::from_rgb(0x66, 0x66, 0x66);
-// UI 工程测试工具的三色（对齐 / 没对齐 / 鼠标格）：两套皮肤同色 - 调试叠层不跟着皮肤走。
+
 pub(crate) const C_GRID_OK: egui::Color32 = egui::Color32::from_rgb(0x00, 0xAA, 0x00);
 pub(crate) const C_GRID_BAD: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x88, 0x00);
 pub(crate) const C_GRID_CURSOR: egui::Color32 = egui::Color32::from_rgb(0x00, 0xCC, 0xCC);
 
-// 图表：绘图区白底、右侧价格轴灰底；A 股习惯是涨红跌绿；刻度参考线用浅灰。
 pub(crate) const C_CHART_BG: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
-pub(crate) const C_AXIS_BG: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
+pub(crate) const C_AXIS_BG: egui::Color32 = egui::Color32::from_rgb(0xDD, 0xDD, 0xDD);
 pub(crate) const C_UP: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0x00);
 pub(crate) const C_DOWN: egui::Color32 = egui::Color32::from_rgb(0x00, 0x99, 0x00);
-pub(crate) const C_TICK: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
+pub(crate) const C_TICK: egui::Color32 = egui::Color32::from_rgb(0xDD, 0xDD, 0xDD);
 
-// 涨跌色的默认值：struct 里的 up_color / down_color 拿它们当初值（红涨绿跌，默认）。
-// 真正画 K 线用的是那两个字段；C_UP / C_DOWN 从此只当默认值的来源和单元测试的参照色。
 pub(crate) const UP_RGB_DEFAULT: (u8, u8, u8) = (C_UP.r(), C_UP.g(), C_UP.b());
 pub(crate) const DOWN_RGB_DEFAULT: (u8, u8, u8) = (C_DOWN.r(), C_DOWN.g(), C_DOWN.b());
 
-// 十字光标：线用中灰（白底上够醒目，又和 #999999 的轴边 / 分隔线分得开），
-// 标签用浅灰底 + 黑边 + 黑字，和菜单 hover 高亮是同一套灰度。
 pub(crate) const C_CROSS: egui::Color32 = egui::Color32::from_rgb(0x66, 0x66, 0x66);
 pub(crate) const C_CROSS_LABEL: egui::Color32 = egui::Color32::from_rgb(0xEE, 0xEE, 0xEE);
 
-// 两栏布局与控制面板：分割条灰、面板灰、按钮深灰硬边、按下态更暗。
 pub(crate) const C_SPLITTER: egui::Color32 = egui::Color32::from_rgb(0xAA, 0xAA, 0xAA);
-// 滚动条：槽和把手必须分得开（把手亮一档，一眼看得出滚到哪儿了）。
+
 pub(crate) const C_SCROLL_TRACK: egui::Color32 = egui::Color32::from_rgb(0xAA, 0xAA, 0xAA);
 pub(crate) const C_SCROLL_THUMB: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
-pub(crate) const C_PANEL_BG: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
+pub(crate) const C_PANEL_BG: egui::Color32 = egui::Color32::from_rgb(0xDD, 0xDD, 0xDD);
 pub(crate) const C_BTN_PRESS: egui::Color32 = egui::Color32::from_rgb(0xAA, 0xAA, 0xAA);
-// 文本编辑器里选区的高亮底色：浅灰，黑字压在上面照样看得清，又不会和控件边框的 #999999 混。
-pub(crate) const C_SEL_BG: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
 
-// 源码编辑器里的语法着色（用户点名要的几个色）：关键字（let / fn / impl 等）蓝 #0000FF，
-// 注释绿 #009900，字符串品红 #FF00FF；其余代码文字（变量名 / 数字 / 标点等）走默认文字色。
-// 三个值都是「同一个十六进制数字重复两遍」，满足 #aabbcc 色值铁律。
-pub(crate) const C_SYN_CODE: egui::Color32 = egui::Color32::from_rgb(0x00, 0x00, 0xFF);
+pub(crate) const C_SEL_BG: egui::Color32 = egui::Color32::from_rgb(0xDD, 0xDD, 0xDD);
+
 pub(crate) const C_SYN_COMMENT: egui::Color32 = egui::Color32::from_rgb(0x00, 0x99, 0x00);
-pub(crate) const C_SYN_STRING: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0xFF);
 
-// 指标区：0 轴那条参考线。DIF / DEA 两条线的颜色归这套皮肤统一管（见 Theme::dif / dea）。
+pub(crate) const C_POINTER_TRAIL: egui::Color32 = egui::Color32::from_rgb(0x00, 0xCC, 0xCC);
+pub(crate) const C_POINTER_TRAIL_HOT: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0xFF);
+
 pub(crate) const C_IND_ZERO: egui::Color32 = egui::Color32::from_rgb(0x99, 0x99, 0x99);
 
-// MACD 两条线的经典配色（蓝 / 橙）。和 theme 里经典那张表的 dif / dea 同值。
 pub(crate) const C_DIF: egui::Color32 = egui::Color32::from_rgb(0x33, 0x33, 0xCC);
 pub(crate) const C_DEA: egui::Color32 = egui::Color32::from_rgb(0xCC, 0x99, 0x00);
 
-// K 线上的叠加均线（MA / EMA 各 6 条，周期见 indicator::MA_PERIODS）：
-// 经典皮肤是白底，所以走深色的 6 个色相；暗色皮肤是黑底，走亮色的那套。
-/// 经典皮肤的 MA5 / MA10 / MA20 / MA60 / MA120 / MA250。
 pub(crate) const C_MA_CLASSIC: [egui::Color32; 6] = [
     egui::Color32::from_rgb(0x33, 0x33, 0xCC),
     egui::Color32::from_rgb(0xCC, 0x00, 0x66),
@@ -107,7 +64,7 @@ pub(crate) const C_MA_CLASSIC: [egui::Color32; 6] = [
     egui::Color32::from_rgb(0x00, 0x99, 0x99),
     egui::Color32::from_rgb(0x66, 0x66, 0x66),
 ];
-/// 经典皮肤的 EMA5 / EMA10 / EMA20 / EMA60 / EMA120 / EMA250。
+
 pub(crate) const C_EMA_CLASSIC: [egui::Color32; 6] = [
     egui::Color32::from_rgb(0xFF, 0x00, 0xFF),
     egui::Color32::from_rgb(0xFF, 0x88, 0x00),
@@ -116,30 +73,10 @@ pub(crate) const C_EMA_CLASSIC: [egui::Color32; 6] = [
     egui::Color32::from_rgb(0x88, 0x88, 0xFF),
     egui::Color32::from_rgb(0xAA, 0x00, 0xAA),
 ];
-/// 暗色皮肤的 MA5 / MA10 / MA20 / MA60 / MA120 / MA250（传统那套：白 / 黄 / 紫 / 绿 / 青 / 灰）。
-pub(crate) const C_MA_DARK: [egui::Color32; 6] = [
-    egui::Color32::from_rgb(0xFF, 0xFF, 0xFF),
-    egui::Color32::from_rgb(0xFF, 0xFF, 0x00),
-    egui::Color32::from_rgb(0xFF, 0x00, 0xFF),
-    egui::Color32::from_rgb(0x00, 0xFF, 0x00),
-    egui::Color32::from_rgb(0x00, 0xFF, 0xFF),
-    egui::Color32::from_rgb(0x88, 0x88, 0x88),
-];
-/// 暗色皮肤的 EMA5 / EMA10 / EMA20 / EMA60 / EMA120 / EMA250（和 MA 那套拉开色相）。
-pub(crate) const C_EMA_DARK: [egui::Color32; 6] = [
-    egui::Color32::from_rgb(0xFF, 0x88, 0x00),
-    egui::Color32::from_rgb(0x88, 0xAA, 0xFF),
-    egui::Color32::from_rgb(0xAA, 0xFF, 0x00),
-    egui::Color32::from_rgb(0x00, 0xFF, 0x88),
-    egui::Color32::from_rgb(0xFF, 0x00, 0xAA),
-    egui::Color32::from_rgb(0xCC, 0xCC, 0xCC),
-];
 
-// 数字 / 文字涨跌色：红涨绿跌，和 K 线那套分开（暗色皮肤下 K 线跌色变青，这里不变）。
 pub(crate) const C_TEXT_UP: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0x00);
 pub(crate) const C_TEXT_DOWN: egui::Color32 = egui::Color32::from_rgb(0x00, 0x99, 0x00);
 
-// KDJ / RSI 那几条线的经典配色（白底上用深色那套：蓝 / 橙 / 品红）。
 pub(crate) const C_KDJ_K: egui::Color32 = egui::Color32::from_rgb(0x33, 0x33, 0xCC);
 pub(crate) const C_KDJ_D: egui::Color32 = egui::Color32::from_rgb(0xCC, 0x99, 0x00);
 pub(crate) const C_KDJ_J: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0xFF);
@@ -147,125 +84,110 @@ pub(crate) const C_RSI_1: egui::Color32 = egui::Color32::from_rgb(0x33, 0x33, 0x
 pub(crate) const C_RSI_2: egui::Color32 = egui::Color32::from_rgb(0xCC, 0x99, 0x00);
 pub(crate) const C_RSI_3: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0xFF);
 
-// ===========================================================================
-//  二、系统级配色表：一套皮肤的全部颜色
-// ===========================================================================
-
-/// 皮肤编号。按钮每点一次在几套之间轮换。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ThemeId {
     Classic,
     Dark,
 }
 
-/// 一张系统级配色表 = 一套皮肤。字段顺序按「区域底色 -> 控件 -> 文字 -> 图表区 -> 涨跌 -> 调试」。
-/// 想做皮肤自定义工具，就是给这张表的每个字段配一个编辑控件。
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct Theme {
-    /// 自己是谁（按钮 / 状态栏回显用）。
     pub(crate) id: ThemeId,
 
-    // ---- 区域底色 ----
-    /// 标题栏 / Pane 标题栏 / 浮动窗标题栏。
     pub(crate) title_bg: egui::Color32,
-    /// 菜单栏 / 下拉菜单面板。
+
     pub(crate) menu_bg: egui::Color32,
-    /// 功能区底色（图表工作区、浮动面板本体）。
+
     pub(crate) work_bg: egui::Color32,
-    /// 主窗口的默认底色（功能区那块「桌面」）：图表子窗口 / 按钮面板 / 浮动窗都浮在它上面。
+
     pub(crate) desktop_bg: egui::Color32,
-    /// 状态栏。
+
     pub(crate) status_bg: egui::Color32,
-    /// 右栏控制面板 / 源码窗行号区 / 下拉面板的行号区这类「面板底」。
+
     pub(crate) panel_bg: egui::Color32,
-    /// 分割条 / 横向拖拽条本体。
+
     pub(crate) splitter: egui::Color32,
-    /// 滚动条的槽（把手在里面滑的那条轨道）。
+
     pub(crate) scroll_track: egui::Color32,
-    /// 滚动条的把手：比槽亮一档，滚到哪儿一眼看得出来。
+
     pub(crate) scroll_thumb: egui::Color32,
 
-    // ---- 控件 ----
-    /// 按钮常态底色。
     pub(crate) btn_face: egui::Color32,
-    /// 按钮悬停底色。
+
     pub(crate) btn_hover: egui::Color32,
-    /// 按钮按下底色。
+
     pub(crate) btn_press: egui::Color32,
-    /// 文本编辑器里选区的高亮底色（文字颜色不变，所以要挑一个两种文字色都压得住的色）。
+
     pub(crate) sel_bg: egui::Color32,
-    /// 关闭键悬停底色。
+
     pub(crate) close_hover: egui::Color32,
-    /// 所有控件 / 窗口的 1px 线框色。
+
     pub(crate) ctrl_border: egui::Color32,
-    /// 区域分隔线 / 状态栏与状态带里的点状虚线。
+
     pub(crate) line: egui::Color32,
 
-    // ---- 文字 ----
-    /// 默认文字色。
-    pub(crate) text: egui::Color32,
-    /// 彩底上的反白文字（关闭键的叉、色相把手）。
-    pub(crate) text_white: egui::Color32,
-    /// 源码编辑器里「关键字」的颜色（let / fn / impl 等，见 ui::editor 的着色）。
-    /// 变量名 / 标点 / 数字这些不属于任何一类的代码文字走默认的 text 色。
-    pub(crate) syn_code: egui::Color32,
-    /// 源码编辑器里「注释」的颜色。
-    pub(crate) syn_comment: egui::Color32,
-    /// 源码编辑器里「字符串」的颜色。
-    pub(crate) syn_string: egui::Color32,
+    pub(crate) chart_line: egui::Color32,
 
-    // ---- 图表区（可指向系统级配色；用户也可以在颜色面板里单独改 K 线涨跌色）----
-    /// 绘图区底色。
+    pub(crate) text: egui::Color32,
+
+    pub(crate) text_white: egui::Color32,
+
+    pub(crate) syn_comment: egui::Color32,
+
     pub(crate) chart_bg: egui::Color32,
-    /// 右侧纵轴底色。
+
     pub(crate) axis_bg: egui::Color32,
-    /// 图表刻度参考线。
+
     pub(crate) tick: egui::Color32,
-    /// 十字光标线。
+
     pub(crate) cross: egui::Color32,
-    /// 十字光标数值 / 索引标签的底色（边框用 ctrl_border）。
+
     pub(crate) cross_label: egui::Color32,
-    /// 指标 0 轴参考线。
+
     pub(crate) ind_zero: egui::Color32,
 
-    // ---- 涨跌（K 线 / 柱子 与 数字 / 文字 两套，分开；都指向系统级配色）----
-    /// K 线 / 柱子涨色。
     pub(crate) candle_up: egui::Color32,
-    /// K 线 / 柱子跌色。
+
     pub(crate) candle_down: egui::Color32,
-    /// 数字 / 文字涨色。
+
     pub(crate) text_up: egui::Color32,
-    /// 数字 / 文字跌色。
+
     pub(crate) text_down: egui::Color32,
-    /// MACD 的 DIF 线。
+
     pub(crate) dif: egui::Color32,
-    /// MACD 的 DEA 线。
+
     pub(crate) dea: egui::Color32,
-    /// KDJ 的 K / D / J 三条线。
+
     pub(crate) kdj_k: egui::Color32,
     pub(crate) kdj_d: egui::Color32,
     pub(crate) kdj_j: egui::Color32,
-    /// RSI 的三条线（周期见 indicator::RSI_PERIODS）。
+
     pub(crate) rsi_1: egui::Color32,
     pub(crate) rsi_2: egui::Color32,
     pub(crate) rsi_3: egui::Color32,
-    /// K 线上的叠加均线：MA / EMA 各 6 条（周期见 indicator::MA_PERIODS）。
+
+    pub(crate) boll_mid: egui::Color32,
+    pub(crate) boll_up: egui::Color32,
+    pub(crate) boll_down: egui::Color32,
+    pub(crate) obv: egui::Color32,
+    pub(crate) cci: egui::Color32,
+    pub(crate) bias: [egui::Color32; 3],
+
     pub(crate) ma: [egui::Color32; 6],
     pub(crate) ema: [egui::Color32; 6],
 
-    // ---- 调试叠层（UI工程测试工具用：见 ui::grid 那一套）----
-    /// 9px UI工程测试线。
-    pub(crate) grid_test: egui::Color32,
-    /// UI工程测试：这块元素四条边都落在网格线上（对齐了）。
     pub(crate) grid_ok: egui::Color32,
-    /// UI工程测试：这块元素有边没落在网格线上（要盯的就是它）。
+
     pub(crate) grid_bad: egui::Color32,
-    /// UI工程测试：鼠标底下那一格 / 光标位置标记。
+
     pub(crate) grid_cursor: egui::Color32,
+
+    pub(crate) pointer_trail: egui::Color32,
+
+    pub(crate) pointer_trail_hot: egui::Color32,
 }
 
 impl Theme {
-    /// 经典（Win9x 灰）皮肤。
     pub(crate) const CLASSIC: Self = Self {
         id: ThemeId::Classic,
         title_bg: C_TITLE_BG,
@@ -284,11 +206,10 @@ impl Theme {
         close_hover: C_CLOSE_HOVER,
         ctrl_border: C_CTRL_BORDER,
         line: C_LINE,
+        chart_line: C_LINE,
         text: C_TEXT,
         text_white: C_TEXT_WHITE,
-        syn_code: C_SYN_CODE,
         syn_comment: C_SYN_COMMENT,
-        syn_string: C_SYN_STRING,
         chart_bg: C_CHART_BG,
         axis_bg: C_AXIS_BG,
         tick: C_TICK,
@@ -307,72 +228,65 @@ impl Theme {
         rsi_1: C_RSI_1,
         rsi_2: C_RSI_2,
         rsi_3: C_RSI_3,
+        boll_mid: egui::Color32::from_rgb(0x33, 0x66, 0xCC),
+        boll_up: egui::Color32::from_rgb(0xCC, 0x00, 0x66),
+        boll_down: egui::Color32::from_rgb(0x00, 0x99, 0x99),
+        obv: egui::Color32::from_rgb(0xCC, 0x66, 0x00),
+        cci: egui::Color32::from_rgb(0x66, 0x00, 0xCC),
+        bias: [
+            egui::Color32::from_rgb(0x33, 0x33, 0xCC),
+            egui::Color32::from_rgb(0xCC, 0x99, 0x00),
+            egui::Color32::from_rgb(0xFF, 0x00, 0xFF),
+        ],
         ma: C_MA_CLASSIC,
         ema: C_EMA_CLASSIC,
-        grid_test: C_GRID_TEST,
         grid_ok: C_GRID_OK,
         grid_bad: C_GRID_BAD,
         grid_cursor: C_GRID_CURSOR,
+        pointer_trail: C_POINTER_TRAIL,
+        pointer_trail_hot: C_POINTER_TRAIL_HOT,
     };
 
-    /// 暗色（大智慧那种）皮肤：黑 / 灰底、红色线框（#CC0000）、白字；
-    /// K 线涨色不变（红），跌色改成青色（#00FFFF）；数字涨跌还是红涨绿跌。
-    pub(crate) const DARK: Self = Self {
-        id: ThemeId::Dark,
-        title_bg: egui::Color32::from_rgb(0x33, 0x33, 0x33),
-        menu_bg: egui::Color32::from_rgb(0x22, 0x22, 0x22),
-        work_bg: egui::Color32::from_rgb(0x00, 0x00, 0x00),
-        desktop_bg: egui::Color32::from_rgb(0x11, 0x11, 0x11),
-        status_bg: egui::Color32::from_rgb(0x33, 0x33, 0x33),
-        panel_bg: egui::Color32::from_rgb(0x22, 0x22, 0x22),
-        splitter: egui::Color32::from_rgb(0x44, 0x44, 0x44),
-        // 滚动条：槽用分割条那档灰，把手亮一档（#444444 的槽配 #444444 的把手是看不见的）。
-        scroll_track: egui::Color32::from_rgb(0x44, 0x44, 0x44),
-        scroll_thumb: egui::Color32::from_rgb(0x66, 0x66, 0x66),
-        btn_face: egui::Color32::from_rgb(0x44, 0x44, 0x44),
-        btn_hover: egui::Color32::from_rgb(0x55, 0x55, 0x55),
-        btn_press: egui::Color32::from_rgb(0x33, 0x33, 0x33),
-        // 选区：中灰，白字压在上面看得清（黑底上不刺眼，也和红边框分得开）。
-        sel_bg: egui::Color32::from_rgb(0x66, 0x66, 0x66),
-        close_hover: egui::Color32::from_rgb(0xCC, 0x00, 0x00),
-        // 线框一律红色（用户指定）。
-        ctrl_border: egui::Color32::from_rgb(0xCC, 0x00, 0x00),
-        line: egui::Color32::from_rgb(0xCC, 0x00, 0x00),
-        text: egui::Color32::from_rgb(0xFF, 0xFF, 0xFF),
-        text_white: egui::Color32::from_rgb(0xFF, 0xFF, 0xFF),
-        // 语法着色：黑底上把关键字 / 字符串提亮一档（名字蓝 / 字符串品红）；
-        // 注释绿两套皮肤同色（用户点名 #009900），暗底上也照样看得清。
-        syn_code: egui::Color32::from_rgb(0x88, 0x88, 0xFF),
-        syn_comment: C_SYN_COMMENT,
-        syn_string: egui::Color32::from_rgb(0xFF, 0x88, 0xFF),
-        chart_bg: egui::Color32::from_rgb(0x00, 0x00, 0x00),
-        axis_bg: egui::Color32::from_rgb(0x22, 0x22, 0x22),
-        // 刻度参考线在黑底上用暗灰，才不至于糊一片红。
-        tick: egui::Color32::from_rgb(0x33, 0x33, 0x33),
-        cross: egui::Color32::from_rgb(0xCC, 0xCC, 0xCC),
-        cross_label: egui::Color32::from_rgb(0x33, 0x33, 0x33),
-        ind_zero: egui::Color32::from_rgb(0x66, 0x66, 0x66),
-        candle_up: egui::Color32::from_rgb(0xFF, 0x00, 0x00),
-        candle_down: egui::Color32::from_rgb(0x00, 0xFF, 0xFF),
-        text_up: egui::Color32::from_rgb(0xFF, 0x00, 0x00),
-        text_down: egui::Color32::from_rgb(0x00, 0x99, 0x00),
-        dif: egui::Color32::from_rgb(0x33, 0x99, 0xFF),
-        dea: egui::Color32::from_rgb(0xFF, 0xCC, 0x00),
-        kdj_k: egui::Color32::from_rgb(0xFF, 0xFF, 0xFF),
-        kdj_d: egui::Color32::from_rgb(0xFF, 0xFF, 0x00),
-        kdj_j: egui::Color32::from_rgb(0xFF, 0x00, 0xFF),
-        rsi_1: egui::Color32::from_rgb(0xFF, 0xFF, 0xFF),
-        rsi_2: egui::Color32::from_rgb(0xFF, 0xFF, 0x00),
-        rsi_3: egui::Color32::from_rgb(0xFF, 0x00, 0xFF),
-        ma: C_MA_DARK,
-        ema: C_EMA_DARK,
-        grid_test: C_GRID_TEST,
-        grid_ok: C_GRID_OK,
-        grid_bad: C_GRID_BAD,
-        grid_cursor: C_GRID_CURSOR,
-    };
+    pub(crate) const DARK: Self = Self::dark_mirror();
 
-    /// 按编号取皮肤。
+    const fn dark_mirror() -> Self {
+        let l = Self::CLASSIC;
+        let mut t = l;
+        t.id = ThemeId::Dark;
+        t.title_bg = invert_color(l.title_bg);
+        t.menu_bg = invert_color(l.menu_bg);
+        t.work_bg = invert_color(l.work_bg);
+        t.desktop_bg = invert_color(l.desktop_bg);
+        t.status_bg = invert_color(l.status_bg);
+        t.panel_bg = invert_color(l.panel_bg);
+        t.splitter = invert_color(l.splitter);
+        t.scroll_track = invert_color(l.scroll_track);
+        t.scroll_thumb = invert_color(l.scroll_thumb);
+        t.btn_face = invert_color(l.btn_face);
+        t.btn_hover = invert_color(l.btn_hover);
+        t.btn_press = invert_color(l.btn_press);
+        t.sel_bg = invert_color(l.sel_bg);
+        t.text = invert_color(l.text);
+        t.syn_comment = invert_color(l.syn_comment);
+        t.grid_ok = invert_color(l.grid_ok);
+        t.grid_bad = invert_color(l.grid_bad);
+        t.grid_cursor = invert_color(l.grid_cursor);
+        t.pointer_trail = invert_color(l.pointer_trail);
+        t.pointer_trail_hot = invert_color(l.pointer_trail_hot);
+        t.chart_bg = egui::Color32::from_rgb(0x00, 0x00, 0x00);
+        t.chart_line = egui::Color32::from_rgb(0xFF, 0x00, 0x00);
+        t.axis_bg = egui::Color32::from_rgb(0x22, 0x22, 0x22);
+        t.tick = egui::Color32::from_rgb(0x22, 0x22, 0x22);
+        t.cross_label = egui::Color32::from_rgb(0x11, 0x11, 0x11);
+        t.ind_zero = egui::Color32::from_rgb(0xFF, 0x00, 0x00);
+        t.candle_down = egui::Color32::from_rgb(0x00, 0xFF, 0xFF);
+        t.ctrl_border = C_BORDER_RED;
+        t.line = C_BORDER_RED;
+        t.close_hover = C_CLOSE_HOVER;
+        t.text_white = C_TEXT_WHITE;
+        t
+    }
+
     pub(crate) const fn of(id: ThemeId) -> Self {
         match id {
             ThemeId::Classic => Self::CLASSIC,
@@ -380,73 +294,358 @@ impl Theme {
         }
     }
 
-    /// 皮肤名字（按钮 / 状态栏回显）。
     pub(crate) fn name(self) -> &'static str {
         match self.id {
-            ThemeId::Classic => "经典",
-            ThemeId::Dark => "暗色",
+            ThemeId::Classic => "浅色",
+            ThemeId::Dark => "深色",
         }
     }
 
-    /// 下一套皮肤（按钮每点一次换一套）。
-    pub(crate) fn next(self) -> Self {
-        Self::of(match self.id {
-            ThemeId::Classic => ThemeId::Dark,
-            ThemeId::Dark => ThemeId::Classic,
+    pub(crate) fn load(id: ThemeId) -> Self {
+        let path = crate::assets::theme_file(id.file_name());
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) => {
+                eprintln!("[theme] 读不到 {}：{error}，使用内置配色", path.display());
+                return Self::of(id);
+            }
+        };
+        match Self::from_json(&text, id) {
+            Ok(theme) => theme,
+            Err(error) => {
+                eprintln!("[theme] {} 无效：{error}，使用内置配色", path.display());
+                Self::of(id)
+            }
+        }
+    }
+
+    pub(crate) fn from_json(text: &str, expected: ThemeId) -> Result<Self, String> {
+        let file: ThemeFile =
+            serde_json::from_str(text).map_err(|error| format!("JSON 解析失败：{error}"))?;
+        if file.format != "roundtable-theme" {
+            return Err(format!(
+                "format 必须是 roundtable-theme，当前是 {}",
+                file.format
+            ));
+        }
+        if file.version != 1 {
+            return Err(format!("version 必须是 1，当前是 {}", file.version));
+        }
+        if file.id != expected.file_name() {
+            return Err(format!(
+                "id 必须是 {}，当前是 {}",
+                expected.file_name(),
+                file.id
+            ));
+        }
+        if file.name.trim().is_empty() {
+            return Err("name 不能为空".to_owned());
+        }
+
+        let colors = file.colors;
+        Ok(Self {
+            id: expected,
+            title_bg: colors.window.title_bg.0,
+            menu_bg: colors.window.menu_bg.0,
+            work_bg: colors.window.work_bg.0,
+            desktop_bg: colors.window.desktop_bg.0,
+            status_bg: colors.window.status_bg.0,
+            panel_bg: colors.window.panel_bg.0,
+            splitter: colors.window.splitter.0,
+            scroll_track: colors.window.scroll_track.0,
+            scroll_thumb: colors.window.scroll_thumb.0,
+            btn_face: colors.window.btn_face.0,
+            btn_hover: colors.window.btn_hover.0,
+            btn_press: colors.window.btn_press.0,
+            sel_bg: colors.window.sel_bg.0,
+            close_hover: colors.window.close_hover.0,
+            ctrl_border: colors.window.ctrl_border.0,
+            line: colors.window.line.0,
+            chart_line: colors.chart.chart_line.0,
+            text: colors.window.text.0,
+            text_white: colors.window.text_white.0,
+            syn_comment: colors.window.syn_comment.0,
+            chart_bg: colors.chart.chart_bg.0,
+            axis_bg: colors.chart.axis_bg.0,
+            tick: colors.chart.tick.0,
+            cross: colors.chart.cross.0,
+            cross_label: colors.chart.cross_label.0,
+            ind_zero: colors.chart.ind_zero.0,
+            candle_up: colors.chart.candle_up.0,
+            candle_down: colors.chart.candle_down.0,
+            text_up: colors.chart.text_up.0,
+            text_down: colors.chart.text_down.0,
+            dif: colors.indicators.dif.0,
+            dea: colors.indicators.dea.0,
+            kdj_k: colors.indicators.kdj_k.0,
+            kdj_d: colors.indicators.kdj_d.0,
+            kdj_j: colors.indicators.kdj_j.0,
+            rsi_1: colors.indicators.rsi_1.0,
+            rsi_2: colors.indicators.rsi_2.0,
+            rsi_3: colors.indicators.rsi_3.0,
+            boll_mid: colors.indicators.boll_mid.0,
+            boll_up: colors.indicators.boll_up.0,
+            boll_down: colors.indicators.boll_down.0,
+            obv: colors.indicators.obv.0,
+            cci: colors.indicators.cci.0,
+            bias: [
+                colors.indicators.bias[0].0,
+                colors.indicators.bias[1].0,
+                colors.indicators.bias[2].0,
+            ],
+            ma: [
+                colors.indicators.ma[0].0,
+                colors.indicators.ma[1].0,
+                colors.indicators.ma[2].0,
+                colors.indicators.ma[3].0,
+                colors.indicators.ma[4].0,
+                colors.indicators.ma[5].0,
+            ],
+            ema: [
+                colors.indicators.ema[0].0,
+                colors.indicators.ema[1].0,
+                colors.indicators.ema[2].0,
+                colors.indicators.ema[3].0,
+                colors.indicators.ema[4].0,
+                colors.indicators.ema[5].0,
+            ],
+            grid_ok: colors.debug.grid_ok.0,
+            grid_bad: colors.debug.grid_bad.0,
+            grid_cursor: colors.debug.grid_cursor.0,
+            pointer_trail: colors.pointer.pointer_trail.0,
+            pointer_trail_hot: colors.pointer.pointer_trail_hot.0,
         })
     }
 
-    /// 这张表里的所有色值（编译期自检查每一套皮肤用）。
-    pub(crate) const fn colors(&self) -> [egui::Color32; 55] {
+    pub(crate) const fn colors(&self) -> [egui::Color32; 63] {
         [
-            self.title_bg, self.menu_bg, self.work_bg, self.desktop_bg, self.status_bg, self.panel_bg,
-            self.splitter, self.scroll_track, self.scroll_thumb,
-            self.btn_face, self.btn_hover, self.btn_press, self.sel_bg,
+            self.title_bg,
+            self.menu_bg,
+            self.work_bg,
+            self.desktop_bg,
+            self.status_bg,
+            self.panel_bg,
+            self.splitter,
+            self.scroll_track,
+            self.scroll_thumb,
+            self.btn_face,
+            self.btn_hover,
+            self.btn_press,
+            self.sel_bg,
             self.close_hover,
-            self.ctrl_border, self.line, self.text, self.text_white, self.syn_code,
-            self.syn_comment, self.syn_string, self.chart_bg,
-            self.axis_bg, self.tick, self.cross, self.cross_label, self.ind_zero,
-            self.candle_up, self.candle_down, self.text_up, self.text_down, self.dif,
-            self.dea, self.kdj_k, self.kdj_d, self.kdj_j, self.rsi_1, self.rsi_2,
-            self.rsi_3, self.ma[0], self.ma[1], self.ma[2], self.ma[3], self.ma[4],
-            self.ma[5], self.ema[0], self.ema[1], self.ema[2], self.ema[3], self.ema[4],
-            self.ema[5], self.grid_test, self.grid_ok, self.grid_bad, self.grid_cursor,
+            self.ctrl_border,
+            self.line,
+            self.chart_line,
+            self.text,
+            self.text_white,
+            self.syn_comment,
+            self.chart_bg,
+            self.axis_bg,
+            self.tick,
+            self.cross,
+            self.cross_label,
+            self.ind_zero,
+            self.candle_up,
+            self.candle_down,
+            self.text_up,
+            self.text_down,
+            self.dif,
+            self.dea,
+            self.kdj_k,
+            self.kdj_d,
+            self.kdj_j,
+            self.rsi_1,
+            self.rsi_2,
+            self.rsi_3,
+            self.boll_mid,
+            self.boll_up,
+            self.boll_down,
+            self.obv,
+            self.cci,
+            self.bias[0],
+            self.bias[1],
+            self.bias[2],
+            self.ma[0],
+            self.ma[1],
+            self.ma[2],
+            self.ma[3],
+            self.ma[4],
+            self.ma[5],
+            self.ema[0],
+            self.ema[1],
+            self.ema[2],
+            self.ema[3],
+            self.ema[4],
+            self.ema[5],
+            self.grid_ok,
+            self.grid_bad,
+            self.grid_cursor,
+            self.pointer_trail,
+            self.pointer_trail_hot,
         ]
     }
 }
 
-// ===========================================================================
-//  三、当前皮肤（全工程取色的唯一入口）
-// ===========================================================================
+impl ThemeId {
+    pub(crate) const fn file_name(self) -> &'static str {
+        match self {
+            ThemeId::Classic => "light",
+            ThemeId::Dark => "dark",
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ThemeFile {
+    format: String,
+    version: u32,
+    id: String,
+    name: String,
+    colors: ThemeColors,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ThemeColors {
+    window: WindowColors,
+    chart: ChartColors,
+    indicators: IndicatorColors,
+    debug: DebugColors,
+    pointer: PointerColors,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WindowColors {
+    title_bg: HexColor,
+    menu_bg: HexColor,
+    work_bg: HexColor,
+    desktop_bg: HexColor,
+    status_bg: HexColor,
+    panel_bg: HexColor,
+    splitter: HexColor,
+    scroll_track: HexColor,
+    scroll_thumb: HexColor,
+    btn_face: HexColor,
+    btn_hover: HexColor,
+    btn_press: HexColor,
+    sel_bg: HexColor,
+    close_hover: HexColor,
+    ctrl_border: HexColor,
+    line: HexColor,
+    text: HexColor,
+    text_white: HexColor,
+    syn_comment: HexColor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChartColors {
+    chart_bg: HexColor,
+    chart_line: HexColor,
+    axis_bg: HexColor,
+    tick: HexColor,
+    cross: HexColor,
+    cross_label: HexColor,
+    ind_zero: HexColor,
+    candle_up: HexColor,
+    candle_down: HexColor,
+    text_up: HexColor,
+    text_down: HexColor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IndicatorColors {
+    dif: HexColor,
+    dea: HexColor,
+    kdj_k: HexColor,
+    kdj_d: HexColor,
+    kdj_j: HexColor,
+    rsi_1: HexColor,
+    rsi_2: HexColor,
+    rsi_3: HexColor,
+    boll_mid: HexColor,
+    boll_up: HexColor,
+    boll_down: HexColor,
+    obv: HexColor,
+    cci: HexColor,
+    bias: [HexColor; 3],
+    ma: [HexColor; 6],
+    ema: [HexColor; 6],
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DebugColors {
+    grid_ok: HexColor,
+    grid_bad: HexColor,
+    grid_cursor: HexColor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PointerColors {
+    pointer_trail: HexColor,
+    pointer_trail_hot: HexColor,
+}
+
+struct HexColor(egui::Color32);
+
+impl<'de> Deserialize<'de> for HexColor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let text = String::deserialize(deserializer)?;
+        parse_hex_color(&text)
+            .map(HexColor)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+fn parse_hex_color(text: &str) -> Result<egui::Color32, String> {
+    let value = text
+        .strip_prefix('#')
+        .ok_or_else(|| format!("颜色 {text} 必须以 # 开头"))?;
+    if value.len() != 6 || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!("颜色 {text} 必须是 #RRGGBB"));
+    }
+    let channel = |range: std::ops::Range<usize>| {
+        u8::from_str_radix(&value[range], 16).map_err(|error| error.to_string())
+    };
+    Ok(egui::Color32::from_rgb(
+        channel(0..2)?,
+        channel(2..4)?,
+        channel(4..6)?,
+    ))
+}
 
 thread_local! {
-    /// 当前皮肤。egui 是单线程的，且界面每帧都从这儿取色，所以放线程局部变量最省事。
     static CURRENT: Cell<Theme> = const { Cell::new(Theme::CLASSIC) };
 }
 
-/// 当前皮肤。界面里所有颜色都从它取（`theme().text` 之类）。
 pub(crate) fn theme() -> Theme {
     CURRENT.with(|c| c.get())
 }
 
-/// 换皮肤。
 pub(crate) fn set_theme(t: Theme) {
     CURRENT.with(|c| c.set(t));
 }
 
-
-/// Color32 -> 0xRRGGBB（交给指标层当 u32 色值用）。
 pub(crate) const fn rgb32_u32(c: egui::Color32) -> u32 {
     ((c.r() as u32) << 16) | ((c.g() as u32) << 8) | c.b() as u32
 }
 
-/// 编译期自检：每个字节都必须是 0x00 / 0x11 / 0x22 ... 0xFF（都是 17 的整数倍），
-/// 也就是「两个十六进制数字相同」。以后新加色值若写成 #808080 这类，这里直接报错。
+pub(crate) const fn invert_color(c: egui::Color32) -> egui::Color32 {
+    egui::Color32::from_rgb(0xFF - c.r(), 0xFF - c.g(), 0xFF - c.b())
+}
+
 pub(crate) const fn color_is_aabbcc(c: egui::Color32) -> bool {
     c.r() % 17 == 0 && c.g() % 17 == 0 && c.b() % 17 == 0
 }
 
-/// 一套皮肤的所有颜色都得过 #aabbcc 这条规矩。
 const fn theme_is_aabbcc(t: Theme) -> bool {
     let cs = t.colors();
     let mut i = 0;
@@ -461,7 +660,6 @@ const fn theme_is_aabbcc(t: Theme) -> bool {
 const _: () = assert!(theme_is_aabbcc(Theme::CLASSIC));
 const _: () = assert!(theme_is_aabbcc(Theme::DARK));
 
-// 默认涨跌色必须真的是「红涨绿跌」（字段初值，点名要的）：写成编译期断言，以后改错立刻知道。
 const _: () = assert!(
     UP_RGB_DEFAULT.0 == 0xFF
         && UP_RGB_DEFAULT.1 == 0x00
@@ -470,8 +668,30 @@ const _: () = assert!(
         && DOWN_RGB_DEFAULT.1 == 0x99
         && DOWN_RGB_DEFAULT.2 == 0x00
 );
-// 暗色皮肤的关键色值：红色线框、白字、K 线跌色变青。
-const _: () = assert!(Theme::DARK.ctrl_border.r() == 0xCC && Theme::DARK.ctrl_border.g() == 0x00 && Theme::DARK.ctrl_border.b() == 0x00);
-const _: () = assert!(Theme::DARK.text.r() == 0xFF && Theme::DARK.text.g() == 0xFF && Theme::DARK.text.b() == 0xFF);
-const _: () = assert!(Theme::DARK.candle_down.r() == 0x00 && Theme::DARK.candle_down.g() == 0xFF && Theme::DARK.candle_down.b() == 0xFF);
-const _: () = assert!(Theme::DARK.candle_up.r() == 0xFF && Theme::DARK.candle_up.g() == 0x00 && Theme::DARK.candle_up.b() == 0x00);
+
+const _: () = assert!(
+    Theme::DARK.ctrl_border.r() == 0xFF
+        && Theme::DARK.ctrl_border.g() == 0x00
+        && Theme::DARK.ctrl_border.b() == 0x00
+);
+const _: () = assert!(
+    Theme::DARK.line.r() == 0xFF && Theme::DARK.line.g() == 0x00 && Theme::DARK.line.b() == 0x00
+);
+const _: () = assert!(
+    Theme::DARK.text.r() == 0xFF && Theme::DARK.text.g() == 0xFF && Theme::DARK.text.b() == 0xFF
+);
+const _: () = assert!(
+    Theme::DARK.candle_down.r() == 0x00
+        && Theme::DARK.candle_down.g() == 0xFF
+        && Theme::DARK.candle_down.b() == 0xFF
+);
+const _: () = assert!(
+    Theme::DARK.close_hover.r() == 0xFF
+        && Theme::DARK.close_hover.g() == 0x00
+        && Theme::DARK.close_hover.b() == 0x00
+);
+const _: () = assert!(
+    Theme::DARK.chart_line.r() == 0xFF
+        && Theme::DARK.chart_line.g() == 0x00
+        && Theme::DARK.chart_line.b() == 0x00
+);

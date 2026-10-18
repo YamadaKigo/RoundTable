@@ -1,20 +1,15 @@
-// ===========================================================================
-//  随机游走行情生成器
-// ===========================================================================
-//  暂时没有真实行情源，先用随机游走造一段能复现的假 K 线：
-//  同一个 seed 一定生成同一串数据，调试时可以对得上。
-
-/// 每天最多波动多少（价格单位）。
-const DAILY_MOVE: f64 = 0.3;
-
-/// 成交量的基准档：再乘上 0.35~1.5 的随机系数与走势强度，落点大约 1.5e7~1.2e8，
-/// 这样刻度里「万」和「亿」两种单位都会出现（见 main.rs 的 fmt_volume）。
 const VOL_BASE: f64 = 6.0e7;
 
-/// 第一根 K 线的日期：2024-01-02（周二）。
 pub const DATE_START: Date = Date::new(2024, 1, 2);
 
-/// 日期（精确到「日」）。本工程只用它做显示和时间轴标签，不涉及时区 / 闰秒。
+const PRICE_TICK: f64 = 0.01;
+
+const LIMIT_PCT: f64 = 0.10;
+
+const GAP_SIGMA: f64 = 0.0065;
+
+const INTRADAY_SIGMA: f64 = 0.013;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Date {
     pub y: i32,
@@ -27,7 +22,6 @@ impl Date {
         Self { y, m, d }
     }
 
-    /// 往后推 n 天（n >= 0）。大小月和闰年都在这儿算清楚。
     pub fn add_days(self, n: i32) -> Self {
         let mut y = self.y;
         let mut m = self.m as i32;
@@ -51,17 +45,14 @@ impl Date {
         }
     }
 
-    /// "MM-DD"：时间轴上同一年里那种短标签。
     pub fn md(self) -> String {
         format!("{:02}-{:02}", self.m, self.d)
     }
 
-    /// "YY-MM-DD"：时间轴上跨年那一格用的短标签。
     pub fn ymd_short(self) -> String {
         format!("{:02}-{:02}-{:02}", self.y.rem_euclid(100), self.m, self.d)
     }
 
-    /// "YYYY-MM-DD"：状态条里的完整日期。
     pub fn full(self) -> String {
         format!("{:04}-{:02}-{:02}", self.y, self.m, self.d)
     }
@@ -75,11 +66,16 @@ fn days_in_month(y: i32, m: i32) -> u8 {
     match m {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
-        _ => if is_leap(y) { 29 } else { 28 },
+        _ => {
+            if is_leap(y) {
+                29
+            } else {
+                28
+            }
+        }
     }
 }
 
-/// 一根 K 线：开盘 / 最高 / 最低 / 收盘 + 成交量 + 日期。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Bar {
     pub o: f64,
@@ -90,7 +86,6 @@ pub struct Bar {
     pub date: Date,
 }
 
-/// splitmix64：不依赖任何外部库的伪随机数发生器，结果完全由 seed 决定。
 struct Rng(u64);
 
 impl Rng {
@@ -106,40 +101,214 @@ impl Rng {
         z ^ (z >> 31)
     }
 
-    /// 均匀落到 [0, 1)。
     fn unit(&mut self) -> f64 {
         (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
     }
 
-    /// 均匀落到 [-1, 1)。
-    fn signed(&mut self) -> f64 {
-        self.unit() * 2.0 - 1.0
+    fn normal(&mut self) -> f64 {
+        let u1 = self.unit().max(1.0e-12);
+        let u2 = self.unit();
+        (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
     }
 }
 
-/// 生成 count 根 K 线。价格从 start 起步，每天收盘价在开盘价基础上随机走 +/-DAILY_MOVE；
-/// 高低点在实体之外再各随机延伸一段，保证 h >= max(o, c) 且 l <= min(o, c)。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarState {
+    Normal,
+    LimitUp,
+    LimitDown,
+    Suspended,
+}
+
+impl BarState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "",
+            Self::LimitUp => "涨停",
+            Self::LimitDown => "跌停",
+            Self::Suspended => "停牌",
+        }
+    }
+}
+
+fn round_tick(v: f64) -> f64 {
+    (v.max(PRICE_TICK) * 100.0).round() / 100.0
+}
+
+fn tick_clamp(v: f64, lo: f64, hi: f64) -> f64 {
+    round_tick(v.clamp(lo, hi))
+}
+
+pub fn limit_prices(prev_close: f64) -> (f64, f64) {
+    let prev = round_tick(prev_close);
+    (
+        round_tick(prev * (1.0 + LIMIT_PCT)),
+        round_tick(prev * (1.0 - LIMIT_PCT)),
+    )
+}
+
+pub fn bar_state(bars: &[Bar], index: usize) -> BarState {
+    let Some(bar) = bars.get(index) else {
+        return BarState::Normal;
+    };
+    if bar.vol <= 0.0 {
+        return BarState::Suspended;
+    }
+    if index == 0 {
+        return BarState::Normal;
+    }
+    let (up, down) = limit_prices(bars[index - 1].c);
+    if bar.c >= up - PRICE_TICK * 0.25 {
+        BarState::LimitUp
+    } else if bar.c <= down + PRICE_TICK * 0.25 {
+        BarState::LimitDown
+    } else {
+        BarState::Normal
+    }
+}
+
+fn forced_events(rng: &mut Rng, count: usize) -> Vec<BarState> {
+    let mut out = vec![BarState::Normal; count];
+    if count < 120 {
+        return out;
+    }
+    let lo = 20usize;
+    let hi = count.saturating_sub(10);
+    if hi <= lo {
+        return out;
+    }
+    let span = hi - lo;
+    for kind in [BarState::LimitUp, BarState::LimitDown, BarState::Suspended] {
+        let mut at = lo + (rng.next_u64() as usize % span);
+        while out[at] != BarState::Normal {
+            at = lo + (at - lo + 1) % span;
+        }
+        out[at] = kind;
+    }
+    out
+}
+
 pub fn generate(seed: u64, count: usize, start: f64) -> Vec<Bar> {
     let mut rng = Rng::new(seed);
     let mut bars = Vec::with_capacity(count);
-    let mut prev_close = start;
-    // 日期只走工作日：从周二起步，周五收盘之后直接跳到下周一（跳过周末）。
-    let mut date = DATE_START;
-    let mut weekday = 1; // 0 = 周一 ... 4 = 周五
+    let mut prev_close = round_tick(start);
 
-    for i in 0..count {
+    let mut date = DATE_START;
+    let mut weekday = 1;
+    let forced = forced_events(&mut rng, count);
+
+    for (i, state) in forced.into_iter().enumerate() {
         if i > 0 {
             let step = if weekday == 4 { 3 } else { 1 };
             date = date.add_days(step);
             weekday = (weekday + 1) % 5;
         }
-        let o = prev_close;
-        let c = o + rng.signed() * DAILY_MOVE;
-        let h = o.max(c) + rng.unit() * DAILY_MOVE;
-        let l = o.min(c) - rng.unit() * DAILY_MOVE;
-        // 成交量：走势越猛量越大（跟真实盘面一个方向），基准 +/-，上下再抖一抖。
-        let amp = ((c - o).abs() / DAILY_MOVE).clamp(0.0, 1.0);
-        let vol = VOL_BASE * (0.35 + 1.15 * rng.unit()) * (0.7 + 0.6 * amp);
+        let (limit_up, limit_down) = limit_prices(prev_close);
+
+        if state == BarState::Suspended {
+            bars.push(Bar {
+                o: prev_close,
+                h: prev_close,
+                l: prev_close,
+                c: prev_close,
+                vol: 0.0,
+                date,
+            });
+            continue;
+        }
+
+        let gap = if i == 0 {
+            0.0
+        } else {
+            (rng.normal() * GAP_SIGMA).clamp(-0.085, 0.085)
+        };
+        let open = tick_clamp(prev_close * (1.0 + gap), limit_down, limit_up);
+
+        let kind = if state != BarState::Normal {
+            state
+        } else if rng.unit() < 0.0015 {
+            if rng.unit() < 0.5 {
+                BarState::LimitUp
+            } else {
+                BarState::LimitDown
+            }
+        } else {
+            BarState::Normal
+        };
+
+        let (o, h, l, c, vol) = match kind {
+            BarState::LimitUp => {
+                if rng.unit() < 0.45 {
+                    (
+                        limit_up,
+                        limit_up,
+                        limit_up,
+                        limit_up,
+                        VOL_BASE * (0.03 + 0.12 * rng.unit()),
+                    )
+                } else {
+                    let low = tick_clamp(
+                        open.min(prev_close * (1.0 - rng.unit() * 0.025)),
+                        limit_down,
+                        limit_up,
+                    )
+                    .min(open);
+                    (
+                        open,
+                        limit_up,
+                        low,
+                        limit_up,
+                        VOL_BASE * (1.0 + 1.8 * rng.unit()),
+                    )
+                }
+            }
+            BarState::LimitDown => {
+                if rng.unit() < 0.45 {
+                    (
+                        limit_down,
+                        limit_down,
+                        limit_down,
+                        limit_down,
+                        VOL_BASE * (0.03 + 0.12 * rng.unit()),
+                    )
+                } else {
+                    let high = tick_clamp(
+                        open.max(prev_close * (1.0 + rng.unit() * 0.025)),
+                        limit_down,
+                        limit_up,
+                    )
+                    .max(open);
+                    (
+                        open,
+                        high,
+                        limit_down,
+                        limit_down,
+                        VOL_BASE * (1.0 + 1.8 * rng.unit()),
+                    )
+                }
+            }
+            BarState::Normal | BarState::Suspended => {
+                let gap_pull = -(open / prev_close - 1.0) * 0.18;
+                let close = tick_clamp(
+                    open * (1.0 + rng.normal() * INTRADAY_SIGMA + gap_pull),
+                    limit_down,
+                    limit_up,
+                );
+                let body_hi = open.max(close);
+                let body_lo = open.min(close);
+                let high = tick_clamp(body_hi * (1.0 + rng.unit() * 0.007), body_hi, limit_up)
+                    .max(body_hi);
+                let low = tick_clamp(body_lo * (1.0 - rng.unit() * 0.007), limit_down, body_lo)
+                    .min(body_lo);
+                let amp = ((close - open).abs() / prev_close).clamp(0.0, 0.2);
+                let volume = VOL_BASE
+                    * (0.35 + 1.15 * rng.unit())
+                    * (0.7 + 35.0 * amp)
+                    * (0.9 + 0.2 * (gap.abs() / GAP_SIGMA).min(3.0));
+                (open, high, low, close, volume)
+            }
+        };
+
         bars.push(Bar {
             o,
             h,

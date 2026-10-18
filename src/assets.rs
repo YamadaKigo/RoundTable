@@ -1,0 +1,35 @@
+use std::path::{Path, PathBuf};
+
+pub(crate) const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/logo/app.ico");
+
+pub(crate) fn root() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let beside_exe = dir.join("assets");
+        if beside_exe.join("logo").is_dir() || beside_exe.join("themes").is_dir() {
+            return beside_exe;
+        }
+    }
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")
+}
+
+pub(crate) fn icons_dir() -> PathBuf {
+    root().join("icons")
+}
+
+pub(crate) fn logo_dir() -> PathBuf {
+    root().join("logo")
+}
+
+pub(crate) fn cursors_dir() -> PathBuf {
+    root().join("cursors")
+}
+
+pub(crate) fn themes_dir() -> PathBuf {
+    root().join("themes")
+}
+
+pub(crate) fn theme_file(id: &str) -> PathBuf {
+    themes_dir().join(format!("{id}.json"))
+}

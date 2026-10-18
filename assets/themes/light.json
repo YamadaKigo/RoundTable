@@ -1,0 +1,69 @@
+{
+  "format": "roundtable-theme",
+  "version": 1,
+  "id": "light",
+  "name": "浅色",
+  "colors": {
+    "window": {
+      "title_bg": "#BBBBBB",
+      "menu_bg": "#DDDDDD",
+      "work_bg": "#FFFFFF",
+      "desktop_bg": "#EEEEEE",
+      "status_bg": "#CCCCCC",
+      "panel_bg": "#DDDDDD",
+      "splitter": "#AAAAAA",
+      "scroll_track": "#AAAAAA",
+      "scroll_thumb": "#CCCCCC",
+      "btn_face": "#CCCCCC",
+      "btn_hover": "#DDDDDD",
+      "btn_press": "#AAAAAA",
+      "sel_bg": "#DDDDDD",
+      "close_hover": "#FF0000",
+      "ctrl_border": "#999999",
+      "line": "#999999",
+      "text": "#000000",
+      "text_white": "#FFFFFF",
+      "syn_comment": "#009900"
+    },
+    "chart": {
+      "chart_bg": "#FFFFFF",
+      "chart_line": "#999999",
+      "axis_bg": "#DDDDDD",
+      "tick": "#DDDDDD",
+      "cross": "#666666",
+      "cross_label": "#EEEEEE",
+      "ind_zero": "#999999",
+      "candle_up": "#FF0000",
+      "candle_down": "#009900",
+      "text_up": "#FF0000",
+      "text_down": "#009900"
+    },
+    "indicators": {
+      "dif": "#3333CC",
+      "dea": "#CC9900",
+      "kdj_k": "#3333CC",
+      "kdj_d": "#CC9900",
+      "kdj_j": "#FF00FF",
+      "rsi_1": "#3333CC",
+      "rsi_2": "#CC9900",
+      "rsi_3": "#FF00FF",
+      "boll_mid": "#3366CC",
+      "boll_up": "#CC0066",
+      "boll_down": "#009999",
+      "obv": "#CC6600",
+      "cci": "#6600CC",
+      "bias": ["#3333CC", "#CC9900", "#FF00FF"],
+      "ma": ["#3333CC", "#CC0066", "#009933", "#6600CC", "#009999", "#666666"],
+      "ema": ["#FF00FF", "#FF8800", "#00CCCC", "#88AA00", "#8888FF", "#AA00AA"]
+    },
+    "debug": {
+      "grid_ok": "#00AA00",
+      "grid_bad": "#FF8800",
+      "grid_cursor": "#00CCCC"
+    },
+    "pointer": {
+      "pointer_trail": "#00CCCC",
+      "pointer_trail_hot": "#FF00FF"
+    }
+  }
+}
