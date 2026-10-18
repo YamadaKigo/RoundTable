@@ -249,7 +249,9 @@ impl StockApp {
         bars: &[egui::Rect],
     ) {
         if self.ui_drag_active() {
-            self.pan = None;
+            for pane in &mut self.panes {
+                pane.view.pan = None;
+            }
             return;
         }
 
@@ -257,10 +259,10 @@ impl StockApp {
         let over_plot =
             hover.and_then(|p| plots.iter().position(|r| r.contains(p)).map(|i| (i, p)));
 
-        let notches = self.take_wheel_notches(ui, over_plot.map(|(_, p)| p));
-        if notches != 0 {
-            if let Some((i, p)) = over_plot {
-                self.zoom_around(p.x - plots[i].min.x, notches);
+        if let Some((pane, p)) = over_plot {
+            let notches = self.take_wheel_notches(ui, Some(p), pane);
+            if notches != 0 {
+                self.zoom_around(pane, p.x - plots[pane].min.x, notches);
             }
         }
 
@@ -276,35 +278,47 @@ impl StockApp {
 
         if pressed {
             if let Some(p) = press_pos {
-                if plots.iter().any(|r| r.contains(p))
-                    && !bars.iter().any(|r| r.contains(p))
-                    && !self.floating_at(p, bottom)
-                {
-                    self.pan = Some((p.x, self.offset));
+                if !bars.iter().any(|r| r.contains(p)) && !self.floating_at(p, bottom) {
+                    for (pane, plot) in plots.iter().enumerate() {
+                        if plot.contains(p) {
+                            let offset = self.panes[pane].view.offset;
+                            self.panes[pane].view.pan = Some((p.x, offset));
+                        }
+                    }
                 }
             }
         }
         if down {
-            if let (Some((start_x, start_offset)), Some(p)) = (self.pan, latest) {
-                let bars = (((p.x - start_x) / bar_advance(self.scale)) as f64).round();
-                let want = (start_offset as f64 - bars).max(0.0) as usize;
-                self.offset = want.min(self.bars.len().saturating_sub(self.visible));
-                if self.offset as f64 != start_offset as f64 - bars {
-                    self.pan = Some((p.x, self.offset));
+            if let Some(p) = latest {
+                let bar_count = self.bars.len();
+                for pane in &mut self.panes {
+                    let Some((start_x, start_offset)) = pane.view.pan else {
+                        continue;
+                    };
+                    let bars = (((p.x - start_x) / bar_advance(pane.view.scale)) as f64).round();
+                    let want = (start_offset as f64 - bars).max(0.0) as usize;
+                    pane.view.offset = want.min(bar_count.saturating_sub(pane.view.visible));
+                    if pane.view.offset as f64 != start_offset as f64 - bars {
+                        pane.view.pan = Some((p.x, pane.view.offset));
+                    }
                 }
             }
         } else {
-            self.pan = None;
+            for pane in &mut self.panes {
+                pane.view.pan = None;
+            }
         }
     }
 
     pub(crate) fn update_crosshair(&mut self, ui: &egui::Ui, plots: &[egui::Rect]) {
         if self.ui_drag_active() {
-            self.crosshair = None;
+            for pane in &mut self.panes {
+                pane.view.crosshair = None;
+            }
             return;
         }
         let hover = ui.input(|i| i.pointer.hover_pos());
-        let dragging = self.pan.is_some();
+        let dragging = self.panes.iter().any(|pane| pane.view.pan.is_some());
         let point = hover.or_else(|| {
             if dragging {
                 ui.input(|i| i.pointer.latest_pos())
@@ -313,41 +327,39 @@ impl StockApp {
             }
         });
         let Some(p) = point else {
-            self.crosshair = None;
+            for pane in &mut self.panes {
+                pane.view.crosshair = None;
+            }
             return;
         };
 
         let pane = match plots.iter().position(|r| r.contains(p)) {
-            Some(i) => i,
-            None if dragging => plots
-                .iter()
-                .enumerate()
-                .min_by(|(_, a), (_, b)| {
-                    (p.y - a.center().y)
-                        .abs()
-                        .partial_cmp(&(p.y - b.center().y).abs())
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .map_or(0, |(i, _)| i),
-            None => {
-                self.crosshair = None;
-                return;
+            Some(i) => Some(i),
+            None if dragging => self.panes.iter().position(|pane| pane.view.pan.is_some()),
+            None => None,
+        };
+        let Some(pane) = pane else {
+            for pane in &mut self.panes {
+                pane.view.crosshair = None;
             }
+            return;
         };
 
         if !dragging && self.floating_at(p, ui.max_rect().max.y) {
-            self.crosshair = None;
+            for pane in &mut self.panes {
+                pane.view.crosshair = None;
+            }
             return;
         }
-        if self.visible == 0 {
-            self.crosshair = None;
+        if self.panes[pane].view.visible == 0 {
+            self.panes[pane].view.crosshair = None;
             return;
         }
 
         let plot = plots[pane];
-        let from = self.offset;
-        let to = (from + self.visible).min(self.bars.len());
-        let advance = bar_advance(self.scale);
+        let from = self.panes[pane].view.offset;
+        let to = (from + self.panes[pane].view.visible).min(self.bars.len());
+        let advance = bar_advance(self.panes[pane].view.scale);
         let top = plot.min.y + CHART_PAD;
         let span_px = (plot.max.y - CHART_PAD - top)
             .max(LINE_W)
@@ -361,12 +373,15 @@ impl StockApp {
         let index = (fpos.floor() as usize).min(self.bars.len().saturating_sub(1));
 
         let t = ((y - top) / span_px).clamp(0.0, 1.0) as f64;
-        self.crosshair = Some(Crosshair {
+        let crosshair = Crosshair {
             value: hi - span * t,
             index,
             fpos: fpos as f64,
             pane,
-        });
+        };
+        for (i, slot) in self.panes.iter_mut().enumerate() {
+            slot.view.crosshair = (i == pane).then_some(crosshair);
+        }
     }
 
     pub(crate) fn ui_chart(&mut self, ui: &mut egui::Ui, pane: usize, area: egui::Rect) {
@@ -415,23 +430,23 @@ impl StockApp {
         }
         self.probe("图表窗状态栏", chart_bar(area));
 
-        let bar_segs = self.chart_status_segments();
+        let bar_segs = self.chart_status_segments(pane);
         let bar = chart_bar(area);
         self.paint_status_bar(&painter, bar, &bar_segs);
 
         self.panes[pane].height = main.height() as i32;
         self.sync_pane_palette();
         self.ensure_pane_computed(pane);
-        self.clamp_view(plot.width());
-        let visible = self.visible;
+        self.clamp_view(pane, plot.width());
+        let visible = self.panes[pane].view.visible;
         if visible == 0 {
             return;
         }
 
-        let from = self.offset;
+        let from = self.panes[pane].view.offset;
         let to = (from + visible).min(self.bars.len());
-        let advance = bar_advance(self.scale);
-        let bar_w = snap_scale(self.scale) as f32;
+        let advance = bar_advance(self.panes[pane].view.scale);
+        let bar_w = snap_scale(self.panes[pane].view.scale) as f32;
         let (lo, hi) = self.pane_view_range(pane, from, to);
         let top = plot.min.y + CHART_PAD;
         let span_px = (plot.max.y - CHART_PAD - top)
@@ -462,6 +477,7 @@ impl StockApp {
         };
 
         let data = std::mem::take(&mut self.panes[pane].cmds);
+        let crosshair = self.panes[pane].view.crosshair;
         let (axis_cmds, time_cmds, status_cmds, overlay_cmds) = {
             let ctx = ChartCtx {
                 bars: &self.bars,
@@ -473,9 +489,9 @@ impl StockApp {
                 time_step,
                 lo,
                 hi,
-                cursor_bar: self.crosshair.map(|c| c.index),
-                cursor_index: self.crosshair.map(|c| c.fpos),
-                cursor_value: self.crosshair.filter(|c| c.pane == pane).map(|c| c.value),
+                cursor_bar: crosshair.map(|c| c.index),
+                cursor_index: crosshair.map(|c| c.fpos),
+                cursor_value: crosshair.filter(|c| c.pane == pane).map(|c| c.value),
             };
             let ind = &self.panes[pane].indicator;
             (
@@ -907,16 +923,21 @@ impl StockApp {
         out.rects
     }
 
-    pub(crate) fn take_wheel_notches(&mut self, ui: &egui::Ui, hover: Option<egui::Pos2>) -> i32 {
+    pub(crate) fn take_wheel_notches(
+        &mut self,
+        ui: &egui::Ui,
+        hover: Option<egui::Pos2>,
+        pane: usize,
+    ) -> i32 {
         let bottom = ui.max_rect().max.y;
         if hover.is_none()
             || self.ui_drag_active()
             || hover.is_some_and(|p| self.floating_at(p, bottom))
         {
-            self.zoom_acc = 0.0;
+            self.panes[pane].view.zoom_acc = 0.0;
             return 0;
         }
-        let mut acc = self.zoom_acc;
+        let mut acc = self.panes[pane].view.zoom_acc;
         ui.input(|i| {
             for event in &i.events {
                 if let egui::Event::MouseWheel { unit, delta, .. } = event {
@@ -929,26 +950,27 @@ impl StockApp {
             }
         });
         let whole = acc.trunc();
-        self.zoom_acc = acc - whole;
+        self.panes[pane].view.zoom_acc = acc - whole;
         whole as i32
     }
 
-    pub(crate) fn zoom_around(&mut self, x_rel: f32, notches: i32) {
-        let old = snap_scale(self.scale);
+    pub(crate) fn zoom_around(&mut self, pane: usize, x_rel: f32, notches: i32) {
+        let old = snap_scale(self.panes[pane].view.scale);
         let new = scale_after(old, notches);
         if new == old {
             return;
         }
-        let mouse_bar = self.offset as f32 + x_rel / bar_advance(old);
-        self.scale = new;
-        self.offset = (mouse_bar - x_rel / bar_advance(new)).round().max(0.0) as usize;
+        let mouse_bar = self.panes[pane].view.offset as f32 + x_rel / bar_advance(old);
+        self.panes[pane].view.scale = new;
+        self.panes[pane].view.offset =
+            (mouse_bar - x_rel / bar_advance(new)).round().max(0.0) as usize;
     }
 
-    pub(crate) fn clamp_view(&mut self, plot_w: f32) {
-        self.visible = visible_bars(plot_w, self.scale).min(self.bars.len());
-        self.offset = self
-            .offset
-            .min(self.bars.len().saturating_sub(self.visible));
+    pub(crate) fn clamp_view(&mut self, pane: usize, plot_w: f32) {
+        let bar_count = self.bars.len();
+        let view = &mut self.panes[pane].view;
+        view.visible = visible_bars(plot_w, view.scale).min(bar_count);
+        view.offset = view.offset.min(bar_count.saturating_sub(view.visible));
     }
 
     pub(crate) fn time_step(&mut self, advance: f32) -> usize {

@@ -18,7 +18,7 @@
       "btn_hover": "#DDDDDD",
       "btn_press": "#AAAAAA",
       "sel_bg": "#DDDDDD",
-      "close_hover": "#FF0000",
+      "symbol": "#000000",
       "ctrl_border": "#999999",
       "line": "#999999",
       "text": "#000000",

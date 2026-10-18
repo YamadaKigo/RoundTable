@@ -112,13 +112,18 @@ pub(crate) enum WinKeys {
 impl WinKeys {
     fn shown(self) -> &'static [(SysButton, usize)] {
         match self {
-            WinKeys::CloseOnly => &[(SysButton::Close, 2)],
+            WinKeys::CloseOnly => &[(SysButton::Pin, 0), (SysButton::Close, 1)],
 
-            WinKeys::MinAndClose => &[(SysButton::Minimize, 1), (SysButton::Close, 2)],
-            WinKeys::MinMaxClose => &[
-                (SysButton::Minimize, 0),
-                (SysButton::Maximize, 1),
+            WinKeys::MinAndClose => &[
+                (SysButton::Pin, 0),
+                (SysButton::Minimize, 1),
                 (SysButton::Close, 2),
+            ],
+            WinKeys::MinMaxClose => &[
+                (SysButton::Pin, 0),
+                (SysButton::Minimize, 1),
+                (SysButton::Maximize, 2),
+                (SysButton::Close, 3),
             ],
         }
     }
@@ -127,6 +132,7 @@ impl WinKeys {
 #[derive(Clone, Copy)]
 pub(crate) struct WinOut {
     pub(crate) panel: Option<egui::Rect>,
+    pub(crate) pin: bool,
     pub(crate) minimize: bool,
     pub(crate) maximize: bool,
     pub(crate) close: bool,
@@ -302,6 +308,7 @@ impl Win {
         self.end_sessions();
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn begin(
         &mut self,
         app: &mut StockApp,
@@ -310,6 +317,7 @@ impl Win {
         title_text: &str,
         keys: WinKeys,
         busy: bool,
+        pinned: bool,
     ) -> WinOut {
         self.update_geometry(app, ui, bounds);
         let rect = self.rect();
@@ -322,7 +330,7 @@ impl Win {
         self.grips(ui);
 
         let title = self.title_band();
-        let keys_rects = sys_button_rects(title);
+        let keys_rects = sys_button_rects_n(title, keys.shown().len());
 
         let mut handle_end = title.max.x;
         for &(_, slot) in keys.shown() {
@@ -341,6 +349,7 @@ impl Win {
             title_text,
             keys,
             self.maximized,
+            pinned,
         );
 
         if let Some(p) = self.drag_title(ui, handle, busy, app.pointer.live) {
@@ -349,6 +358,7 @@ impl Win {
 
         WinOut {
             panel: Some(rect),
+            pin: hit == Some(SysButton::Pin),
             minimize: hit == Some(SysButton::Minimize),
             maximize: hit == Some(SysButton::Maximize),
             close: hit == Some(SysButton::Close),
@@ -598,10 +608,11 @@ pub(crate) fn paint_title_bar(
     text: &str,
     keys: WinKeys,
     maximized: bool,
+    pinned: bool,
 ) -> Option<SysButton> {
     painter.rect_filled(title, egui::CornerRadius::ZERO, theme().title_bg);
 
-    let rects = sys_button_rects(title);
+    let rects = sys_button_rects_n(title, keys.shown().len());
     let mut keys_left = title.max.x;
     for &(_, slot) in keys.shown() {
         keys_left = keys_left.min(rects[slot].min.x);
@@ -634,33 +645,18 @@ pub(crate) fn paint_title_bar(
             egui::Sense::click(),
         );
         let hot = resp.hovered();
-        let (face, symbol) = match kind {
-            SysButton::Close => (close_key_face(hot), close_key_symbol(hot)),
-            SysButton::Minimize | SysButton::Maximize => (
-                if hot {
-                    theme().btn_hover
-                } else {
-                    theme().btn_face
-                },
-                theme().text,
-            ),
-        };
-        painter.rect_filled(rect, egui::CornerRadius::ZERO, face);
-        border_hard(painter, rect, theme().ctrl_border);
-
         let restore = matches!(keys, WinKeys::MinAndClose) && kind == SysButton::Minimize;
-        if restore {
-            paint_restore_symbol(
-                painter,
-                egui::pos2(rect.min.x + CELL_CENTER, rect.min.y + CELL_CENTER),
-                symbol,
-            );
-        } else {
-            kind.paint_symbol_max(painter, rect, symbol, face, maximized);
-        }
+        paint_sys_button(app, painter, rect, hot, kind, maximized, restore, pinned);
 
         app.probe(
             match (kind, restore) {
+                (SysButton::Pin, _) => {
+                    if pinned {
+                        "解除置顶键"
+                    } else {
+                        "置顶键"
+                    }
+                }
                 (SysButton::Minimize, true) => "还原键",
                 (SysButton::Minimize, false) => "最小化键",
                 (SysButton::Maximize, _) => "最大化键",

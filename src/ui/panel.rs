@@ -196,7 +196,7 @@ impl StockApp {
         work: egui::Rect,
         which: LeftSplit,
     ) {
-        let chart_dragging = self.pan.is_some();
+        let chart_dragging = self.panes.iter().any(|pane| pane.view.pan.is_some());
         let resp = ui.allocate_rect(
             bar,
             if chart_dragging {
@@ -456,8 +456,12 @@ impl StockApp {
                 };
             }
             PanelAction::ResetView => {
-                self.scale = SCALE_MIN;
-                self.offset = 0;
+                if let Some(pane) = self.active_chart_pane() {
+                    let view = &mut self.panes[pane].view;
+                    view.scale = SCALE_MIN;
+                    view.offset = 0;
+                    view.crosshair = None;
+                }
             }
             PanelAction::ToggleGrid => {
                 self.show_grid = !self.show_grid;
@@ -480,7 +484,10 @@ impl StockApp {
     }
 
     pub(crate) fn zoom_step(&mut self, notches: i32) {
-        self.scale = scale_after(self.scale, notches);
+        if let Some(pane) = self.active_chart_pane() {
+            let view = &mut self.panes[pane].view;
+            view.scale = scale_after(view.scale, notches);
+        }
     }
 
     pub(crate) fn regenerate_random_walk(&mut self) {
@@ -489,9 +496,12 @@ impl StockApp {
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1_442_695_040_888_963_407);
         crate::ecs::regenerate_market(&mut self.world);
-        self.offset = 0;
-        self.scale = BAR_SCALE_DEFAULT;
-        self.crosshair = None;
+        for pane in &mut self.panes {
+            pane.view.offset = 0;
+            pane.view.scale = BAR_SCALE_DEFAULT;
+            pane.view.crosshair = None;
+            pane.view.pan = None;
+        }
         self.status_msg = format!("已生成新的随机行情（种子 {}）", self.bar_seed);
     }
 }

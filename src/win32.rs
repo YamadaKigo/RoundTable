@@ -40,6 +40,7 @@ unsafe extern "system" {
     pub(crate) fn GetCursorPos(p: *mut Point) -> i32;
     pub(crate) fn SetCursorPos(x: i32, y: i32) -> i32;
     pub(crate) fn ClientToScreen(hwnd: isize, p: *mut Point) -> i32;
+    pub(crate) fn GetLocalTime(time: *mut SystemTime);
 }
 
 #[repr(C)]
@@ -48,8 +49,28 @@ pub(crate) struct Point {
     pub(crate) y: i32,
 }
 
+#[repr(C)]
+pub(crate) struct SystemTime {
+    year: u16,
+    month: u16,
+    day_of_week: u16,
+    day: u16,
+    hour: u16,
+    minute: u16,
+    second: u16,
+    milliseconds: u16,
+}
+
 #[link(name = "kernel32")]
 unsafe extern "system" {
+    pub(crate) fn CreateMutexW(
+        attrs: *mut core::ffi::c_void,
+        owner: i32,
+        name: *const u16,
+    ) -> isize;
+    pub(crate) fn CloseHandle(handle: isize) -> i32;
+    pub(crate) fn GetLastError() -> u32;
+    pub(crate) fn SetLastError(error: u32);
     pub(crate) fn GlobalLock(handle: isize) -> *mut u8;
     pub(crate) fn GlobalUnlock(handle: isize) -> i32;
 }
@@ -64,6 +85,28 @@ pub(crate) fn message_box(title: &str, body: &str) {
     unsafe {
         MessageBoxW(0, body.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
     }
+}
+
+static SINGLE_INSTANCE_HANDLE: AtomicIsize = AtomicIsize::new(0);
+
+pub(crate) fn acquire_single_instance() -> bool {
+    if SINGLE_INSTANCE_HANDLE.load(Ordering::Acquire) != 0 {
+        return true;
+    }
+    let name = wide("Local\\RoundTable.SingleInstance");
+    unsafe {
+        SetLastError(0);
+        let handle = CreateMutexW(core::ptr::null_mut(), 0, name.as_ptr());
+        if handle == 0 {
+            return false;
+        }
+        if GetLastError() == 183 {
+            CloseHandle(handle);
+            return false;
+        }
+        SINGLE_INSTANCE_HANDLE.store(handle, Ordering::Release);
+    }
+    true
 }
 
 pub(crate) const CF_UNICODETEXT: u32 = 13;
@@ -87,6 +130,21 @@ pub(crate) fn cursor_pos() -> Option<(i32, i32)> {
 
 pub(crate) fn set_cursor_pos(x: i32, y: i32) -> bool {
     unsafe { SetCursorPos(x, y) != 0 }
+}
+
+pub(crate) fn current_time_text() -> String {
+    let mut time = SystemTime {
+        year: 0,
+        month: 0,
+        day_of_week: 0,
+        day: 0,
+        hour: 0,
+        minute: 0,
+        second: 0,
+        milliseconds: 0,
+    };
+    unsafe { GetLocalTime(&mut time) };
+    format!("{:02}:{:02}:{:02}", time.hour, time.minute, time.second)
 }
 
 pub(crate) fn client_origin(hwnd: isize) -> Option<(i32, i32)> {

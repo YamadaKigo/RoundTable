@@ -1,7 +1,5 @@
 use std::path::{Path, PathBuf};
 
-pub(crate) const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/logo/app.ico");
-
 pub(crate) fn root() -> PathBuf {
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
@@ -24,6 +22,10 @@ pub(crate) fn logo_dir() -> PathBuf {
 
 pub(crate) fn cursors_dir() -> PathBuf {
     root().join("cursors")
+}
+
+pub(crate) fn symbols_dir() -> PathBuf {
+    root().join("symbols")
 }
 
 pub(crate) fn themes_dir() -> PathBuf {

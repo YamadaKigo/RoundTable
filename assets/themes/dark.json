@@ -18,7 +18,7 @@
       "btn_hover": "#222222",
       "btn_press": "#555555",
       "sel_bg": "#222222",
-      "close_hover": "#FF0000",
+      "symbol": "#FFFFFF",
       "ctrl_border": "#FF0000",
       "line": "#FF0000",
       "text": "#FFFFFF",

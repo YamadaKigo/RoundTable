@@ -2,21 +2,15 @@ use crate::ecs::ComponentTable;
 #[cfg(test)]
 use crate::ecs::Entity;
 use crate::ecs::entity::EntityAllocator;
-use crate::ecs::{Crosshair, MarketBars, Pane};
+use crate::ecs::{MarketBars, Pane};
 use crate::grid::*;
 use crate::indicator;
 use crate::theme::{DOWN_RGB_DEFAULT, UP_RGB_DEFAULT};
-use crate::ui::panel::{CHART_PANE_W, IND_H_DEFAULT, KLINE_H_DEFAULT, VOL_H_DEFAULT};
+use crate::ui::panel::{IND_H_DEFAULT, KLINE_H_DEFAULT, VOL_H_DEFAULT};
 
 pub(crate) struct AppWorld {
     pub(crate) bars: MarketBars,
     pub(crate) bar_seed: u64,
-    pub(crate) scale: u32,
-    pub(crate) offset: usize,
-    pub(crate) visible: usize,
-    pub(crate) pan: Option<(f32, usize)>,
-    pub(crate) zoom_acc: f32,
-    pub(crate) crosshair: Option<Crosshair>,
     pub(crate) panes: ComponentTable<Pane>,
     pub(crate) panes_palette: indicator::Palette,
     pub(crate) kline_h: f32,
@@ -43,12 +37,6 @@ impl AppWorld {
                 BAR_SEED, BAR_COUNT, BAR_START,
             )),
             bar_seed: BAR_SEED,
-            scale: BAR_SCALE_DEFAULT,
-            offset: 0,
-            visible: visible_bars(CHART_PANE_W - LINE_W - AXIS_W, BAR_SCALE_DEFAULT),
-            pan: None,
-            zoom_acc: 0.0,
-            crosshair: None,
             panes: pane_components,
             panes_palette: palette,
             kline_h: KLINE_H_DEFAULT,

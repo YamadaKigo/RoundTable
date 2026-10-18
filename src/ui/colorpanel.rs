@@ -388,7 +388,7 @@ impl StockApp {
 
         let out = cp
             .win
-            .begin(self, ui, work, "颜色设置", WinKeys::CloseOnly, false);
+            .begin(self, ui, work, "颜色设置", WinKeys::CloseOnly, false, false);
 
         self.probe("颜色面板", cp.win.rect());
         if out.close {
@@ -581,7 +581,7 @@ impl StockApp {
                 text: if cp.hex_valid {
                     theme().text
                 } else {
-                    theme().close_hover
+                    theme().candle_up
                 },
                 edge: None,
             },

@@ -338,29 +338,6 @@ pub(crate) fn floating_label_top(
     clamp_soft(snap, top_line, bot_line - span)
 }
 
-pub(crate) fn paint_cross(
-    painter: &egui::Painter,
-    center: egui::Pos2,
-    radius: i32,
-    color: egui::Color32,
-) {
-    let cx = center.x.round() as i32;
-    let cy = center.y.round() as i32;
-    let put = |col: i32, row: i32| {
-        let block = egui::Rect::from_min_size(
-            egui::pos2(col as f32, row as f32),
-            egui::vec2(LINE_W, LINE_W),
-        );
-        painter.rect_filled(block, egui::CornerRadius::ZERO, color);
-    };
-    for d in 0..=radius {
-        put(cx - d, cy - d);
-        put(cx + d, cy - d);
-        put(cx - d, cy + d);
-        put(cx + d, cy + d);
-    }
-}
-
 pub(crate) fn tag_box(
     painter: &egui::Painter,
     rect: egui::Rect,

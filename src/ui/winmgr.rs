@@ -45,6 +45,10 @@ pub(crate) struct ManagedWin {
 
     pub(crate) pane: usize,
 
+    pub(crate) pinned: bool,
+
+    pin_seq: u64,
+
     mini_seq: u64,
 
     mini_w: f32,
@@ -74,10 +78,6 @@ pub(crate) struct WinMgr {
 
     pub(crate) plots: Vec<egui::Rect>,
 
-    pub(crate) plot_w_max: f32,
-
-    plot_owner: Vec<usize>,
-
     pending: Option<u64>,
 
     pub(crate) work: egui::Rect,
@@ -85,6 +85,7 @@ pub(crate) struct WinMgr {
     placed: bool,
     next_id: u64,
     next_mini: u64,
+    next_pin: u64,
 }
 
 impl WinMgr {
@@ -92,13 +93,12 @@ impl WinMgr {
         Self {
             wins: Vec::new(),
             plots: Vec::new(),
-            plot_w_max: 0.0,
-            plot_owner: Vec::new(),
             pending: None,
             work: egui::Rect::NOTHING,
             placed: false,
             next_id: 1,
             next_mini: 0,
+            next_pin: 0,
         }
     }
 
@@ -107,6 +107,15 @@ impl WinMgr {
     }
 
     pub(crate) fn with_default_windows() -> Self {
+        Self::with_initial_chart(false)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_default_windows_and_chart() -> Self {
+        Self::with_initial_chart(true)
+    }
+
+    fn with_initial_chart(chart: bool) -> Self {
         let mut mgr = Self::new();
         mgr.add(
             WinKind::Panel,
@@ -115,13 +124,15 @@ impl WinMgr {
             egui::vec2(PANEL_W, PANEL_CHILD_H),
             egui::vec2(PANEL_W, PANEL_CHILD_H),
         );
-        mgr.add(
-            WinKind::Chart,
-            WIN_CHART_TITLE,
-            PANE_CANDLE,
-            egui::vec2(NEW_WIN_W, NEW_WIN_H),
-            Self::chart_min_size(),
-        );
+        if chart {
+            mgr.add(
+                WinKind::Chart,
+                WIN_CHART_TITLE,
+                PANE_CANDLE,
+                egui::vec2(NEW_WIN_W, NEW_WIN_H),
+                Self::chart_min_size(),
+            );
+        }
         mgr
     }
 
@@ -146,6 +157,8 @@ impl WinMgr {
             minimized: false,
             restore: (egui::Pos2::ZERO, size),
             pane,
+            pinned: false,
+            pin_seq: 0,
             mini_seq: 0,
             mini_w: MINI_W,
             w,
@@ -303,7 +316,7 @@ impl WinMgr {
     }
 
     pub(crate) fn mini_width(app: &mut StockApp, title: &str) -> f32 {
-        let need = app.text_width(title) + 2.0 * TEXT_PAD_X + 2.0 * SYS_BTN_W - LINE_W;
+        let need = app.text_width(title) + 2.0 * TEXT_PAD_X + 3.0 * SYS_BTN_W - LINE_W;
         cells(((need - LINE_W) / PITCH).ceil() as i32).max(MINI_W)
     }
 
@@ -340,10 +353,34 @@ impl WinMgr {
     fn draw_order(&self) -> Vec<usize> {
         let live = |w: &ManagedWin, mini: bool| w.w.open && w.minimized == mini;
         let mut out: Vec<usize> = (0..self.wins.len())
-            .filter(|&i| live(&self.wins[i], false))
+            .filter(|&i| live(&self.wins[i], false) && !self.wins[i].pinned)
             .collect();
+        let mut pinned: Vec<usize> = (0..self.wins.len())
+            .filter(|&i| live(&self.wins[i], false) && self.wins[i].pinned)
+            .collect();
+        pinned.sort_by_key(|&i| self.wins[i].pin_seq);
+        out.extend(pinned);
         out.extend((0..self.wins.len()).filter(|&i| live(&self.wins[i], true)));
         out
+    }
+
+    pub(crate) fn toggle_pin(&mut self, i: usize) {
+        self.wins[i].pinned = !self.wins[i].pinned;
+        if self.wins[i].pinned {
+            self.wins[i].pin_seq = self.next_pin;
+            self.next_pin += 1;
+        } else {
+            self.wins[i].pin_seq = 0;
+        }
+        self.wins[i].w.end_sessions();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn order_ids(&self) -> Vec<u64> {
+        self.draw_order()
+            .into_iter()
+            .map(|i| self.wins[i].w.id)
+            .collect()
     }
 
     fn top_win_at(&self, p: egui::Pos2) -> Option<usize> {
@@ -358,6 +395,14 @@ impl WinMgr {
             .into_iter()
             .rev()
             .find(|&i| !self.wins[i].minimized)
+    }
+
+    pub(crate) fn top_chart_pane(&self) -> Option<usize> {
+        self.draw_order()
+            .into_iter()
+            .rev()
+            .find(|&i| self.wins[i].kind == WinKind::Chart && self.wins[i].w.open)
+            .map(|i| self.wins[i].pane)
     }
 
     fn press_owner_at(&self, p: egui::Pos2) -> Option<usize> {
@@ -562,11 +607,6 @@ impl WinMgr {
         let panes = app.panes.len();
         self.plots.clear();
         self.plots.resize(panes, egui::Rect::NOTHING);
-        self.plot_owner.clear();
-        self.plot_owner.resize(panes, usize::MAX);
-        let live = self.live_index();
-        let all = app.pan.is_some();
-        self.plot_w_max = 0.0;
         for i in self.draw_order() {
             if !self.wins[i].w.open || self.wins[i].kind != WinKind::Chart || self.wins[i].minimized
             {
@@ -577,11 +617,6 @@ impl WinMgr {
             let layout = app.panes[pane].indicator.layout();
             let (_, _, main, _) = chart_rows(body, layout);
             self.plots[pane] = frame_rects(main).0;
-            self.plot_owner[pane] = i;
-            self.plot_w_max = self.plot_w_max.max(self.plots[pane].width());
-            if !all && live != Some(i) {
-                self.plots[pane] = egui::Rect::NOTHING;
-            }
         }
     }
 
@@ -622,7 +657,6 @@ impl WinMgr {
                 let layout = app.panes[pane].indicator.layout();
                 let (_, _, main, _) = chart_rows(body, layout);
                 self.plots[pane] = frame_rects(main).0;
-                self.plot_owner[pane] = i;
                 app.ui_chart(ui, pane, body);
             }
             WinKind::Source => {
@@ -662,8 +696,10 @@ impl WinMgr {
                 &name,
                 WinKeys::MinAndClose,
                 false,
+                self.wins[i].pinned,
             );
             match hit {
+                Some(SysButton::Pin) => self.toggle_pin(i),
                 Some(SysButton::Minimize) => self.toggle_minimize(app, i),
                 Some(SysButton::Close) => self.close_win(app, i),
 
@@ -674,10 +710,13 @@ impl WinMgr {
         }
 
         let work = self.work;
+        let pinned = self.wins[i].pinned;
         let out = self.wins[i]
             .w
-            .begin(app, ui, work, &name, WinKeys::MinMaxClose, busy);
-        if out.close {
+            .begin(app, ui, work, &name, WinKeys::MinMaxClose, busy, pinned);
+        if out.pin {
+            self.toggle_pin(i);
+        } else if out.close {
             self.close_win(app, i);
         } else if out.maximize {
             self.wins[i].w.toggle_maximize(work);

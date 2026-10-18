@@ -33,6 +33,8 @@ impl ButtonState {
 pub(crate) enum ButtonContent {
     Text(String),
 
+    Symbol(SymbolKind),
+
     #[allow(dead_code)]
     IconText(IconKind, String),
 
@@ -43,10 +45,24 @@ impl ButtonContent {
     pub(crate) fn label(&self) -> String {
         match self {
             ButtonContent::Text(text) => text.clone(),
+            ButtonContent::Symbol(kind) => kind.file_stem().to_owned(),
             ButtonContent::IconText(_, text) => text.clone(),
             ButtonContent::Icon(kind) => kind.label().to_owned(),
         }
     }
+
+    pub(crate) fn class(&self) -> ButtonClass {
+        match self {
+            ButtonContent::Text(_) | ButtonContent::Symbol(_) => ButtonClass::Text,
+            ButtonContent::Icon(_) | ButtonContent::IconText(..) => ButtonClass::Icon,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ButtonClass {
+    Text,
+    Icon,
 }
 
 #[derive(Clone)]
@@ -90,6 +106,7 @@ impl StockApp {
     pub(crate) fn button_width(&mut self, content: &ButtonContent) -> f32 {
         let inner = match content {
             ButtonContent::Text(text) => self.text_width(text),
+            ButtonContent::Symbol(_) => SYMBOL_W,
             ButtonContent::IconText(_, text) => ICON_W + ICON_GAP + self.text_width(text),
 
             ButtonContent::Icon(_) => return cells(2),
@@ -133,6 +150,12 @@ impl StockApp {
                     &text,
                     theme().text,
                 );
+            }
+            ButtonContent::Symbol(kind) => {
+                let symbol = self.symbols.get(*kind);
+                let rect =
+                    egui::Rect::from_center_size(rect.center(), egui::vec2(SYMBOL_W, SYMBOL_H));
+                symbol.paint(painter, rect, theme().symbol);
             }
             ButtonContent::Icon(kind) => {
                 let icon = egui::Rect::from_min_size(

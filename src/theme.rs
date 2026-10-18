@@ -13,7 +13,6 @@ pub(crate) const C_STATUS_BG: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC
 pub(crate) const C_BTN_FACE: egui::Color32 = egui::Color32::from_rgb(0xCC, 0xCC, 0xCC);
 
 pub(crate) const C_BTN_HOVER: egui::Color32 = egui::Color32::from_rgb(0xDD, 0xDD, 0xDD);
-pub(crate) const C_CLOSE_HOVER: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0x00);
 pub(crate) const C_BORDER_RED: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0x00);
 pub(crate) const C_TEXT: egui::Color32 = egui::Color32::from_rgb(0x00, 0x00, 0x00);
 pub(crate) const C_TEXT_WHITE: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
@@ -120,7 +119,7 @@ pub(crate) struct Theme {
 
     pub(crate) sel_bg: egui::Color32,
 
-    pub(crate) close_hover: egui::Color32,
+    pub(crate) symbol: egui::Color32,
 
     pub(crate) ctrl_border: egui::Color32,
 
@@ -203,7 +202,7 @@ impl Theme {
         btn_hover: C_BTN_HOVER,
         btn_press: C_BTN_PRESS,
         sel_bg: C_SEL_BG,
-        close_hover: C_CLOSE_HOVER,
+        symbol: C_TEXT,
         ctrl_border: C_CTRL_BORDER,
         line: C_LINE,
         chart_line: C_LINE,
@@ -282,7 +281,7 @@ impl Theme {
         t.candle_down = egui::Color32::from_rgb(0x00, 0xFF, 0xFF);
         t.ctrl_border = C_BORDER_RED;
         t.line = C_BORDER_RED;
-        t.close_hover = C_CLOSE_HOVER;
+        t.symbol = C_TEXT_WHITE;
         t.text_white = C_TEXT_WHITE;
         t
     }
@@ -358,7 +357,7 @@ impl Theme {
             btn_hover: colors.window.btn_hover.0,
             btn_press: colors.window.btn_press.0,
             sel_bg: colors.window.sel_bg.0,
-            close_hover: colors.window.close_hover.0,
+            symbol: colors.window.symbol.0,
             ctrl_border: colors.window.ctrl_border.0,
             line: colors.window.line.0,
             chart_line: colors.chart.chart_line.0,
@@ -432,7 +431,7 @@ impl Theme {
             self.btn_hover,
             self.btn_press,
             self.sel_bg,
-            self.close_hover,
+            self.symbol,
             self.ctrl_border,
             self.line,
             self.chart_line,
@@ -531,7 +530,7 @@ struct WindowColors {
     btn_hover: HexColor,
     btn_press: HexColor,
     sel_bg: HexColor,
-    close_hover: HexColor,
+    symbol: HexColor,
     ctrl_border: HexColor,
     line: HexColor,
     text: HexColor,
@@ -686,9 +685,9 @@ const _: () = assert!(
         && Theme::DARK.candle_down.b() == 0xFF
 );
 const _: () = assert!(
-    Theme::DARK.close_hover.r() == 0xFF
-        && Theme::DARK.close_hover.g() == 0x00
-        && Theme::DARK.close_hover.b() == 0x00
+    Theme::DARK.symbol.r() == 0xFF
+        && Theme::DARK.symbol.g() == 0xFF
+        && Theme::DARK.symbol.b() == 0xFF
 );
 const _: () = assert!(
     Theme::DARK.chart_line.r() == 0xFF

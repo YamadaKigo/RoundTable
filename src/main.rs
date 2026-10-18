@@ -84,6 +84,9 @@ fn report_crash(text: &str) {
 
 fn main() -> eframe::Result {
     install_panic_hook();
+    if !platform::acquire_single_instance() {
+        return Ok(());
+    }
     let result = run();
 
     if let Err(e) = &result {
@@ -107,12 +110,11 @@ fn run() -> eframe::Result {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_NAME)
-            .with_icon(crate::ui::icon::app_icon())
             .with_decorations(false)
             .with_position([win_x, win_y])
             .with_inner_size([win_w, win_h])
             .with_min_inner_size([WINDOW_MIN_W, WINDOW_MIN_H])
-            .with_maximized(false),
+            .with_fullscreen(true),
         wgpu_options,
         ..Default::default()
     };

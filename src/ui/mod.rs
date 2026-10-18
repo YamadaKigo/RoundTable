@@ -12,6 +12,7 @@ pub(crate) mod panel;
 pub(crate) mod panemenu;
 pub(crate) mod pointerdebug;
 pub(crate) mod source;
+pub(crate) mod symbol;
 pub(crate) mod textbox;
 pub(crate) mod textbuf;
 pub(crate) mod titlebar;

@@ -381,14 +381,17 @@ impl DebugConsole {
                 app.switch_theme();
                 self.log(format!("theme={}", theme().name()));
             }
-            "data" => self.log(format!(
-                "bars={} seed={} scale={} offset={} visible={}",
-                app.bars.len(),
-                app.bar_seed,
-                app.scale,
-                app.offset,
-                app.visible
-            )),
+            "data" => {
+                let view = app.active_chart_pane().map(|pane| &app.panes[pane].view);
+                self.log(format!(
+                    "bars={} seed={} scale={} offset={} visible={}",
+                    app.bars.len(),
+                    app.bar_seed,
+                    view.map_or(0, |view| view.scale),
+                    view.map_or(0, |view| view.offset),
+                    view.map_or(0, |view| view.visible)
+                ));
+            }
             "windows" => {
                 let open = app.debug_windows.windows.len();
                 self.log(format!("windows={open}"));
@@ -433,13 +436,14 @@ impl DebugConsole {
             p.y,
             if app.pointer.show_trail { "on" } else { "off" }
         ));
+        let view = app.active_chart_pane().map(|pane| &app.panes[pane].view);
         self.log(format!(
             "data bars={} seed={} scale={} offset={} visible={}",
             app.bars.len(),
             app.bar_seed,
-            app.scale,
-            app.offset,
-            app.visible
+            view.map_or(0, |view| view.scale),
+            view.map_or(0, |view| view.offset),
+            view.map_or(0, |view| view.visible)
         ));
         self.log(format!(
             "theme={} grid={} charts={} source={} console={}",

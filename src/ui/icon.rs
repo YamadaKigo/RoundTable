@@ -218,24 +218,65 @@ impl IconSet {
     }
 }
 
-pub(crate) use crate::assets::APP_ICON_BYTES;
-
 #[cfg(test)]
 pub(crate) use crate::assets::{icons_dir, logo_dir};
 
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) const APP_ICON_SIZES: [u32; 9] = [16, 32, 48, 64, 80, 96, 128, 256, 512];
+pub(crate) struct PixelImage {
+    width: usize,
+    height: usize,
+    px: Vec<Option<egui::Color32>>,
+}
 
-pub(crate) fn app_icon() -> egui::IconData {
-    std::fs::read(crate::assets::logo_dir().join("app.ico"))
-        .ok()
-        .and_then(|bytes| app_icon_from_ico(&bytes))
-        .or_else(|| app_icon_from_ico(APP_ICON_BYTES))
-        .unwrap_or_else(|| egui::IconData {
-            rgba: [0xCC, 0x00, 0x00, 0xFF].repeat(32 * 32),
+impl PixelImage {
+    pub(crate) fn load_logo_32() -> Option<Self> {
+        let bytes = std::fs::read(crate::assets::logo_dir().join("RoundTable_32.ico")).ok()?;
+        Self::from_icon_data(&app_icon_from_ico(&bytes)?)
+    }
+
+    fn from_icon_data(data: &egui::IconData) -> Option<Self> {
+        if data.width != 32 || data.height != 32 || data.rgba.len() != 32 * 32 * 4 {
+            return None;
+        }
+        let px = data
+            .rgba
+            .chunks_exact(4)
+            .map(|px| (px[3] >= 128).then_some(egui::Color32::from_rgb(px[0], px[1], px[2])))
+            .collect();
+        Some(Self {
             width: 32,
             height: 32,
+            px,
         })
+    }
+
+    pub(crate) fn paint(&self, painter: &egui::Painter, rect: egui::Rect) {
+        let x0 = rect.min.x.round();
+        let y0 = rect.min.y.round();
+        let mut mesh = egui::Mesh::default();
+        for row in 0..self.height {
+            let mut col = 0usize;
+            while col < self.width {
+                let Some(color) = self.px[row * self.width + col] else {
+                    col += 1;
+                    continue;
+                };
+                let start = col;
+                while col < self.width && self.px[row * self.width + col] == Some(color) {
+                    col += 1;
+                }
+                mesh.add_colored_rect(
+                    egui::Rect::from_min_size(
+                        egui::pos2(x0 + start as f32, y0 + row as f32),
+                        egui::vec2((col - start) as f32, LINE_W),
+                    ),
+                    color,
+                );
+            }
+        }
+        if !mesh.is_empty() {
+            painter.add(egui::Shape::mesh(mesh));
+        }
+    }
 }
 
 pub(crate) fn app_icon_from_ico(bytes: &[u8]) -> Option<egui::IconData> {

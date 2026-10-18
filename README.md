@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo/RoundTable_128.png" width="128" height="128" alt="RoundTable logo">
+  <img src="assets/logo/RoundTable_64.ico" width="64" height="64" alt="RoundTable logo">
 </p>
 
 <h1 align="center">RoundTable 圆桌</h1>
@@ -8,7 +8,7 @@
 
 RoundTable 是使用 Rust、eframe、egui 与 wgpu 构建的桌面图表应用。它不使用传统控件皮肤，不依赖圆角、阴影、渐变、透明混色或抗锯齿；窗口、菜单、按钮、输入框、滚动条、图表和指针都由 1px 线条与纯色矩形逐像素绘制。
 
-项目当前内置随机游走行情、K 线/美国线、成交量、MACD、KDJ、RSI、BOLL、OBV、CCI、BIAS、源码编辑器、浮动子窗口和调试控制台。核心数据使用轻量 ECS 组织，主题与图标来自可替换的资源目录。
+项目当前内置随机游走行情、K 线/美国线、成交量、MACD、KDJ、RSI、BOLL、OBV、CCI、BIAS、源码编辑器、浮动子窗口和调试控制台。核心数据使用轻量 ECS 组织，主题、界面符号和位图资源来自可替换的资源目录。
 
 ## 特性
 
@@ -19,9 +19,14 @@ RoundTable 是使用 Rust、eframe、egui 与 wgpu 构建的桌面图表应用�
 - 中文宋体 16px 点阵字与 ASCII Fixedsys 8x16 点阵字。
 - 轻量 ECS 核心：实体、组件表、世界资源与系统分层。
 - 可编辑 JSON 主题，默认读取 `assets/themes/light.json`。
-- 默认应用图标为 `assets/logo/app.ico`。
+- 标题按钮使用可换色 PNG 符号，颜色由主题 JSON 控制。
+- 子窗口支持置顶，置顶窗口按置顶先后顺序排列层级。
+- 每个图表拥有独立的缩放、平移、可见范围和十字光标状态。
+- 启动即全屏，初始工作区不创建图表窗。
+- 单实例运行，重复启动不会打开第二个主程序。
 - 多图表窗口、控制面板、源码窗、控制台窗、调色板和右键菜单。
-- 175 项像素级自动化测试，覆盖布局、线宽、字距、主题、图标、编辑器和交互。
+- 工作区左上角固定显示 `RoundTable_32.ico`。
+- 182 项像素级自动化测试，覆盖布局、线宽、字距、主题、符号、编辑器和交互。
 
 ## 运行环境
 
@@ -67,6 +72,7 @@ assets\
 - 鼠标左键拖动图表：横向平移。
 - 十字光标：悬停图表查看索引、价格和时间标签。
 - 图表标题栏：可切换指标、叠加均线/EMA/BOLL、打开源码。
+- 子窗口标题栏：置顶、最小化、最大化/还原、关闭；置顶按钮位于最小化左侧。
 - 控制面板：重新生成行情、修改涨跌色、缩放、切换主题、UI 网格测试、新增图表和打开控制台。
 - 窗口标题栏：拖动、最小化、最大化、关闭。
 - 窗口边缘：自由尺寸缩放，连续到 1px。
@@ -77,15 +83,33 @@ assets\
 
 ## 默认资源
 
-### 应用图标
+### 程序图标与工作区 Logo
 
-默认图标文件：
+应用暂不设置自定义程序图标，Windows 使用系统默认程序图标。窗口 Viewport 也不再传入 egui/eframe 的图标。
+
+工作区左上角固定绘制：
 
 ```text
-assets/logo/app.ico
+assets/logo/RoundTable_32.ico
 ```
 
-程序启动时优先读取该 ICO，并选择其中最大的正方形图像作为窗口图标。若文件缺失或格式无效，会使用编译期嵌入的同一 ICO 作为回退。替换图标后重启即可生效，无需重新编译。`assets/logo/` 下的 `RoundTable_*.png` 用于视觉资源与一致性测试，不参与运行时缩放。
+该 Logo 以 32×32 像素硬边绘制，不随子窗口移动。其余 `RoundTable_*.ico` 可通过 `tools/make_app_icon.ps1` 系列工具维护。
+
+### 界面符号
+
+标题栏按钮符号位于：
+
+```text
+assets/symbols/
+  minimize.png
+  maximize.png
+  restore.png
+  close.png
+  pin.png
+  unpin.png
+```
+
+符号固定为 16×16 PNG。`#FF00FF` 表示透明，其他像素只作为蒙版；运行时统一使用主题字段 `window.symbol` 的颜色重绘，因此与文字一样跟随主题变化。关闭按钮与其他标题按钮共用按钮底色和悬停色，不再单独变红。
 
 ### 主题
 
@@ -149,7 +173,7 @@ assets/themes/dark.json
 | `btn_hover` | 按钮悬停底色 |
 | `btn_press` | 按钮按下与选中底色 |
 | `sel_bg` | 文本选区底色 |
-| `close_hover` | 关闭键悬停底色 |
+| `symbol` | 标题栏自定义符号颜色 |
 | `ctrl_border` | 控件与窗口边框 |
 | `line` | 区域分隔线 |
 | `text` | 主文字色 |
@@ -250,6 +274,7 @@ src/ecs/
 
 - `Pane`：指标对象、绘图指令缓存、绘图区高度、脏标记。
 - `Crosshair`：十字光标数值、序号、浮点位置与所属面板。
+- `ChartView`：单个图表自己的缩放、偏移、可见根数、平移、滚轮余量和十字光标。
 - `MarketBars`：行情序列资源，提供只读切片访问与整体替换。
 
 `ComponentTable<T>` 将实体 ID 与组件值分开保存，并通过 `Deref`、索引和迭代器提供低开销访问。UI 仍可按下标读取面板，但面板的实体身份由 ECS 管理。
@@ -258,8 +283,7 @@ src/ecs/
 
 `AppWorld` 保存跨实体共享的核心资源：
 
-- 行情种子与 K 线视图窗口。
-- 缩放、偏移、可见根数与平移状态。
+- 行情种子。
 - 当前指标调色板。
 - 图表列高度与叠加配置。
 - 用户自定义涨跌色及“是否跟随主题”状态。
@@ -272,7 +296,7 @@ src/ecs/
 - `ensure_pane_computed`：只对脏面板执行指标计算并更新绘图指令。
 - `regenerate_market`：替换行情资源并让全部面板重算。
 
-`StockApp` 通过 `Deref`/`DerefMut` 借用 `AppWorld`。界面调度仍留在应用层，行情、面板和分析结果由 ECS 核心统一持有，避免把这些状态重新散落到 UI 模块。
+`StockApp` 通过 `Deref`/`DerefMut` 借用 `AppWorld`。界面调度仍留在应用层，行情、面板和分析结果由 ECS 核心统一持有。`ChartView` 挂在各自的面板实体上，因此图表之间不会共享缩放、平移或十字光标。
 
 ## 代码结构
 
@@ -318,14 +342,16 @@ src/
     source.rs         源码窗口与编译动作
     console.rs        调试控制台
     colorpanel.rs     RGB/HSV 调色板
-    button.rs         统一按钮
+    button.rs         文本按钮 / 图标按钮
+    symbol.rs         16px 自定义符号加载与主题着色
     textbox.rs        单行输入框
     textbuf.rs        可编辑文本缓冲
     icon.rs           16px 工具栏图标、光标资源和 ICO 解码
 assets/
   cursors/            软件指针位图
   icons/              工具栏 16x16 图标
-  logo/               应用 ICO 与多尺寸 Logo
+  logo/               工作区 32px Logo 与多尺寸 ICO
+  symbols/            标题按钮自定义 PNG 符号
   themes/             浅色/深色主题 JSON
 ```
 

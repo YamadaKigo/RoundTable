@@ -14,6 +14,7 @@ use crate::ui::icon::*;
 use crate::ui::menu::*;
 use crate::ui::panel::*;
 use crate::ui::source::*;
+pub(crate) use crate::ui::symbol::*;
 use crate::ui::titlebar::*;
 use crate::ui::winmgr::*;
 use eframe::egui;
@@ -296,6 +297,10 @@ pub(crate) struct StockApp {
 
     pub(crate) icons: IconSet,
 
+    pub(crate) symbols: SymbolSet,
+
+    pub(crate) logo: Option<PixelImage>,
+
     pub(crate) cursors: Cursors,
 
     pub(crate) pointer: PointerManager,
@@ -399,6 +404,8 @@ impl StockApp {
             hwnd,
             client_cover_ready,
             icons: IconSet::load_or_create(),
+            symbols: SymbolSet::load(),
+            logo: PixelImage::load_logo_32(),
             cursors: Cursors::load(),
             pointer: PointerManager::new(mouse_feel()),
             tooltip: None,
@@ -493,15 +500,21 @@ impl StockApp {
         if !self.status_msg.is_empty() {
             segs.push(self.status_msg.clone());
         }
+        segs.push(current_time_text());
         segs
     }
 
-    pub(crate) fn chart_status_segments(&self) -> Vec<String> {
+    pub(crate) fn chart_status_segments(&self, pane: usize) -> Vec<String> {
+        let view = &self.panes[pane].view;
         vec![
-            format!("缩放 {}", self.scale),
-            format!("平移 {}", self.offset),
-            format!("可见 {} / 共 {} 根", self.visible, self.bars.len()),
+            format!("缩放 {}", view.scale),
+            format!("平移 {}", view.offset),
+            format!("可见 {} / 共 {} 根", view.visible, self.bars.len()),
         ]
+    }
+
+    pub(crate) fn active_chart_pane(&self) -> Option<usize> {
+        self.win_mgr.top_chart_pane()
     }
 
     pub(crate) fn probe(&mut self, name: &str, rect: egui::Rect) {
@@ -954,7 +967,8 @@ impl StockApp {
             return Some(kind);
         }
 
-        if self.color_panel.win.dragging() || self.pan.is_some() {
+        if self.color_panel.win.dragging() || self.panes.iter().any(|pane| pane.view.pan.is_some())
+        {
             return Some(CursorKind::Move);
         }
         if self.color_panel.drag != ColorDrag::None || self.source.editor.scroll_grab.is_some() {
@@ -1077,15 +1091,23 @@ impl StockApp {
 
         self.chart_interact(ui, &plots, &[]);
 
-        let plot_w = self.win_mgr.plot_w_max;
-        if plot_w > 0.0 {
-            self.clamp_view(plot_w);
+        for (pane, plot) in plots.iter().enumerate() {
+            if plot.is_positive() {
+                self.clamp_view(pane, plot.width());
+            }
         }
         self.update_crosshair(ui, &plots);
 
         let mut mgr = self.win_mgr.take();
         mgr.draw(self, ui, areas[2]);
         self.win_mgr = mgr;
+
+        if let Some(logo) = &self.logo {
+            logo.paint(
+                &ui.painter().clone(),
+                egui::Rect::from_min_size(areas[2].min, egui::vec2(32.0, 32.0)),
+            );
+        }
 
         let blank_right_click = ctx.input(|i| {
             (

@@ -20,6 +20,11 @@ mod fallback {
         eprintln!("{title}: {body}");
     }
 
+    pub(crate) fn acquire_single_instance() -> bool {
+        static ACQUIRED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        !ACQUIRED.swap(true, std::sync::atomic::Ordering::AcqRel)
+    }
+
     pub(crate) fn win32_hwnd(_raw: RawWindowHandle) -> isize {
         0
     }
@@ -42,6 +47,10 @@ mod fallback {
 
     pub(crate) fn set_cursor_pos(_x: i32, _y: i32) -> bool {
         false
+    }
+
+    pub(crate) fn current_time_text() -> String {
+        "00:00:00".to_owned()
     }
 
     pub(crate) fn client_origin(_hwnd: isize) -> Option<(i32, i32)> {

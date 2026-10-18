@@ -89,6 +89,10 @@ fn blank_app() -> StockApp {
 
         icons: IconSet::load_or_create(),
 
+        symbols: SymbolSet::load(),
+
+        logo: PixelImage::load_logo_32(),
+
         cursors: Cursors::load(),
         pointer: crate::pointer::PointerManager::new(crate::pointer::PointerFeel::default()),
         tooltip: None,
@@ -104,7 +108,7 @@ fn blank_app() -> StockApp {
         hsplit_grab: None,
         vsplit_grab: None,
         split_x: CHART_PANE_W,
-        win_mgr: WinMgr::with_default_windows(),
+        win_mgr: WinMgr::with_default_windows_and_chart(),
         work_rect: egui::Rect::NOTHING,
         panel_buttons: Vec::new(),
         panel_press: None,
@@ -128,7 +132,7 @@ fn blank_app() -> StockApp {
     };
 
     app.bars.replace(Vec::new());
-    app.visible = 0;
+    app.panes[0].view.visible = 0;
     app.adopt_theme_candle_colors(theme());
     app.sync_pane_palette();
     app
@@ -682,7 +686,7 @@ fn hex_box_frame_sits_on_grid_lines() {
         hex_rect.max.x as usize - LINE_W as usize,
     );
     let ink = (inner_l..inner_r)
-        .filter(|&cx| (hex_row - 8..hex_row + 8).any(|cy| grid[cy][cx] == Some(C_CLOSE_HOVER)))
+        .filter(|&cx| (hex_row - 8..hex_row + 8).any(|cy| grid[cy][cx] == Some(C_UP)))
         .count();
     assert!(ink > 0, "非法时文字没变红");
 }
@@ -829,7 +833,9 @@ fn volume_bars_align_with_candles() {
         .collect();
     let mut app = blank_app();
     app.replace_bars(bars);
-    app.scale = SCALE_MIN;
+    for pane in &mut app.panes {
+        pane.view.scale = SCALE_MIN;
+    }
 
     let (grid, [kline, _bar, volume, _bar2, _ind]) = render_left(&mut app);
 
@@ -1351,7 +1357,9 @@ fn volume_bars_stretch_with_the_pane() {
 
     let mut app = blank_app();
     app.replace_bars(bars);
-    app.scale = SCALE_MIN;
+    for pane in &mut app.panes {
+        pane.view.scale = SCALE_MIN;
+    }
 
     let work = left_work();
 
@@ -2184,7 +2192,9 @@ fn crosshair_stays_in_the_hovered_chart_only() {
         plots[i] = frame_rects(main).0;
         app.panes[i].height = main.height() as i32;
     }
-    app.clamp_view(plots[0].width());
+    for (pane, plot) in plots.iter().enumerate() {
+        app.clamp_view(pane, plot.width());
+    }
     for i in 0..app.panes.len() {
         app.ensure_pane_computed(i);
     }
@@ -2200,12 +2210,18 @@ fn crosshair_stays_in_the_hovered_chart_only() {
         app.update_crosshair(ui, &plots);
     });
     absorb_textures(&mut out.textures_delta);
-    let cross = app.crosshair.expect("鼠标在图上应该有十字光标");
+    let cross = app.panes[PANE_VOLUME]
+        .view
+        .crosshair
+        .expect("鼠标在图上应该有十字光标");
     assert_eq!(cross.pane, PANE_VOLUME, "十字光标该落在鼠标压着的那一块");
+    assert!(app.panes[PANE_CANDLE].view.crosshair.is_none());
+    assert!(app.panes[PANE_MACD].view.crosshair.is_none());
 
-    let from = app.offset;
-    let advance = bar_advance(app.scale);
-    let x = px_center(plots[0].min.x + (cross.fpos - from as f64) as f32 * advance) as usize;
+    let from = app.panes[PANE_VOLUME].view.offset;
+    let advance = bar_advance(app.panes[PANE_VOLUME].view.scale);
+    let x =
+        px_center(plots[PANE_VOLUME].min.x + (cross.fpos - from as f64) as f32 * advance) as usize;
     let (grid, [k, _b, v, _b2, m]) = render_left(&mut app);
     let vlines = |area: egui::Rect, pane: usize| -> usize {
         let layout = app.panes[pane].indicator.layout();
@@ -2457,9 +2473,9 @@ fn theme_switches_the_whole_palette() {
         "深色图表背景该是黑色"
     );
     assert_eq!(
-        rgb32_u32(theme().close_hover),
-        0xFF0000,
-        "关闭键悬停该是红色"
+        rgb32_u32(theme().symbol),
+        0xFFFFFF,
+        "深色主题的符号色应跟随文字"
     );
 
     set_theme(Theme::CLASSIC);
@@ -2798,7 +2814,9 @@ fn splitter_drag_does_not_touch_the_chart() {
         plots[i] = frame_rects(main).0;
         app.panes[i].height = main.height() as i32;
     }
-    app.clamp_view(plots[0].width());
+    for (pane, plot) in plots.iter().enumerate() {
+        app.clamp_view(pane, plot.width());
+    }
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
     let target = plots[1].center();
 
@@ -2822,9 +2840,15 @@ fn splitter_drag_does_not_touch_the_chart() {
         app.update_crosshair(ui, &plots);
     });
     absorb_textures(&mut out.textures_delta);
-    assert!(app.pan.is_some(), "绘图区按下该能平移");
-    assert!(app.crosshair.is_some(), "鼠标在图上该有十字光标");
-    app.pan = None;
+    assert!(
+        app.panes[PANE_VOLUME].view.pan.is_some(),
+        "绘图区按下该能平移"
+    );
+    assert!(
+        app.panes[PANE_VOLUME].view.crosshair.is_some(),
+        "鼠标在图上该有十字光标"
+    );
+    app.panes[PANE_VOLUME].view.pan = None;
 
     app.hsplit_grab = Some(5.0);
     let mut raw = egui::RawInput::default();
@@ -2835,13 +2859,19 @@ fn splitter_drag_does_not_touch_the_chart() {
         app.update_crosshair(ui, &plots);
     });
     absorb_textures(&mut out.textures_delta);
-    assert!(app.pan.is_none(), "拖拖拽条时不该把图表拖走");
     assert!(
-        app.crosshair.is_none(),
+        app.panes[PANE_VOLUME].view.pan.is_none(),
+        "拖拖拽条时不该把图表拖走"
+    );
+    assert!(
+        app.panes[PANE_VOLUME].view.crosshair.is_none(),
         "拖拖拽条时不该响应图表区的十字光标"
     );
 
-    let before = (app.scale, app.offset);
+    let before = (
+        app.panes[PANE_VOLUME].view.scale,
+        app.panes[PANE_VOLUME].view.offset,
+    );
     let mut raw = egui::RawInput::default();
     raw.screen_rect = Some(screen);
     raw.events = vec![
@@ -2859,12 +2889,15 @@ fn splitter_drag_does_not_touch_the_chart() {
     });
     absorb_textures(&mut out.textures_delta);
     assert_eq!(
-        (app.scale, app.offset),
+        (
+            app.panes[PANE_VOLUME].view.scale,
+            app.panes[PANE_VOLUME].view.offset
+        ),
         before,
         "拖拖拽条时滚轮不该缩放 / 平移 K 线"
     );
     assert!(
-        app.crosshair.is_none(),
+        app.panes[PANE_VOLUME].view.crosshair.is_none(),
         "拖拖拽条时滚轮扫过绘图区也不该冒十字线"
     );
     app.hsplit_grab = None;
@@ -2877,7 +2910,10 @@ fn splitter_drag_does_not_touch_the_chart() {
         app.update_crosshair(ui, &plots);
     });
     absorb_textures(&mut out.textures_delta);
-    assert!(app.crosshair.is_some(), "松开拖拽条之后十字光标该恢复");
+    assert!(
+        app.panes[PANE_VOLUME].view.crosshair.is_some(),
+        "松开拖拽条之后十字光标该恢复"
+    );
 
     app.color_panel.win.set_dragging(true);
     let mut raw = egui::RawInput::default();
@@ -2888,7 +2924,7 @@ fn splitter_drag_does_not_touch_the_chart() {
     });
     absorb_textures(&mut out.textures_delta);
     assert!(
-        app.crosshair.is_none(),
+        app.panes[PANE_VOLUME].view.crosshair.is_none(),
         "拖浮动窗口时不该响应图表区的十字光标"
     );
     app.color_panel.win.set_dragging(false);
@@ -2908,7 +2944,7 @@ fn splitter_drag_does_not_touch_the_chart() {
     });
     absorb_textures(&mut out.textures_delta);
     assert!(
-        app.crosshair.is_none(),
+        app.panes[PANE_VOLUME].view.crosshair.is_none(),
         "拖子窗口时不该响应图表区的十字光标"
     );
     app.win_mgr.wins[win_i].w.set_dragging(false);
@@ -2919,7 +2955,10 @@ fn splitter_drag_does_not_touch_the_chart() {
         app.update_crosshair(ui, &plots);
     });
     absorb_textures(&mut out.textures_delta);
-    assert!(app.crosshair.is_some(), "松开浮动窗口之后十字光标该恢复");
+    assert!(
+        app.panes[PANE_VOLUME].view.crosshair.is_some(),
+        "松开浮动窗口之后十字光标该恢复"
+    );
 }
 
 #[test]
@@ -3006,7 +3045,7 @@ fn status_bar_has_solid_dividers_on_the_grid() {
     app.fps = 60.4;
     app.status_msg = "状态栏测试".to_owned();
     app.replace_bars(data::random_walk::generate(BAR_SEED, 80, BAR_START));
-    app.visible = 80;
+    app.panes[0].view.visible = 80;
     let layout = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
     let areas = split_areas(layout);
     let status = areas[3];
@@ -3085,7 +3124,9 @@ fn panes_render_at_the_minimum_height() {
         app.panes[i].height = main.height() as i32;
         assert!(plots[i].height() > 0.0, "第 {} 块绘图区高度非正", i + 1);
     }
-    app.clamp_view(plots[0].width());
+    for (pane, plot) in plots.iter().enumerate() {
+        app.clamp_view(pane, plot.width());
+    }
     for i in 0..app.panes.len() {
         app.ensure_pane_computed(i);
     }
@@ -3103,9 +3144,12 @@ fn panes_render_at_the_minimum_height() {
             app.ui_chart(ui, i, *area);
         }
     });
-    assert!(app.crosshair.is_some(), "最小高度下十字光标没建起来");
     let _ = ctx.tessellate(std::mem::take(&mut out.shapes), 1.0);
     absorb_textures(&mut out.textures_delta);
+    assert!(
+        app.panes[PANE_MACD].view.crosshair.is_some(),
+        "最小高度下十字光标没建起来"
+    );
 }
 
 #[test]
@@ -3183,9 +3227,10 @@ fn render_window_at(
         app.win_mgr = mgr;
         let plots = app.win_mgr.plots.clone();
         app.chart_interact(ui, &plots, &[]);
-        let plot_w = app.win_mgr.plot_w_max;
-        if plot_w > 0.0 {
-            app.clamp_view(plot_w);
+        for (pane, plot) in plots.iter().enumerate() {
+            if plot.is_positive() {
+                app.clamp_view(pane, plot.width());
+            }
         }
         app.update_crosshair(ui, &plots);
         let mut mgr = app.win_mgr.take();
@@ -3290,7 +3335,7 @@ fn a_window_is_one_piece_while_being_dragged() {
     app.text_engine = HardText::new(&ctx);
     app.replace_bars(data::random_walk::generate(BAR_SEED, BAR_COUNT, BAR_START));
     app.fps = 60.0;
-    app.visible = visible_bars(CHART_PANE_W - LINE_W - AXIS_W, BAR_SCALE_DEFAULT);
+    app.panes[0].view.visible = visible_bars(CHART_PANE_W - LINE_W - AXIS_W, BAR_SCALE_DEFAULT);
     if app.panel_buttons.is_empty() {
         app.build_panel_buttons();
     }
@@ -3408,7 +3453,7 @@ fn dump_full_window_for_visual_check() {
     ctx.set_pixels_per_point(1.0);
     app.text_engine = HardText::new(&ctx);
     app.fps = 60.0;
-    app.visible = visible_bars(CHART_PANE_W - LINE_W - AXIS_W, BAR_SCALE_DEFAULT);
+    app.panes[0].view.visible = visible_bars(CHART_PANE_W - LINE_W - AXIS_W, BAR_SCALE_DEFAULT);
     let grid = render_window(&mut app);
     write_bmp("target/ui_full.bmp", &grid);
 
@@ -4007,22 +4052,19 @@ fn window_overflow_lands_in_the_elastic_bands() {
         "横向零头没落在绘图区（弹性段）里"
     );
     let keys = sys_button_rects(title);
-    for k in keys {
+    for &k in &keys {
         assert_eq!(
             k.size(),
             egui::vec2(SYS_BTN_W, SYS_BTN_H),
             "右边那几个键被零头改了尺寸"
         );
     }
-    assert_eq!(keys[2].max.x, title.max.x, "关闭键没钉在窗口右边");
-    assert_eq!(keys[2].min.y, win.min.y, "关闭键没压在窗口标题栏上");
+    assert_eq!(keys[3].max.x, title.max.x, "关闭键没钉在窗口右边");
+    assert_eq!(keys[3].min.y, win.min.y, "关闭键没压在窗口标题栏上");
 
-    assert_eq!(
-        keys[1].min.x,
-        keys[0].max.x - LINE_W,
-        "最大化没夹在最小化和关闭中间"
-    );
-    assert_eq!(keys[2].min.x, keys[1].max.x - LINE_W, "关闭没挨着最大化");
+    assert_eq!(keys[1].min.x, keys[0].max.x - LINE_W, "最小化没挨着置顶");
+    assert_eq!(keys[2].min.x, keys[1].max.x - LINE_W, "最大化没挨着最小化");
+    assert_eq!(keys[3].min.x, keys[2].max.x - LINE_W, "关闭没挨着最大化");
 }
 
 #[test]
@@ -4093,7 +4135,7 @@ fn window_title_keys_raise_minimize_and_close() {
         .position(|w| w.w.id == old_id)
         .unwrap();
     let before = app.win_mgr.wins[i].rect();
-    let min_key = sys_button_rects(free_band(before, 0, WIN_TITLE_ROWS))[0].center();
+    let min_key = sys_button_rects(free_band(before, 0, WIN_TITLE_ROWS))[1].center();
     win_frame(&mut app, &ctx, work, click(min_key));
     win_frame(&mut app, &ctx, work, release(min_key));
     let i = app
@@ -4108,14 +4150,15 @@ fn window_title_keys_raise_minimize_and_close() {
         work.min,
         "最小化之后没堆到左上角"
     );
+    let title = app.win_mgr.wins[i].title.clone();
     assert_eq!(
         app.win_mgr.rect_of(i).size(),
-        egui::vec2(MINI_W, WIN_TITLE_H)
+        egui::vec2(WinMgr::mini_width(&mut app, &title), WIN_TITLE_H)
     );
 
     win_frame(&mut app, &ctx, work, vec![]);
     let mini = app.win_mgr.rect_of(i);
-    let restore_key = sys_button_rects(free_band(mini, 0, WIN_TITLE_ROWS))[1].center();
+    let restore_key = sys_button_rects_n(free_band(mini, 0, WIN_TITLE_ROWS), 3)[1].center();
     win_frame(&mut app, &ctx, work, click(restore_key));
     win_frame(&mut app, &ctx, work, release(restore_key));
     let i = app
@@ -4132,7 +4175,7 @@ fn window_title_keys_raise_minimize_and_close() {
     );
 
     win_frame(&mut app, &ctx, work, vec![]);
-    let close_key = sys_button_rects(free_band(before, 0, WIN_TITLE_ROWS))[2].center();
+    let close_key = sys_button_rects(free_band(before, 0, WIN_TITLE_ROWS))[3].center();
     let was = app.win_mgr.chart_count();
     win_frame(&mut app, &ctx, work, click(close_key));
     win_frame(&mut app, &ctx, work, release(close_key));
@@ -4826,7 +4869,7 @@ fn window_maximize_key_fills_the_work_area_and_restores() {
     let before = app.win_mgr.wins[i].rect();
     assert_ne!(before, work, "这块窗口本来不该是铺满的");
 
-    let key = sys_button_rects(free_band(before, 0, WIN_TITLE_ROWS))[1].center();
+    let key = sys_button_rects(free_band(before, 0, WIN_TITLE_ROWS))[2].center();
     win_frame(&mut app, &ctx, work, press(key));
     win_frame(&mut app, &ctx, work, release(key));
     assert!(app.win_mgr.wins[i].w.maximized, "点最大化键没最大化");
@@ -4848,7 +4891,7 @@ fn window_maximize_key_fills_the_work_area_and_restores() {
     assert_eq!(app.win_mgr.wins[i].rect(), work, "最大化中还能拉边缩放");
     win_frame(&mut app, &ctx, work, release(edge));
 
-    let key = sys_button_rects(free_band(work, 0, WIN_TITLE_ROWS))[1].center();
+    let key = sys_button_rects(free_band(work, 0, WIN_TITLE_ROWS))[2].center();
     win_frame(&mut app, &ctx, work, press(key));
     win_frame(&mut app, &ctx, work, release(key));
     assert!(!app.win_mgr.wins[i].w.maximized, "再点一下没还原");
@@ -5020,7 +5063,7 @@ fn dump_new_indicators_for_visual_check() {
     app.text_engine = HardText::new(&ctx);
     app.replace_bars(data::random_walk::generate(BAR_SEED, BAR_COUNT, BAR_START));
     app.fps = 60.0;
-    app.visible = visible_bars(CHART_PANE_W - LINE_W - AXIS_W, BAR_SCALE_DEFAULT);
+    app.panes[0].view.visible = visible_bars(CHART_PANE_W - LINE_W - AXIS_W, BAR_SCALE_DEFAULT);
 
     app.set_pane_indicator(PANE_CANDLE, 1);
     app.set_pane_indicator(PANE_VOLUME, 4);
@@ -5283,102 +5326,64 @@ fn icon_pngs_on_disk_are_the_only_source() {
 }
 
 #[test]
-fn app_icon_is_a_standard_multi_size_ico() {
-    let b = APP_ICON_BYTES;
-    assert_eq!(u16::from_le_bytes([b[0], b[1]]), 0, "ICO reserved 字段不对");
-    assert_eq!(u16::from_le_bytes([b[2], b[3]]), 1, "不是 ICO 类型");
-    let count = u16::from_le_bytes([b[4], b[5]]) as usize;
-    assert_eq!(count, APP_ICON_SIZES.len(), "ICO 条目数量不对");
-    let mut sizes = Vec::new();
-    for i in 0..count {
-        let at = 6 + i * 16;
-        let len = u32::from_le_bytes(b[at + 8..at + 12].try_into().unwrap()) as usize;
-        let off = u32::from_le_bytes(b[at + 12..at + 16].try_into().unwrap()) as usize;
-        let image = &b[off..off + len];
-        let (size, height) = ico_dib_size(image).expect("ICO 的 DIB 头不对");
-        assert_eq!(
-            u32::from_le_bytes(image[0..4].try_into().unwrap()),
-            40,
-            "{size}px 条目不是 32bpp DIB"
-        );
-        assert_eq!(size, height, "ICO 条目不是正方形");
-        let directory_size = if size >= 256 { 0 } else { size as u8 };
-        assert_eq!(b[at], directory_size);
-        assert_eq!(b[at + 1], directory_size);
-        assert_eq!(u32::from_le_bytes(image[4..8].try_into().unwrap()), size);
-        assert_eq!(u16::from_le_bytes(image[14..16].try_into().unwrap()), 32);
-        assert_eq!(u32::from_le_bytes(image[16..20].try_into().unwrap()), 0);
-        let decoded = decode_ico_dib_rgba(image).expect("ICO 里的 DIB 解不开");
-        assert_eq!((decoded.width, decoded.height), (size, size));
-        sizes.push(size);
-    }
-    assert_eq!(sizes, APP_ICON_SIZES.to_vec(), "ICO 没有打包全部图标尺寸");
-    let icon = app_icon();
-    assert_eq!(
-        (icon.width, icon.height),
-        (512, 512),
-        "窗口图标没取最高清那一档"
-    );
-    assert_eq!(icon.rgba.len(), 512 * 512 * 4);
+fn work_area_logo_loads_the_fixed_32px_ico() {
+    let bytes = std::fs::read(logo_dir().join("RoundTable_32.ico")).expect("读不到 32px logo");
+    let icon = app_icon_from_ico(&bytes).expect("32px logo 解不开");
+    assert_eq!((icon.width, icon.height), (32, 32));
+    assert!(PixelImage::load_logo_32().is_some(), "工作区 logo 没加载");
 }
 
 #[test]
-fn app_ico_preserves_every_logo_pixel() {
-    let b = APP_ICON_BYTES;
-    let count = u16::from_le_bytes([b[4], b[5]]) as usize;
-    let logo_dir = logo_dir();
-    let mut logo_sizes = Vec::new();
-    for entry in std::fs::read_dir(&logo_dir).expect("读不到 logo 目录") {
-        let entry = entry.expect("遍历 logo 目录失败");
-        if !entry.file_type().expect("读不到 logo 文件类型").is_file() {
-            continue;
+fn empty_runtime_workspace_paints_the_logo_at_its_origin() {
+    let mut app = blank_app();
+    app.win_mgr = WinMgr::with_default_windows();
+    let grid = render_window(&mut app);
+    let origin = app.work_rect.min;
+    assert!(app.logo.is_some(), "工作区 logo 没加载");
+    let mut lit = 0usize;
+    for y in origin.y as usize..origin.y as usize + 32 {
+        for x in origin.x as usize..origin.x as usize + 32 {
+            lit += usize::from(grid[y][x] != Some(C_DESKTOP_BG));
         }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name == "app.ico" {
-            continue;
-        }
-        let size = name
-            .strip_prefix("RoundTable_")
-            .and_then(|name| name.strip_suffix(".png"))
-            .and_then(|size| size.parse::<u32>().ok())
-            .unwrap_or_else(|| panic!("logo 目录里有未打包的文件：{name}"));
-        logo_sizes.push(size);
     }
-    logo_sizes.sort_unstable();
-    assert!(
-        logo_sizes.iter().all(|size| APP_ICON_SIZES.contains(size)),
-        "logo 目录里有 ICO 未覆盖的尺寸"
-    );
+    assert_eq!(app.win_mgr.chart_count(), 0);
+    assert!(lit > 0, "工作区左上角没有画出固定 logo");
+}
 
-    for size in logo_sizes {
-        let png = std::fs::read(logo_dir.join(format!("RoundTable_{size}.png")))
-            .expect("读不到 logo PNG");
-        let source = decode_png_rgba(&png).expect("logo PNG 解不开");
-        assert_eq!((source.width, source.height), (size, size));
+#[test]
+fn title_symbols_are_png_masks() {
+    let set = SymbolSet::load();
+    for kind in SymbolKind::ALL {
+        assert!(!set.get(kind).is_blank(), "{} 符号是空的", kind.file_stem());
+        let bytes =
+            std::fs::read(crate::assets::symbols_dir().join(format!("{}.png", kind.file_stem())))
+                .expect("读不到符号 PNG");
+        let image = decode_png_rgba(&bytes).expect("符号 PNG 解不开");
+        assert_eq!((image.width, image.height), (16, 16));
         assert!(
-            source
-                .rgba
-                .chunks_exact(4)
-                .all(|px| px[3] == 0 || px[3] == 0xFF),
-            "{size}px logo 的 alpha 不是硬边"
-        );
-        let entry = (0..count)
-            .map(|i| 6 + i * 16)
-            .find(|&at| {
-                let len = u32::from_le_bytes(b[at + 8..at + 12].try_into().unwrap()) as usize;
-                let off = u32::from_le_bytes(b[at + 12..at + 16].try_into().unwrap()) as usize;
-                ico_dib_size(&b[off..off + len]) == Some((size, size))
-            })
-            .expect("ICO 缺少尺寸");
-        let len = u32::from_le_bytes(b[entry + 8..entry + 12].try_into().unwrap()) as usize;
-        let off = u32::from_le_bytes(b[entry + 12..entry + 16].try_into().unwrap()) as usize;
-        let got = decode_ico_dib_rgba(&b[off..off + len]).expect("ICO DIB 解不开");
-        assert_eq!((got.width, got.height), (size, size));
-        assert_eq!(
-            got.rgba, source.rgba,
-            "{size}px 的 ICO 像素没有保持 logo 原样"
+            image.rgba.chunks_exact(4).all(|px| {
+                px[3] == 0 || (px[0], px[1], px[2]) == SYMBOL_TRANSPARENT_RGB || px[3] == 0xFF
+            }),
+            "{} 符号不是硬边 PNG",
+            kind.file_stem()
         );
     }
+}
+
+#[test]
+fn text_buttons_include_symbols_and_icon_buttons_keep_icons() {
+    assert_eq!(
+        ButtonContent::Text("确定".to_owned()).class(),
+        ButtonClass::Text
+    );
+    assert_eq!(
+        ButtonContent::Symbol(SymbolKind::Pin).class(),
+        ButtonClass::Text
+    );
+    assert_eq!(
+        ButtonContent::Icon(IconKind::Save).class(),
+        ButtonClass::Icon
+    );
 }
 
 #[test]
@@ -5434,6 +5439,139 @@ fn ecs_spawns_one_entity_per_pane() {
 }
 
 #[test]
+fn runtime_default_workspace_has_no_chart() {
+    let mgr = WinMgr::with_default_windows();
+    assert_eq!(mgr.chart_count(), 0, "启动时不应带图表窗");
+    assert!(
+        mgr.wins
+            .iter()
+            .any(|w| w.kind == WinKind::Panel && w.w.open),
+        "控制面板仍应存在"
+    );
+}
+
+#[test]
+fn chart_view_state_is_independent_per_pane() {
+    let mut app = blank_app();
+    app.panes[0].view.scale = SCALE_MIN;
+    app.panes[0].view.offset = 11;
+    app.panes[0].view.visible = 31;
+    app.panes[1].view.scale = SCALE_MAX;
+    app.panes[1].view.offset = 7;
+    app.panes[1].view.visible = 13;
+    app.panes[2].view.offset = 3;
+
+    assert_eq!(
+        (
+            app.panes[0].view.scale,
+            app.panes[0].view.offset,
+            app.panes[0].view.visible
+        ),
+        (SCALE_MIN, 11, 31)
+    );
+    assert_eq!(
+        (
+            app.panes[1].view.scale,
+            app.panes[1].view.offset,
+            app.panes[1].view.visible
+        ),
+        (SCALE_MAX, 7, 13)
+    );
+    assert_eq!(app.panes[2].view.offset, 3);
+}
+
+#[test]
+fn pinned_windows_follow_pin_order_above_regular_windows() {
+    let mut mgr = WinMgr::new();
+    let a = mgr.add(
+        WinKind::Chart,
+        "A",
+        0,
+        egui::vec2(cells(20), cells(20)),
+        egui::vec2(cells(20), cells(20)),
+    );
+    let b = mgr.add(
+        WinKind::Chart,
+        "B",
+        1,
+        egui::vec2(cells(20), cells(20)),
+        egui::vec2(cells(20), cells(20)),
+    );
+    let c = mgr.add(
+        WinKind::Chart,
+        "C",
+        2,
+        egui::vec2(cells(20), cells(20)),
+        egui::vec2(cells(20), cells(20)),
+    );
+    for i in 0..3 {
+        mgr.wins[i].w.open = true;
+    }
+    mgr.toggle_pin(a);
+    mgr.toggle_pin(c);
+    let order = mgr.order_ids();
+    assert_eq!(
+        order,
+        vec![mgr.wins[b].w.id, mgr.wins[a].w.id, mgr.wins[c].w.id]
+    );
+    mgr.toggle_pin(a);
+    assert_eq!(mgr.order_ids().last().copied(), Some(mgr.wins[c].w.id));
+}
+
+#[test]
+fn child_pin_button_toggles_from_the_title_bar() {
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    let mut app = blank_app();
+    let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(60)));
+    let click = |pos: egui::Pos2| {
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    };
+    let release = |pos: egui::Pos2| {
+        vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]
+    };
+    win_frame(&mut app, &ctx, work, vec![]);
+    let chart = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|w| w.kind == WinKind::Chart)
+        .expect("图表窗没建出来");
+    let title = free_band(app.win_mgr.wins[chart].rect(), 0, WIN_TITLE_ROWS);
+    let pin = sys_button_rects(title)[0].center();
+    win_frame(&mut app, &ctx, work, click(pin));
+    win_frame(&mut app, &ctx, work, release(pin));
+    assert!(app.win_mgr.wins[chart].pinned, "置顶键没切到置顶状态");
+    win_frame(&mut app, &ctx, work, click(pin));
+    win_frame(&mut app, &ctx, work, release(pin));
+    assert!(!app.win_mgr.wins[chart].pinned, "再次点击没解除置顶");
+}
+
+#[test]
+fn status_bar_contains_a_current_time_field() {
+    let app = blank_app();
+    let segs = app.status_segments();
+    let time = segs.last().expect("状态栏最后一格应是时间");
+    assert_eq!(time.len(), 8, "时间格式应为 HH:MM:SS");
+    assert_eq!(time.as_bytes()[2], b':');
+    assert_eq!(time.as_bytes()[5], b':');
+}
+
+#[test]
 fn crosshair_time_label_never_stacks_on_the_timeline_border() {
     let mut app = blank_app();
     app.replace_bars(data::random_walk::generate(BAR_SEED, 64, BAR_START));
@@ -5449,7 +5587,10 @@ fn crosshair_time_label_never_stacks_on_the_timeline_border() {
     assert_eq!(time.min.y as usize, shared, "时间带上沿不是那条共用的线");
 
     let grid = render_window_at(&mut app, Some(plot.center()));
-    app.crosshair.expect("鼠标在绘图区里应该有十字光标");
+    app.panes[0]
+        .view
+        .crosshair
+        .expect("鼠标在绘图区里应该有十字光标");
 
     let label_top = (plot.max.y - PITCH * CROSS_LABEL_ROWS as f32) as usize;
     assert_eq!(label_top % 9, 0, "索引牌上边框没落在网格线上");
@@ -5747,7 +5888,10 @@ fn crosshair_time_label_never_leaks_into_the_status_bar() {
     assert_eq!(boundary, macd.max.y as usize - 1, "共用那条线的位置不对");
 
     let grid = render_window_at(&mut app, Some(plot.center()));
-    app.crosshair.expect("鼠标在图里应该有十字光标");
+    app.panes[0]
+        .view
+        .crosshair
+        .expect("鼠标在图里应该有十字光标");
     let (x0, x1) = (plot.min.x as usize, plot.max.x as usize);
     let longest = |row: usize| -> usize {
         let (mut best, mut cur) = (0usize, 0usize);
@@ -6531,15 +6675,15 @@ fn minimized_restore_button_uses_one_pixel_shell_line() {
     app.win_mgr.minimize(i, w);
     let grid = render_window(&mut app);
     let mini = app.win_mgr.rect_of(i);
-    let keys = sys_button_rects(free_band(mini, 0, WIN_TITLE_ROWS));
+    let keys = sys_button_rects_n(free_band(mini, 0, WIN_TITLE_ROWS), 3);
     let restore = keys[1];
     let y = mini.min.y as usize + 4;
     let line = restore.min.x as usize;
     assert_eq!(grid[y][line], Some(C_CTRL_BORDER), "还原键左边框没画出来");
-    assert!(
-        is_title_face(grid[y][line - 1]),
-        "还原键左边出现了第二条线（2px 叠线）：{:?}",
-        grid[y][line - 1]
+    assert_ne!(
+        grid[y][line - 1],
+        Some(C_CTRL_BORDER),
+        "还原键左边出现了第二条线（2px 叠线）"
     );
 }
 
@@ -6608,16 +6752,16 @@ fn key_symbol_ink(
 
     let title = egui::Rect::from_min_size(btn.min, egui::vec2(MINI_W, WIN_TITLE_H));
     let scan = match keys {
-        WinKeys::MinAndClose => sys_button_rects(title)[1],
+        WinKeys::MinAndClose => sys_button_rects_n(title, 3)[1],
         _ => btn,
     };
+    let mut app = blank_app();
     let mut raw = egui::RawInput::default();
     raw.screen_rect = Some(canvas);
     let mut out = ctx.run_ui(raw, |ui| {
         let painter = ui.painter().clone();
         match keys {
             WinKeys::MinAndClose => {
-                let mut app = blank_app();
                 paint_title_bar(
                     &mut app,
                     ui,
@@ -6627,11 +6771,13 @@ fn key_symbol_ink(
                     "图表",
                     WinKeys::MinAndClose,
                     false,
+                    false,
                 );
             }
             _ => {
-                painter.rect_filled(btn, egui::CornerRadius::ZERO, C_BTN_FACE);
-                kind.paint_symbol_max(&painter, btn, C_TEXT, C_BTN_FACE, maximized);
+                paint_sys_button(
+                    &mut app, &painter, btn, false, kind, maximized, false, false,
+                );
             }
         }
     });
@@ -6666,52 +6812,36 @@ fn sys_key_symbols_are_squares_centered_in_the_key() {
     ctx.set_pixels_per_point(1.0);
     set_theme(Theme::CLASSIC);
     let btn = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(SYS_BTN_W, SYS_BTN_H));
-    let center = btn.min + egui::vec2(CELL_CENTER, CELL_CENTER);
-
-    let (_, max) = key_symbol_ink(&ctx, SysButton::Maximize, false, WinKeys::MinMaxClose);
-    assert_eq!(max.width(), max.height(), "最大化那个符号不是正方形");
-    assert_eq!(max.width(), 9.0, "最大化那个正方形边长不对");
-    assert_eq!(max.center(), btn.center(), "最大化那个正方形没居中");
-
-    let (grid, restore) = key_symbol_ink(&ctx, SysButton::Maximize, true, WinKeys::MinMaxClose);
-    assert_eq!(restore.width(), 9.0, "还原那个菱形的宽不对");
-    assert_eq!(restore.height(), 9.0, "还原那个菱形的高不对");
-    assert_eq!(restore.center(), btn.center(), "还原那个菱形没居中");
-    let (cx, cy) = (center.x as usize, center.y as usize);
-
-    for (x, y) in [(cx, cy - 4), (cx, cy + 4), (cx - 4, cy), (cx + 4, cy)] {
-        assert_eq!(grid[y][x], Some(C_TEXT), "菱形的尖缺了 ({x},{y})");
-    }
-
-    for d in 1..=4i32 {
-        for up in [true, false] {
-            let dy = if up { 4 - d } else { -(4 - d) };
-            for x in [(cx as i32 + d) as usize, (cx as i32 - d) as usize] {
-                let y = (cy as i32 + dy) as usize;
-                assert_eq!(grid[y][x], Some(C_TEXT), "菱形的边缺了 ({x},{y})");
-            }
-        }
-    }
-
-    for (x, y) in [
-        (cx - 4, cy - 4),
-        (cx + 4, cy - 4),
-        (cx - 4, cy + 4),
-        (cx + 4, cy + 4),
-        (cx, cy),
-        (cx - 1, cy),
-        (cx, cy - 1),
+    for kind in [
+        SysButton::Pin,
+        SysButton::Minimize,
+        SysButton::Maximize,
+        SysButton::Close,
     ] {
-        assert_ne!(
-            grid[y][x],
-            Some(C_TEXT),
-            "菱形是空心的 / 不是菱形：({x},{y}) 有墨"
+        let (_, ink) = key_symbol_ink(&ctx, kind, false, WinKeys::MinMaxClose);
+        assert!(
+            ink.width() > 0.0 && ink.height() > 0.0,
+            "{kind:?} 没画出符号"
         );
+        assert!(
+            (ink.center().x - btn.center().x).abs() <= 1.0
+                && (ink.center().y - btn.center().y).abs() <= 1.0,
+            "{kind:?} 符号没居中"
+        );
+        assert!(btn.contains_rect(ink), "{kind:?} 符号超出按钮");
     }
 
-    let (_, strip) = key_symbol_ink(&ctx, SysButton::Minimize, false, WinKeys::MinAndClose);
-    assert_eq!(strip.width(), 9.0, "最小化那条上的键画的不是还原菱形");
-    assert_eq!(strip.height(), 9.0, "最小化那条上的键画的不是还原菱形");
+    let app = blank_app();
+    assert_ne!(
+        app.symbols.get(SymbolKind::Pin),
+        app.symbols.get(SymbolKind::Unpin),
+        "置顶和解除置顶符号不能相同"
+    );
+    assert_ne!(
+        app.symbols.get(SymbolKind::Maximize),
+        app.symbols.get(SymbolKind::Restore),
+        "最大化和还原符号不能相同"
+    );
 }
 
 #[test]
@@ -6810,7 +6940,7 @@ fn the_dark_skin_inverts_the_window_and_keeps_chart_colors_light() {
     assert_eq!(d.ema, l.ema);
     assert_eq!(d.ctrl_border, egui::Color32::from_rgb(0xFF, 0x00, 0x00));
     assert_eq!(d.line, egui::Color32::from_rgb(0xFF, 0x00, 0x00));
-    assert_eq!(d.close_hover, l.close_hover);
+    assert_eq!(d.symbol, egui::Color32::from_rgb(0xFF, 0xFF, 0xFF));
     assert_eq!(d.text_white, l.text_white);
 }
 
@@ -7020,7 +7150,7 @@ fn dump_zoom_for_visual_check() {
     raw.screen_rect = Some(canvas);
     let mut out = ctx.run_ui(raw, |ui| {
         let painter = ui.painter().clone();
-        for (i, kind) in [SysButton::Maximize, SysButton::Maximize, SysButton::Close]
+        for (i, kind) in [SysButton::Pin, SysButton::Maximize, SysButton::Close]
             .into_iter()
             .enumerate()
         {
@@ -7028,17 +7158,7 @@ fn dump_zoom_for_visual_check() {
                 egui::pos2(20.0 + 25.0 * i as f32, 20.0),
                 egui::vec2(SYS_BTN_W, SYS_BTN_H),
             );
-            let face = match kind {
-                SysButton::Close => close_key_face(false),
-                _ => C_BTN_FACE,
-            };
-            let symbol = match kind {
-                SysButton::Close => close_key_symbol(false),
-                _ => C_TEXT,
-            };
-            painter.rect_filled(btn, egui::CornerRadius::ZERO, face);
-            border_hard(&painter, btn, C_CTRL_BORDER);
-            kind.paint_symbol_max(&painter, btn, symbol, face, i == 1);
+            paint_sys_button(&mut app, &painter, btn, false, kind, i == 1, false, i == 0);
         }
     });
     absorb_textures(&mut out.textures_delta);
@@ -8397,7 +8517,7 @@ fn the_wheel_only_reaches_the_active_window() {
         "取样点得同时落在代码窗那块面板里才算测到"
     );
     frame(&mut app, press(chart_body));
-    let (scale_before, scroll_before) = (app.scale, app.source.editor.scroll);
+    let (scale_before, scroll_before) = (app.panes[0].view.scale, app.source.editor.scroll);
     frame(&mut app, release(chart_body));
     assert_eq!(
         app.win_mgr.live_index(),
@@ -8410,7 +8530,7 @@ fn the_wheel_only_reaches_the_active_window() {
         "滚轮滚在激活的图表窗上，底下的代码窗却跟着滚了"
     );
     assert!(
-        app.scale != scale_before,
+        app.panes[0].view.scale != scale_before,
         "滚轮没归激活的图表窗（K 线该缩放）"
     );
 
@@ -8444,9 +8564,9 @@ fn the_color_panel_can_be_dragged_left_of_its_close_key() {
     app.open_color_panel(ColorTarget::Up);
     frame(&mut app, vec![]);
     let title = app.color_panel.win.title_band();
-    let close = sys_button_rects(title)[2];
+    let keys = sys_button_rects_n(title, 2);
 
-    let p = egui::pos2(close.min.x - 6.0, title.center().y);
+    let p = egui::pos2(keys[0].min.x - 6.0, title.center().y);
     assert!(title.contains(p), "取样点没落在标题栏上");
     let before = app.color_panel.win.rect();
     let walk = egui::vec2(-40.0, -20.0);
