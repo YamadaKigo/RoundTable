@@ -1,6 +1,7 @@
 use crate::app::*;
 use crate::grid::*;
 use crate::theme::*;
+use crate::ui::icon::CursorKind;
 use eframe::egui;
 
 pub(crate) struct MenuNode {
@@ -194,6 +195,13 @@ pub(crate) struct MenuPanel {
     pub(crate) rows: usize,
 }
 
+fn menu_hit_rect(rect: egui::Rect) -> egui::Rect {
+    egui::Rect::from_min_max(
+        rect.min + egui::vec2(LINE_W, LINE_W),
+        rect.max - egui::vec2(LINE_W, LINE_W),
+    )
+}
+
 impl MenuPanel {
     pub(crate) fn right(anchor: egui::Rect, w: f32, rows: usize, window_bottom: f32) -> Self {
         let h = cells(MENU_ROW_ROWS * rows as i32);
@@ -291,12 +299,21 @@ impl MenuPanel {
         let mut clicked = None;
         for j in 0..self.rows {
             let row = self.row(j);
-            app.probe(&format!("菜单项 {j}"), row);
-            let resp = interact_rect(ui, row, egui::Sense::click());
+            let resp = interact_rect(ui, menu_hit_rect(row), egui::Sense::click());
             if resp.hovered() {
+                app.pointer.force_hint(CursorKind::Normal, ui);
                 self.paint_row_hover(painter, row);
             }
             draw_row(app, painter, j, row);
+            if j + 1 < self.rows {
+                hline_hard(
+                    painter,
+                    row.min.x + LINE_W,
+                    row.max.x - LINE_W,
+                    row.max.y - LINE_W,
+                    theme().line,
+                );
+            }
             if resp.clicked() {
                 clicked = Some(j);
             }
@@ -372,6 +389,13 @@ impl<'a, 'b> MenuBar<'a, 'b> {
             .collect();
         let rects = menu_item_rects(self.bar, &widths, self.align);
 
+        if ui
+            .input(|i| i.pointer.hover_pos())
+            .is_some_and(|p| self.bar.contains(p))
+        {
+            app.pointer.force_hint(CursorKind::Normal, ui);
+        }
+
         painter.rect_filled(self.bar, egui::CornerRadius::ZERO, theme().menu_bg);
 
         if let Some(text) = self.label {
@@ -389,8 +413,7 @@ impl<'a, 'b> MenuBar<'a, 'b> {
         let mut hovered = vec![false; self.titles.len()];
         let mut clicked = None;
         for (i, rect) in rects.iter().enumerate() {
-            app.probe(self.titles[i], *rect);
-            let resp = interact_rect(ui, *rect, egui::Sense::click());
+            let resp = interact_rect(ui, menu_hit_rect(*rect), egui::Sense::click());
             hovered[i] = resp.hovered();
             if resp.clicked() {
                 clicked = Some(i);
@@ -505,7 +528,7 @@ pub(crate) fn ui_menu_popup(
     bounds: egui::Rect,
     keep: &[egui::Rect],
 ) -> Option<&'static str> {
-    ui_menu_popup_inner(app, ui, anchor, items, state, bounds, keep, true)
+    ui_menu_popup_inner(app, ui, anchor, items, state, bounds, keep)
 }
 
 pub(crate) fn ui_menu_popup_persistent(
@@ -517,7 +540,7 @@ pub(crate) fn ui_menu_popup_persistent(
     bounds: egui::Rect,
     keep: &[egui::Rect],
 ) -> Option<&'static str> {
-    ui_menu_popup_inner(app, ui, anchor, items, state, bounds, keep, false)
+    ui_menu_popup_inner(app, ui, anchor, items, state, bounds, keep)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -529,7 +552,6 @@ fn ui_menu_popup_inner(
     state: &mut MenuState,
     bounds: egui::Rect,
     keep: &[egui::Rect],
-    close_on_leave: bool,
 ) -> Option<&'static str> {
     if state.open.is_none() {
         state.path.clear();
@@ -548,7 +570,8 @@ fn ui_menu_popup_inner(
         } else {
             MenuPanel::flyout(row_anchor, w, level.len(), bounds)
         };
-        let hovered = pointer.and_then(|p| (0..level.len()).find(|&j| panel.row(j).contains(p)));
+        let hovered = pointer
+            .and_then(|p| (0..level.len()).find(|&j| menu_hit_rect(panel.row(j)).contains(p)));
         let next = match hovered {
             Some(j) if level[j].has_children() => Some(j),
 
@@ -572,15 +595,10 @@ fn ui_menu_popup_inner(
     }
     let mut keep_rects = keep.to_vec();
     keep_rects.extend(chain.iter().map(|(p, _)| p.rect));
+    if pointer.is_some_and(|p| chain.iter().any(|(panel, _)| panel.rect.contains(p))) {
+        app.pointer.force_hint(CursorKind::Normal, ui);
+    }
     close_on_outside_click(ui, &keep_rects, state);
-
-    if close_on_leave && state.open.is_some() && pointer_left(ui, &keep_rects) {
-        state.open = None;
-    }
-    if state.open.is_none() {
-        state.path.clear();
-        return None;
-    }
 
     let mut clicked: Option<(usize, usize)> = None;
     for (k, (panel, level)) in chain.iter().enumerate() {
@@ -629,13 +647,6 @@ fn paint_submenu_arrow(painter: &egui::Painter, row: egui::Rect) {
             theme().text,
         );
     }
-}
-
-pub(crate) fn pointer_left(ui: &egui::Ui, keep: &[egui::Rect]) -> bool {
-    ui.ctx().input(|i| match i.pointer.hover_pos() {
-        Some(p) => !keep.iter().any(|r| r.contains(p)),
-        None => i.pointer.latest_pos().is_some(),
-    })
 }
 
 pub(crate) fn close_on_outside_click(ui: &egui::Ui, keep: &[egui::Rect], state: &mut MenuState) {

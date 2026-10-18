@@ -71,14 +71,6 @@ impl Indicator for Rsi {
         &self.title
     }
 
-    fn source(&self) -> &'static str {
-        include_str!("rsi.rs")
-    }
-
-    fn path(&self) -> &'static str {
-        file!()
-    }
-
     fn value_range(&self, _lo: f64, _hi: f64) -> (f64, f64) {
         (RANGE_LO, RANGE_HI)
     }

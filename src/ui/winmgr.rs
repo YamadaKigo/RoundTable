@@ -19,7 +19,7 @@ pub(crate) const MINI_W: f32 = cells(10);
 
 pub(crate) const WIN_CHART_TITLE: &str = "图表";
 
-pub(crate) const SRC_TITLE: &str = "源码";
+pub(crate) const SRC_TITLE: &str = "指标代码";
 
 const _: () = assert!((NEW_WIN_W as i32 - 1) % 9 == 0 && (NEW_WIN_H as i32 - 1) % 9 == 0);
 const _: () = assert!((MINI_W as i32 - 1) % 9 == 0);
@@ -86,6 +86,10 @@ pub(crate) struct WinMgr {
     next_id: u64,
     next_mini: u64,
     next_pin: u64,
+    focused_id: Option<u64>,
+    source_needs_placement: bool,
+    #[cfg(test)]
+    focused_pane_override: Option<usize>,
 }
 
 impl WinMgr {
@@ -99,6 +103,10 @@ impl WinMgr {
             next_id: 1,
             next_mini: 0,
             next_pin: 0,
+            focused_id: None,
+            source_needs_placement: false,
+            #[cfg(test)]
+            focused_pane_override: None,
         }
     }
 
@@ -117,13 +125,14 @@ impl WinMgr {
 
     fn with_initial_chart(chart: bool) -> Self {
         let mut mgr = Self::new();
-        mgr.add(
+        let panel = mgr.add(
             WinKind::Panel,
             PANEL_TITLE,
             PANE_CANDLE,
             egui::vec2(PANEL_W, PANEL_CHILD_H),
             egui::vec2(PANEL_W, PANEL_CHILD_H),
         );
+        mgr.toggle_pin(panel);
         if chart {
             mgr.add(
                 WinKind::Chart,
@@ -163,6 +172,7 @@ impl WinMgr {
             mini_w: MINI_W,
             w,
         });
+        self.focused_id = Some(id);
         self.wins.len() - 1
     }
 
@@ -187,6 +197,9 @@ impl WinMgr {
         if let Some(i) = self.source_index() {
             self.wins[i].w.open = true;
             self.wins[i].minimized = false;
+            if !self.wins[i].pinned {
+                self.toggle_pin(i);
+            }
             self.activate(i);
             return i;
         }
@@ -197,12 +210,14 @@ impl WinMgr {
             egui::vec2(SRC_W, SRC_H),
             egui::vec2(SRC_W, SRC_H),
         );
-        self.wins[i].w.pos = egui::pos2(SRC_DEFAULT_X, SRC_DEFAULT_Y);
+        self.source_needs_placement = !work.is_positive();
+        self.wins[i].w.pos = self.source_default_position(work);
 
         if work.is_positive() {
             self.wins[i].w.clamp_into(work);
         }
         self.wins[i].restore = (self.wins[i].w.pos, self.wins[i].w.size);
+        self.toggle_pin(i);
         i
     }
 
@@ -212,6 +227,23 @@ impl WinMgr {
             self.wins[i].minimized = false;
             self.wins[i].w.end_sessions();
         }
+    }
+
+    fn source_default_position(&self, work: egui::Rect) -> egui::Pos2 {
+        if !work.is_positive() {
+            return egui::pos2(SRC_DEFAULT_X, SRC_DEFAULT_Y);
+        }
+        let right_limit = self
+            .wins
+            .iter()
+            .find(|w| w.kind == WinKind::Panel && w.pinned && w.w.open)
+            .map_or(work.max.x, |w| w.w.pos.x);
+        let x_max = (right_limit - SRC_W).max(work.min.x);
+        let y_max = (work.max.y - SRC_H).max(work.min.y);
+        egui::pos2(
+            SRC_DEFAULT_X.clamp(work.min.x, x_max),
+            SRC_DEFAULT_Y.clamp(work.min.y, y_max),
+        )
     }
 
     pub(crate) fn console_open(&self) -> bool {
@@ -224,6 +256,9 @@ impl WinMgr {
         if let Some(i) = self.wins.iter().position(|w| w.kind == WinKind::Console) {
             self.wins[i].w.open = true;
             self.wins[i].minimized = false;
+            if !self.wins[i].pinned {
+                self.toggle_pin(i);
+            }
             self.wins[i].w.guard_open_click();
             self.activate(i);
             return i;
@@ -245,6 +280,7 @@ impl WinMgr {
         }
         self.wins[i].w.guard_open_click();
         self.wins[i].restore = (self.wins[i].w.pos, self.wins[i].w.size);
+        self.toggle_pin(i);
         i
     }
 
@@ -390,11 +426,40 @@ impl WinMgr {
             .find(|&i| self.rect_of(i).contains(p))
     }
 
+    #[cfg(test)]
     pub(crate) fn live_index(&self) -> Option<usize> {
+        if let Some(id) = self.focused_id
+            && let Some(i) = self
+                .wins
+                .iter()
+                .position(|w| w.w.id == id && w.w.open && !w.minimized)
+        {
+            return Some(i);
+        }
         self.draw_order()
             .into_iter()
             .rev()
             .find(|&i| !self.wins[i].minimized)
+    }
+
+    pub(crate) fn focused_index(&self) -> Option<usize> {
+        let id = self.focused_id?;
+        self.wins.iter().position(|w| w.w.id == id && w.w.open)
+    }
+
+    pub(crate) fn focused_pane(&self) -> Option<usize> {
+        #[cfg(test)]
+        if let Some(pane) = self.focused_pane_override {
+            return Some(pane);
+        }
+        let i = self.focused_index()?;
+        (self.wins[i].kind == WinKind::Chart).then_some(self.wins[i].pane)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn focus_pane(&mut self, pane: usize) -> bool {
+        self.focused_pane_override = Some(pane);
+        true
     }
 
     pub(crate) fn top_chart_pane(&self) -> Option<usize> {
@@ -507,18 +572,22 @@ impl WinMgr {
     }
 
     fn close_win(&mut self, app: &mut StockApp, i: usize) {
+        let closed_id = self.wins[i].w.id;
         let pane = self.wins[i].pane;
         let title = self.wins[i].title.clone();
         self.wins[i].w.open = false;
         self.wins[i].w.end_sessions();
         self.wins[i].minimized = false;
-        if self.wins[i].kind == WinKind::Chart {
-            if app.pane_menu == Some(pane) {
-                app.pane_menu = None;
-            }
-            if app.overlay_menu == Some(pane) {
-                app.overlay_menu = None;
-            }
+        if self.wins[i].kind == WinKind::Chart && app.pane_menu == Some(pane) {
+            app.pane_menu = None;
+        }
+        if self.focused_id == Some(closed_id) {
+            self.focused_id = self
+                .draw_order()
+                .into_iter()
+                .rev()
+                .map(|i| self.wins[i].w.id)
+                .next();
         }
         app.status_msg = format!("{title}：已关闭");
     }
@@ -553,6 +622,14 @@ impl WinMgr {
 
     pub(crate) fn plan(&mut self, app: &mut StockApp, ui: &mut egui::Ui, work: egui::Rect) {
         self.work = work;
+        if self.source_needs_placement
+            && work.is_positive()
+            && let Some(i) = self.source_index()
+        {
+            self.wins[i].w.pos = self.source_default_position(work);
+            self.wins[i].restore.0 = self.wins[i].w.pos;
+            self.source_needs_placement = false;
+        }
         app.debug_windows.windows = self
             .wins
             .iter()
@@ -581,6 +658,19 @@ impl WinMgr {
             }
         }
         self.clamp_all(work);
+
+        if !self.drag_active()
+            && let Some(p) = ui.input(|i| i.pointer.latest_pos())
+            && work.contains(p)
+            && !app.floating_at(p, ui.max_rect().max.y)
+            && let Some(i) = self.top_win_at(p)
+        {
+            let id = self.wins[i].w.id;
+            if self.focused_id != Some(id) {
+                self.focused_id = Some(id);
+                self.activate(i);
+            }
+        }
 
         if ui.input(|i| i.pointer.primary_pressed()) {
             if let Some(p) = ui.input(|i| i.pointer.interact_pos()) {
@@ -633,18 +723,18 @@ impl WinMgr {
                 .enumerate()
                 .any(|(k, w)| k != i && (w.w.dragging() || w.w.resizing()));
 
-            let prev_origin = app.grid_origin;
-            app.grid_origin = self.rect_of(i).min;
-
-            app.win_silent = self.live_index() != Some(i);
-            let body = self.begin_win(app, ui, i, busy);
-            if let Some(body) = body {
-                app.probe(&format!("窗口 {}", self.wins[i].title), self.rect_of(i));
-                app.probe("窗口标题栏", free_band(self.rect_of(i), 0, WIN_TITLE_ROWS));
-                self.draw_content(app, ui, i, body);
-            }
-            self.end_win(ui, i, busy);
-            app.grid_origin = prev_origin;
+            let focused = self.focused_id == Some(self.wins[i].w.id);
+            app.win_silent = !focused;
+            ui.scope(|ui| {
+                if !focused {
+                    ui.disable();
+                }
+                let body = self.begin_win(app, ui, i, busy);
+                if let Some(body) = body {
+                    self.draw_content(app, ui, i, body);
+                }
+                self.end_win(ui, i, busy);
+            });
         }
         app.win_silent = false;
     }
@@ -657,6 +747,10 @@ impl WinMgr {
                 let layout = app.panes[pane].indicator.layout();
                 let (_, _, main, _) = chart_rows(body, layout);
                 self.plots[pane] = frame_rects(main).0;
+                if app.win_silent {
+                    app.panes[pane].view.crosshair = None;
+                    app.panes[pane].view.pan = None;
+                }
                 app.ui_chart(ui, pane, body);
             }
             WinKind::Source => {
@@ -697,6 +791,7 @@ impl WinMgr {
                 WinKeys::MinAndClose,
                 false,
                 self.wins[i].pinned,
+                true,
             );
             match hit {
                 Some(SysButton::Pin) => self.toggle_pin(i),
@@ -711,9 +806,16 @@ impl WinMgr {
 
         let work = self.work;
         let pinned = self.wins[i].pinned;
-        let out = self.wins[i]
-            .w
-            .begin(app, ui, work, &name, WinKeys::MinMaxClose, busy, pinned);
+        let out = self.wins[i].w.begin(
+            app,
+            ui,
+            work,
+            &name,
+            WinKeys::MinMaxClose,
+            busy,
+            pinned,
+            false,
+        );
         if out.pin {
             self.toggle_pin(i);
         } else if out.close {

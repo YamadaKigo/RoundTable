@@ -11,7 +11,18 @@ pub(crate) fn ensure_pane_computed(world: &mut AppWorld, pane: usize) {
     if !world.panes[pane].dirty {
         return;
     }
-    let cmds = world.panes[pane].indicator.compute(&world.bars);
+    let script = world.panes[pane].script.clone();
+    let cmds = if let Some(script) = script {
+        match script.compute(&world.bars, &world.panes_palette) {
+            Ok(cmds) => cmds,
+            Err(error) => {
+                world.panes[pane].script_error = Some(error);
+                Vec::new()
+            }
+        }
+    } else {
+        world.panes[pane].indicator.compute(&world.bars)
+    };
     world.panes[pane].cmds = cmds;
     world.panes[pane].dirty = false;
 }

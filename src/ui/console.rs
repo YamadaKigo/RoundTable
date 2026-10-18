@@ -2,6 +2,7 @@ use crate::app::*;
 use crate::grid::*;
 use crate::theme::*;
 use crate::ui::button::*;
+use crate::ui::editor::vertical_scrollbar;
 use crate::ui::textbox::*;
 use crate::ui::textbuf::char_allowed;
 use eframe::egui;
@@ -20,7 +21,7 @@ pub(crate) const CONSOLE_MIN_H: f32 = cells(CONSOLE_MIN_ROWS);
 const CONSOLE_MAX_LINES: usize = 2000;
 const CONSOLE_INPUT_ID: &str = "rt_debug_console_input";
 const CONSOLE_FOOTER_ROWS: i32 = TEXT_ROWS;
-const CONSOLE_FOOTER_H: f32 = cells(CONSOLE_FOOTER_ROWS);
+pub(crate) const CONSOLE_FOOTER_H: f32 = cells(CONSOLE_FOOTER_ROWS);
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ConsoleFooterLayout {
@@ -61,6 +62,7 @@ pub(crate) struct DebugConsole {
     input: TextInput,
 
     scroll: usize,
+    scroll_grab: Option<egui::Vec2>,
     follow: bool,
     wheel_acc: f32,
     last_status: String,
@@ -78,6 +80,7 @@ impl DebugConsole {
             lines: VecDeque::new(),
             input: TextInput::new(240),
             scroll: 0,
+            scroll_grab: None,
             follow: true,
             wheel_acc: 0.0,
             last_status: String::new(),
@@ -120,6 +123,11 @@ impl DebugConsole {
         self.lines.iter().any(|line| line.contains(needle))
     }
 
+    #[cfg(test)]
+    pub(crate) fn scroll(&self) -> usize {
+        self.scroll
+    }
+
     pub(crate) fn ui(&mut self, app: &mut StockApp, ui: &mut egui::Ui, rect: egui::Rect) {
         let painter = ui.painter().clone().with_clip_rect(rect);
         painter.rect_filled(rect, egui::CornerRadius::ZERO, theme().work_bg);
@@ -131,11 +139,7 @@ impl DebugConsole {
             if app.pointer.system {
                 "鼠标 系统".to_owned()
             } else {
-                format!(
-                    "速度 {:.2}x 加速度 {:.2}",
-                    app.pointer.feel().base_speed,
-                    app.pointer.feel().acceleration
-                )
+                "鼠标 软件".to_owned()
             },
         ];
         app.paint_status_bar(&painter, header, &header_segs);
@@ -217,7 +221,11 @@ impl DebugConsole {
                 },
             );
         }
-        let focused = ui.memory(|m| m.has_focus(egui::Id::new(CONSOLE_INPUT_ID)));
+        if app.win_silent {
+            ui.memory_mut(|m| m.surrender_focus(egui::Id::new(CONSOLE_INPUT_ID)));
+        }
+        let focused =
+            !app.win_silent && ui.memory(|m| m.has_focus(egui::Id::new(CONSOLE_INPUT_ID)));
         if focused && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             execute = true;
         }
@@ -233,7 +241,10 @@ impl DebugConsole {
         painter: &egui::Painter,
         log: egui::Rect,
     ) {
-        let inner = log.shrink(LINE_W);
+        let inner = egui::Rect::from_min_max(
+            log.min + egui::vec2(LINE_W, LINE_W),
+            egui::pos2(log.max.x - SRC_BAR_W - 2.0 * LINE_W, log.max.y - LINE_W),
+        );
         let rows = ((inner.height() / SRC_ROW_PITCH).floor() as usize).max(1);
         let max_scroll = self.lines.len().saturating_sub(rows);
 
@@ -268,6 +279,22 @@ impl DebugConsole {
         if self.follow {
             self.scroll = max_scroll;
         }
+
+        vertical_scrollbar(
+            app,
+            ui,
+            painter,
+            egui::Id::new("rt_console_scroll"),
+            log,
+            log.min.y,
+            log.max.y,
+            rows,
+            self.lines.len(),
+            max_scroll,
+            &mut self.scroll,
+            &mut self.scroll_grab,
+        );
+        self.follow = self.scroll >= max_scroll;
 
         let text_painter = painter.with_clip_rect(inner);
         let text_x = text_left_x(inner.min.x, log.min.x);
@@ -307,11 +334,8 @@ impl DebugConsole {
             "help" | "?" => {
                 self.log("help / ?        显示命令列表");
                 self.log("status          输出运行状态快照");
-                self.log("pointer         指针速度 / 加速度 / 当前位置");
-                self.log("speed <数值>    设置鼠标速度，例如 speed 1.0");
-                self.log("accel <数值>    设置鼠标加速度，例如 accel 0.1");
+                self.log("pointer         输出鼠标位置和速度");
                 self.log("trail on|off    开关鼠标轨迹叠层");
-                self.log("grid on|off     开关 UI 工程测试网格");
                 self.log("theme           切换到下一套主题");
                 self.log("data            行情数量和视图状态");
                 self.log("windows         列出当前打开的窗口");
@@ -330,9 +354,7 @@ impl DebugConsole {
                 let p = app.pointer.position();
                 let v = app.pointer.velocity();
                 self.log(format!(
-                    "pointer speed={:.2}x accel={:.2} pos=({:.1},{:.1}) v=({:.1},{:.1}) |v|={:.1}px/s",
-                    app.pointer.feel().base_speed,
-                    app.pointer.feel().acceleration,
+                    "pointer pos=({:.1},{:.1}) v=({:.1},{:.1}) |v|={:.1}px/s",
                     p.x,
                     p.y,
                     v.x,
@@ -340,42 +362,12 @@ impl DebugConsole {
                     v.length()
                 ));
             }
-            "speed" => {
-                if rest.is_empty() {
-                    self.log(format!("speed={:.2}x", app.pointer.feel().base_speed));
-                } else {
-                    match rest.parse::<f32>() {
-                        Ok(value) => {
-                            let actual = app.pointer.set_speed(value);
-                            self.log(format!("speed={actual:.2}x"));
-                        }
-                        Err(_) => self.log("speed 需要一个数值，例如 speed 1.0"),
-                    }
-                }
-            }
-            "accel" => {
-                if rest.is_empty() {
-                    self.log(format!("accel={:.2}", app.pointer.feel().acceleration));
-                } else {
-                    match rest.parse::<f32>() {
-                        Ok(value) => {
-                            let actual = app.pointer.set_acceleration(value);
-                            self.log(format!("accel={actual:.2}"));
-                        }
-                        Err(_) => self.log("accel 需要一个数值，例如 accel 0.1"),
-                    }
-                }
-            }
             "trail" => {
                 set_toggle(&mut app.pointer.show_trail, rest);
                 self.log(format!(
                     "trail={}",
                     if app.pointer.show_trail { "on" } else { "off" }
                 ));
-            }
-            "grid" => {
-                set_toggle(&mut app.show_grid, rest);
-                self.log(format!("grid={}", if app.show_grid { "on" } else { "off" }));
             }
             "theme" => {
                 app.switch_theme();
@@ -428,12 +420,13 @@ impl DebugConsole {
             app.frame_interval_ms,
             app.debug_windows.windows.len()
         ));
+        let v = app.pointer.velocity();
         self.log(format!(
-            "pointer speed={:.2}x accel={:.2} pos=({:.1},{:.1}) trail={}",
-            app.pointer.feel().base_speed,
-            app.pointer.feel().acceleration,
+            "pointer pos=({:.1},{:.1}) v=({:.1},{:.1}) trail={}",
             p.x,
             p.y,
+            v.x,
+            v.y,
             if app.pointer.show_trail { "on" } else { "off" }
         ));
         let view = app.active_chart_pane().map(|pane| &app.panes[pane].view);
@@ -446,9 +439,8 @@ impl DebugConsole {
             view.map_or(0, |view| view.visible)
         ));
         self.log(format!(
-            "theme={} grid={} charts={} source={} console={}",
+            "theme={} charts={} source={} console={}",
             theme().name(),
-            if app.show_grid { "on" } else { "off" },
             app.debug_windows.chart_count,
             app.debug_windows.source_open,
             app.debug_windows.console_open

@@ -42,6 +42,7 @@ pub(crate) enum ButtonContent {
 }
 
 impl ButtonContent {
+    #[cfg(test)]
     pub(crate) fn label(&self) -> String {
         match self {
             ButtonContent::Text(text) => text.clone(),
@@ -92,14 +93,6 @@ impl Button {
         self.w = app.button_width(&self.content);
         self
     }
-
-    pub(crate) fn label(&self) -> String {
-        if self.tip.is_empty() {
-            self.content.label()
-        } else {
-            self.tip.clone()
-        }
-    }
 }
 
 impl StockApp {
@@ -123,7 +116,6 @@ impl StockApp {
         pressed: bool,
         tip: &str,
     ) -> bool {
-        self.probe(&format!("按钮 {}", content.label()), rect);
         let resp = interact_rect(ui, rect, egui::Sense::click());
         let state = if pressed || resp.is_pointer_button_down_on() {
             ButtonState::Pressed

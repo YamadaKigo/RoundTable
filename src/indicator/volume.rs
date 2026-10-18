@@ -39,14 +39,6 @@ impl Indicator for Volume {
         "成交量"
     }
 
-    fn source(&self) -> &'static str {
-        include_str!("volume.rs")
-    }
-
-    fn path(&self) -> &'static str {
-        file!()
-    }
-
     fn compute(&self, bars: &[Bar]) -> Vec<DrawCmd> {
         volume_bars(bars, self.pal.candle_up, self.pal.candle_down)
     }

@@ -22,17 +22,15 @@ impl StockApp {
 
         ind.set_palette(self.current_palette());
 
-        if ind.supports_overlay() {
-            ind.set_overlay_state(self.overlay);
-        }
-        let ov_ok = ind.supports_overlay();
         let name = ind.name().to_owned();
+        let script_source = indicator::script_source(&name);
+        let script = crate::script::ScriptProgram::parse(&script_source).ok();
         self.panes[pane].indicator = ind;
         self.panes[pane].dirty = true;
+        self.panes[pane].script = script;
+        self.panes[pane].script_source = script_source;
+        self.panes[pane].script_error = None;
 
-        if !ov_ok {
-            self.overlay_menu = None;
-        }
         self.status_msg = format!("Pane{} 换成：{}", pane + 1, name);
 
         if self.win_mgr.source_open() && self.source.pane == pane {
@@ -70,7 +68,13 @@ impl StockApp {
             return;
         }
 
-        if pointer_left(ui, &[panel, self.pane_menu_bar]) {
+        let outside_click = ui.ctx().input(|i| {
+            i.pointer.primary_clicked()
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| !panel.contains(p) && !self.pane_menu_bar.contains(p))
+        });
+        if outside_click {
             self.pane_menu = None;
         }
     }

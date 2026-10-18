@@ -7,7 +7,6 @@ pub(crate) mod editor;
 pub(crate) mod floatwin;
 pub(crate) mod icon;
 pub(crate) mod menu;
-pub(crate) mod overlaymenu;
 pub(crate) mod panel;
 pub(crate) mod panemenu;
 pub(crate) mod pointerdebug;

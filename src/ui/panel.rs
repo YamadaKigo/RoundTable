@@ -1,6 +1,5 @@
 use crate::app::*;
 use crate::grid::*;
-use crate::pointer::*;
 use crate::theme::*;
 use crate::ui::button::*;
 use crate::ui::colorpanel::*;
@@ -18,11 +17,11 @@ pub(crate) const SPLITTER_W: f32 = cells(SPLITTER_COLS);
 
 pub(crate) const PANEL_TITLE: &str = "控制面板";
 
-pub(crate) const PANEL_BTN_COUNT: i32 = 18;
+pub(crate) const PANEL_BTN_COUNT: i32 = 11;
 
 pub(crate) const PANEL_CHILD_ROWS: i32 = WIN_TITLE_ROWS + 1 + (PANEL_BTN_COUNT - 1) * 2 + 2 + 1;
 pub(crate) const PANEL_CHILD_H: f32 = cells(PANEL_CHILD_ROWS);
-const _: () = assert!(PANEL_BTN_COUNT == 18 && PANEL_CHILD_ROWS == 40);
+const _: () = assert!(PANEL_BTN_COUNT == 11 && PANEL_CHILD_ROWS == 26);
 
 pub(crate) const KLINE_ROWS: i32 = 52;
 pub(crate) const VOL_ROWS: i32 = 21;
@@ -72,24 +71,13 @@ pub(crate) enum PanelAction {
 
     OpenDownColor,
 
-    PointerSpeedUp,
-    PointerSpeedDown,
-
-    PointerAccelUp,
-    PointerAccelDown,
-
     TogglePointerMode,
 
     TogglePointerTrail,
 
-    ZoomIn,
-    ZoomOut,
-
     ResetView,
 
     PrintState,
-
-    ToggleGrid,
 
     ToggleTheme,
 
@@ -278,8 +266,10 @@ impl StockApp {
             y += BTN_STEP;
         }
 
-        let pointer = ui.input(|i| i.pointer.hover_pos());
-        let down = ui.input(|i| i.pointer.primary_down());
+        let pointer = (!self.win_silent)
+            .then(|| ui.input(|i| i.pointer.hover_pos()))
+            .flatten();
+        let down = !self.win_silent && ui.input(|i| i.pointer.primary_down());
         let hot = rects
             .iter()
             .position(|r| pointer.is_some_and(|p| r.contains(p)));
@@ -289,10 +279,9 @@ impl StockApp {
             let content = self.panel_buttons[i].button.content.clone();
             let action = self.panel_buttons[i].action;
             let pressed = self.panel_press == Some(i);
-            let label = self.panel_buttons[i].button.label();
 
             if self.draw_button(ui, &painter, *rect, &content, pressed, "") {
-                self.run_action(action, &label);
+                self.run_action(action);
             }
         }
     }
@@ -320,54 +309,14 @@ impl StockApp {
                 PanelAction::TogglePointerMode,
             ),
             (
-                ButtonContent::Text("鼠标速度 +".to_owned()),
-                "提高软件指针的基础速度（不写回系统设置）",
-                PanelAction::PointerSpeedUp,
-            ),
-            (
-                ButtonContent::Text("鼠标速度 -".to_owned()),
-                "降低软件指针的基础速度（不写回系统设置）",
-                PanelAction::PointerSpeedDown,
-            ),
-            (
-                ButtonContent::Text("鼠标加速 +".to_owned()),
-                "增强快速移动时的指针加速度",
-                PanelAction::PointerAccelUp,
-            ),
-            (
-                ButtonContent::Text("鼠标加速 -".to_owned()),
-                "减弱快速移动时的指针加速度（减到 0 = 完全线性）",
-                PanelAction::PointerAccelDown,
-            ),
-            (
                 ButtonContent::Text("鼠标轨迹".to_owned()),
                 "开关指针工程调试叠层：最近一段轨迹、速度、加速度和坐标",
                 PanelAction::TogglePointerTrail,
             ),
             (
-                ButtonContent::Text("放大".to_owned()),
-                "K 线放大一档",
-                PanelAction::ZoomIn,
-            ),
-            (
-                ButtonContent::Text("缩小".to_owned()),
-                "K 线缩小一档",
-                PanelAction::ZoomOut,
-            ),
-            (
                 ButtonContent::Text("重置视图".to_owned()),
                 "缩放与平移都回到最初",
                 PanelAction::ResetView,
-            ),
-            (
-                ButtonContent::Text("打印当前状态".to_owned()),
-                "把当前状态写到状态栏",
-                PanelAction::PrintState,
-            ),
-            (
-                ButtonContent::Text("UI工程测试".to_owned()),
-                "给每块 UI 元素描一圈边界框（绿 = 四条边都在网格线上 / 橙 = 没对齐）+ 右下角坐标读数",
-                PanelAction::ToggleGrid,
             ),
             (
                 ButtonContent::Text("切换主题".to_owned()),
@@ -389,6 +338,11 @@ impl StockApp {
                 "打开调试控制台：运行状态、滚动日志和命令输入",
                 PanelAction::OpenConsole,
             ),
+            (
+                ButtonContent::Text("打印当前状态".to_owned()),
+                "把当前图表、窗口和主题状态写到状态栏",
+                PanelAction::PrintState,
+            ),
         ];
         self.panel_buttons = items
             .into_iter()
@@ -407,44 +361,21 @@ impl StockApp {
         }
     }
 
-    pub(crate) fn run_action(&mut self, action: PanelAction, label: &str) {
+    pub(crate) fn run_action(&mut self, action: PanelAction) {
         match action {
             PanelAction::NewRandomWalk => {
                 self.regenerate_random_walk();
             }
 
-            PanelAction::ZoomIn => self.zoom_step(1),
-            PanelAction::ZoomOut => self.zoom_step(-1),
-
             PanelAction::OpenUpColor => self.open_color_panel(ColorTarget::Up),
             PanelAction::OpenDownColor => self.open_color_panel(ColorTarget::Down),
-            PanelAction::PointerSpeedUp => {
-                let speed = self.pointer.adjust_speed(POINTER_SPEED_STEP);
-                self.status_msg = format!("鼠标速度：{speed:.2}x");
-            }
-            PanelAction::PointerSpeedDown => {
-                let speed = self.pointer.adjust_speed(1.0 / POINTER_SPEED_STEP);
-                self.status_msg = format!("鼠标速度：{speed:.2}x");
-            }
-            PanelAction::PointerAccelUp => {
-                let accel = self.pointer.adjust_acceleration(POINTER_ACCEL_STEP);
-                self.status_msg = format!("鼠标加速度：{accel:.2}");
-            }
-            PanelAction::PointerAccelDown => {
-                let accel = self.pointer.adjust_acceleration(-POINTER_ACCEL_STEP);
-                self.status_msg = format!("鼠标加速度：{accel:.2}");
-            }
             PanelAction::TogglePointerMode => {
                 self.pointer.system = !self.pointer.system;
                 self.pointer.pinned = None;
                 self.status_msg = if self.pointer.system {
                     "鼠标控制：系统鼠标（系统指针原样显示）".to_owned()
                 } else {
-                    format!(
-                        "鼠标控制：软件鼠标（速度 {:.2}x，加速度 {:.2}）",
-                        self.pointer.feel().base_speed,
-                        self.pointer.feel().acceleration
-                    )
+                    "鼠标控制：软件鼠标".to_owned()
                 };
             }
             PanelAction::TogglePointerTrail => {
@@ -463,30 +394,22 @@ impl StockApp {
                     view.crosshair = None;
                 }
             }
-            PanelAction::ToggleGrid => {
-                self.show_grid = !self.show_grid;
-                self.status_msg = if self.show_grid {
-                    "UI工程测试：开（元素边界 + 坐标读数，见右下角牌子）".to_owned()
-                } else {
-                    "UI工程测试：关".to_owned()
-                };
-            }
-
             PanelAction::ToggleTheme => self.switch_theme(),
             PanelAction::FollowSystemColors => self.follow_system_chart_colors(),
 
             PanelAction::AddChart => self.request_win(WinCmd::AddChart),
             PanelAction::OpenConsole => self.request_win(WinCmd::OpenConsole),
-            _ => {
-                self.status_msg = format!("你点击了：{label}");
+            PanelAction::PrintState => {
+                let view = self.active_chart_pane().map(|pane| &self.panes[pane].view);
+                self.status_msg = format!(
+                    "图表 {} 块，窗口 {} 块，主题 {}，缩放 {}，平移 {}",
+                    self.debug_windows.chart_count,
+                    self.debug_windows.windows.len(),
+                    theme().name(),
+                    view.map_or(0, |view| view.scale),
+                    view.map_or(0, |view| view.offset)
+                );
             }
-        }
-    }
-
-    pub(crate) fn zoom_step(&mut self, notches: i32) {
-        if let Some(pane) = self.active_chart_pane() {
-            let view = &mut self.panes[pane].view;
-            view.scale = scale_after(view.scale, notches);
         }
     }
 

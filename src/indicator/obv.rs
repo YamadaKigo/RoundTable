@@ -35,14 +35,6 @@ impl Indicator for Obv {
         "OBV"
     }
 
-    fn source(&self) -> &'static str {
-        include_str!("obv.rs")
-    }
-
-    fn path(&self) -> &'static str {
-        file!()
-    }
-
     fn layout(&self) -> ChartLayout {
         ChartLayout::with_status(STATUS_ROWS)
     }

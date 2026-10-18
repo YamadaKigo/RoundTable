@@ -12,8 +12,6 @@ pub(crate) const fn grid_line(i: i32) -> f32 {
     i as f32 * PITCH
 }
 
-pub(crate) const CELL_CENTER: f32 = LINE_W + GRID;
-
 pub(crate) fn snap_cells_up(v: f32) -> f32 {
     let n = ((v - LINE_W) / PITCH).ceil().max(0.0);
     n * PITCH + LINE_W
@@ -280,19 +278,6 @@ pub(crate) fn hline_hard(painter: &egui::Painter, x0: f32, x1: f32, y: f32, colo
 
 pub(crate) fn vline_hard(painter: &egui::Painter, x: f32, y0: f32, y1: f32, color: egui::Color32) {
     painter.rect_filled(vline_rect(x, y0, y1), egui::CornerRadius::ZERO, color);
-}
-
-pub(crate) fn paint_rects_mesh(painter: &egui::Painter, rects: &[(egui::Rect, egui::Color32)]) {
-    if rects.is_empty() {
-        return;
-    }
-    let mut mesh = egui::Mesh::default();
-    mesh.reserve_vertices(rects.len() * 4);
-    mesh.reserve_triangles(rects.len() * 2);
-    for (rect, color) in rects {
-        mesh.add_colored_rect(*rect, *color);
-    }
-    painter.add(egui::Shape::mesh(mesh));
 }
 
 pub(crate) fn hline_rect(x0: f32, x1: f32, y: f32) -> egui::Rect {

@@ -38,16 +38,24 @@ pub(crate) struct Pane {
     pub(crate) height: i32,
     pub(crate) dirty: bool,
     pub(crate) view: ChartView,
+    pub(crate) script: Option<crate::script::ScriptProgram>,
+    pub(crate) script_source: String,
+    pub(crate) script_error: Option<String>,
 }
 
 impl Pane {
     pub(crate) fn new(indicator: Box<dyn indicator::Indicator>) -> Self {
+        let script_source = indicator::script_source(indicator.name());
+        let script = crate::script::ScriptProgram::parse(&script_source).ok();
         Self {
             indicator,
             cmds: Vec::new(),
             height: 0,
             dirty: true,
             view: ChartView::new(),
+            script,
+            script_source,
+            script_error: None,
         }
     }
 }

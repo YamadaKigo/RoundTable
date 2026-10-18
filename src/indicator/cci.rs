@@ -66,14 +66,6 @@ impl Indicator for Cci {
         &self.title
     }
 
-    fn source(&self) -> &'static str {
-        include_str!("cci.rs")
-    }
-
-    fn path(&self) -> &'static str {
-        file!()
-    }
-
     fn value_range(&self, lo: f64, hi: f64) -> (f64, f64) {
         (lo.min(-100.0), hi.max(100.0))
     }

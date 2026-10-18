@@ -56,11 +56,6 @@
       "ma": ["#3333CC", "#CC0066", "#009933", "#6600CC", "#009999", "#666666"],
       "ema": ["#FF00FF", "#FF8800", "#00CCCC", "#88AA00", "#8888FF", "#AA00AA"]
     },
-    "debug": {
-      "grid_ok": "#00AA00",
-      "grid_bad": "#FF8800",
-      "grid_cursor": "#00CCCC"
-    },
     "pointer": {
       "pointer_trail": "#00CCCC",
       "pointer_trail_hot": "#FF00FF"

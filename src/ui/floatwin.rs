@@ -102,8 +102,6 @@ impl WinEdge {
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum WinKeys {
-    CloseOnly,
-
     MinAndClose,
 
     MinMaxClose,
@@ -112,8 +110,6 @@ pub(crate) enum WinKeys {
 impl WinKeys {
     fn shown(self) -> &'static [(SysButton, usize)] {
         match self {
-            WinKeys::CloseOnly => &[(SysButton::Pin, 0), (SysButton::Close, 1)],
-
             WinKeys::MinAndClose => &[
                 (SysButton::Pin, 0),
                 (SysButton::Minimize, 1),
@@ -318,6 +314,7 @@ impl Win {
         keys: WinKeys,
         busy: bool,
         pinned: bool,
+        minimized: bool,
     ) -> WinOut {
         self.update_geometry(app, ui, bounds);
         let rect = self.rect();
@@ -350,6 +347,7 @@ impl Win {
             keys,
             self.maximized,
             pinned,
+            minimized,
         );
 
         if let Some(p) = self.drag_title(ui, handle, busy, app.pointer.live) {
@@ -609,6 +607,7 @@ pub(crate) fn paint_title_bar(
     keys: WinKeys,
     maximized: bool,
     pinned: bool,
+    minimized: bool,
 ) -> Option<SysButton> {
     painter.rect_filled(title, egui::CornerRadius::ZERO, theme().title_bg);
 
@@ -645,25 +644,9 @@ pub(crate) fn paint_title_bar(
             egui::Sense::click(),
         );
         let hot = resp.hovered();
-        let restore = matches!(keys, WinKeys::MinAndClose) && kind == SysButton::Minimize;
+        let restore = minimized && kind == SysButton::Minimize;
         paint_sys_button(app, painter, rect, hot, kind, maximized, restore, pinned);
 
-        app.probe(
-            match (kind, restore) {
-                (SysButton::Pin, _) => {
-                    if pinned {
-                        "解除置顶键"
-                    } else {
-                        "置顶键"
-                    }
-                }
-                (SysButton::Minimize, true) => "还原键",
-                (SysButton::Minimize, false) => "最小化键",
-                (SysButton::Maximize, _) => "最大化键",
-                (SysButton::Close, _) => "关闭键",
-            },
-            rect,
-        );
         if resp.clicked() {
             hit = Some(kind);
         }

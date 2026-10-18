@@ -38,12 +38,6 @@ impl Default for PointerFeel {
     }
 }
 
-pub(crate) const POINTER_SPEED_STEP: f32 = 1.10;
-pub(crate) const POINTER_SPEED_MIN: f32 = 0.25;
-pub(crate) const POINTER_SPEED_MAX: f32 = 5.0;
-pub(crate) const POINTER_ACCEL_STEP: f32 = 0.10;
-pub(crate) const POINTER_ACCEL_MAX: f32 = 2.0;
-
 pub(crate) struct PointerMotion {
     position: egui::Pos2,
 
@@ -61,6 +55,7 @@ pub(crate) struct PointerManager {
     pub(crate) system: bool,
     pub(crate) show_trail: bool,
     pub(crate) hint: CursorKind,
+    pub(crate) forced_hint: Option<CursorKind>,
     pub(crate) wheel_until: f64,
     pub(crate) live: Option<egui::Pos2>,
     pub(crate) pinned: Option<egui::Pos2>,
@@ -73,6 +68,7 @@ impl PointerManager {
             system: false,
             show_trail: false,
             hint: CursorKind::Normal,
+            forced_hint: None,
             wheel_until: 0.0,
             live: None,
             pinned: None,
@@ -82,10 +78,16 @@ impl PointerManager {
     pub(crate) fn begin_frame(&mut self) {
         self.pinned = None;
         self.hint = CursorKind::Normal;
+        self.forced_hint = None;
     }
 
     pub(crate) fn wheel_active(&self, ctx: &egui::Context) -> bool {
         self.wheel_until > ctx.input(|i| i.time)
+    }
+
+    pub(crate) fn force_hint(&mut self, kind: CursorKind, ui: &egui::Ui) {
+        self.forced_hint = Some(kind);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
     }
 
     pub(crate) fn pinned_if_down(&self, ctx: &egui::Context) -> Option<egui::Pos2> {
@@ -143,52 +145,6 @@ impl PointerMotion {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn acceleration(&self) -> egui::Vec2 {
         self.acceleration
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn feel(&self) -> PointerFeel {
-        self.feel
-    }
-
-    pub(crate) fn adjust_speed(&mut self, factor: f32) -> f32 {
-        let factor = if factor.is_finite() && factor > 0.0 {
-            factor
-        } else {
-            1.0
-        };
-        self.feel.base_speed =
-            (self.feel.base_speed * factor).clamp(POINTER_SPEED_MIN, POINTER_SPEED_MAX);
-        self.velocity = egui::Vec2::ZERO;
-        self.acceleration = egui::Vec2::ZERO;
-        self.feel.base_speed
-    }
-
-    pub(crate) fn set_speed(&mut self, speed: f32) -> f32 {
-        let speed = if speed.is_finite() {
-            speed.clamp(POINTER_SPEED_MIN, POINTER_SPEED_MAX)
-        } else {
-            self.feel.base_speed
-        };
-        self.feel.base_speed = speed;
-        self.velocity = egui::Vec2::ZERO;
-        self.acceleration = egui::Vec2::ZERO;
-        speed
-    }
-
-    pub(crate) fn adjust_acceleration(&mut self, delta: f32) -> f32 {
-        let delta = if delta.is_finite() { delta } else { 0.0 };
-        self.feel.acceleration = (self.feel.acceleration + delta).clamp(0.0, POINTER_ACCEL_MAX);
-        self.feel.acceleration
-    }
-
-    pub(crate) fn set_acceleration(&mut self, acceleration: f32) -> f32 {
-        let acceleration = if acceleration.is_finite() {
-            acceleration.clamp(0.0, POINTER_ACCEL_MAX)
-        } else {
-            self.feel.acceleration
-        };
-        self.feel.acceleration = acceleration;
-        acceleration
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -374,24 +330,6 @@ mod tests {
             "高速段没有进入加速区：{ga} / {gb}"
         );
         assert!((gb / ga - 4.0).abs() < 0.05, "速度档位改变了加速曲线");
-    }
-
-    #[test]
-    fn pointer_controls_clamp_and_recentre_the_motion_state() {
-        let mut p = PointerMotion::default();
-        assert_eq!(p.feel().base_speed, 1.0);
-        assert_eq!(p.feel().acceleration, 0.3);
-        assert_eq!(p.set_speed(1.75), 1.75);
-        assert_eq!(p.set_acceleration(0.25), 0.25);
-        p.reset(egui::pos2(10.0, 10.0), 0.0);
-        let _ = p.advance(&[egui::vec2(100.0, 0.0)], 0.02, bounds());
-        let faster = p.adjust_speed(10.0);
-        assert_eq!(faster, POINTER_SPEED_MAX);
-        assert_eq!(p.velocity(), egui::Vec2::ZERO);
-        let slower = p.adjust_speed(0.0001);
-        assert_eq!(slower, POINTER_SPEED_MIN);
-        assert_eq!(p.adjust_acceleration(100.0), POINTER_ACCEL_MAX);
-        assert_eq!(p.adjust_acceleration(-100.0), 0.0);
     }
 
     #[test]

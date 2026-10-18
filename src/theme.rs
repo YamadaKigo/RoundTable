@@ -20,10 +20,6 @@ pub(crate) const C_LINE: egui::Color32 = egui::Color32::from_rgb(0x99, 0x99, 0x9
 
 pub(crate) const C_CTRL_BORDER: egui::Color32 = egui::Color32::from_rgb(0x99, 0x99, 0x99);
 
-pub(crate) const C_GRID_OK: egui::Color32 = egui::Color32::from_rgb(0x00, 0xAA, 0x00);
-pub(crate) const C_GRID_BAD: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x88, 0x00);
-pub(crate) const C_GRID_CURSOR: egui::Color32 = egui::Color32::from_rgb(0x00, 0xCC, 0xCC);
-
 pub(crate) const C_CHART_BG: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
 pub(crate) const C_AXIS_BG: egui::Color32 = egui::Color32::from_rgb(0xDD, 0xDD, 0xDD);
 pub(crate) const C_UP: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0x00);
@@ -175,12 +171,6 @@ pub(crate) struct Theme {
     pub(crate) ma: [egui::Color32; 6],
     pub(crate) ema: [egui::Color32; 6],
 
-    pub(crate) grid_ok: egui::Color32,
-
-    pub(crate) grid_bad: egui::Color32,
-
-    pub(crate) grid_cursor: egui::Color32,
-
     pub(crate) pointer_trail: egui::Color32,
 
     pub(crate) pointer_trail_hot: egui::Color32,
@@ -239,9 +229,6 @@ impl Theme {
         ],
         ma: C_MA_CLASSIC,
         ema: C_EMA_CLASSIC,
-        grid_ok: C_GRID_OK,
-        grid_bad: C_GRID_BAD,
-        grid_cursor: C_GRID_CURSOR,
         pointer_trail: C_POINTER_TRAIL,
         pointer_trail_hot: C_POINTER_TRAIL_HOT,
     };
@@ -267,9 +254,6 @@ impl Theme {
         t.sel_bg = invert_color(l.sel_bg);
         t.text = invert_color(l.text);
         t.syn_comment = invert_color(l.syn_comment);
-        t.grid_ok = invert_color(l.grid_ok);
-        t.grid_bad = invert_color(l.grid_bad);
-        t.grid_cursor = invert_color(l.grid_cursor);
         t.pointer_trail = invert_color(l.pointer_trail);
         t.pointer_trail_hot = invert_color(l.pointer_trail_hot);
         t.chart_bg = egui::Color32::from_rgb(0x00, 0x00, 0x00);
@@ -408,15 +392,12 @@ impl Theme {
                 colors.indicators.ema[4].0,
                 colors.indicators.ema[5].0,
             ],
-            grid_ok: colors.debug.grid_ok.0,
-            grid_bad: colors.debug.grid_bad.0,
-            grid_cursor: colors.debug.grid_cursor.0,
             pointer_trail: colors.pointer.pointer_trail.0,
             pointer_trail_hot: colors.pointer.pointer_trail_hot.0,
         })
     }
 
-    pub(crate) const fn colors(&self) -> [egui::Color32; 63] {
+    pub(crate) const fn colors(&self) -> [egui::Color32; 60] {
         [
             self.title_bg,
             self.menu_bg,
@@ -476,9 +457,6 @@ impl Theme {
             self.ema[3],
             self.ema[4],
             self.ema[5],
-            self.grid_ok,
-            self.grid_bad,
-            self.grid_cursor,
             self.pointer_trail,
             self.pointer_trail_hot,
         ]
@@ -510,7 +488,6 @@ struct ThemeColors {
     window: WindowColors,
     chart: ChartColors,
     indicators: IndicatorColors,
-    debug: DebugColors,
     pointer: PointerColors,
 }
 
@@ -577,14 +554,6 @@ struct IndicatorColors {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct DebugColors {
-    grid_ok: HexColor,
-    grid_bad: HexColor,
-    grid_cursor: HexColor,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct PointerColors {
     pointer_trail: HexColor,
     pointer_trail_hot: HexColor,
@@ -622,7 +591,7 @@ fn parse_hex_color(text: &str) -> Result<egui::Color32, String> {
 }
 
 thread_local! {
-    static CURRENT: Cell<Theme> = const { Cell::new(Theme::CLASSIC) };
+    static CURRENT: Cell<Theme> = const { Cell::new(Theme::DARK) };
 }
 
 pub(crate) fn theme() -> Theme {

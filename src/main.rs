@@ -15,6 +15,7 @@ mod grid;
 mod indicator;
 mod platform;
 mod pointer;
+mod script;
 mod theme;
 mod ui;
 

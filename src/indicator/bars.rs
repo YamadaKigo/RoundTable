@@ -24,14 +24,6 @@ impl Indicator for Bars {
         "美国线"
     }
 
-    fn source(&self) -> &'static str {
-        include_str!("bars.rs")
-    }
-
-    fn path(&self) -> &'static str {
-        file!()
-    }
-
     fn compute(&self, bars: &[Bar]) -> Vec<DrawCmd> {
         let mut out = ohlc_bars(bars, self.pal.candle_up, self.pal.candle_down);
         out.extend(overlay_lines(bars, self.ov, &self.pal));

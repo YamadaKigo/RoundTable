@@ -19,7 +19,6 @@ pub(crate) struct AppWorld {
     pub(crate) up_color: (u8, u8, u8),
     pub(crate) down_color: (u8, u8, u8),
     pub(crate) chart_follows_theme: bool,
-    pub(crate) overlay: indicator::Overlay,
     entities: EntityAllocator,
 }
 
@@ -45,7 +44,6 @@ impl AppWorld {
             up_color: UP_RGB_DEFAULT,
             down_color: DOWN_RGB_DEFAULT,
             chart_follows_theme: true,
-            overlay: indicator::Overlay::DEFAULT,
             entities,
         }
     }

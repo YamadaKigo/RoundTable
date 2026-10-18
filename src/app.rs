@@ -69,9 +69,6 @@ impl StockApp {
             .map(|mut ind| {
                 ind.set_palette(pal);
 
-                if ind.supports_overlay() {
-                    ind.set_overlay_state(indicator::Overlay::DEFAULT);
-                }
                 Pane::new(ind)
             })
             .collect()
@@ -154,6 +151,7 @@ impl StockApp {
     pub(crate) fn run_context_action(&mut self, ui: &egui::Ui, action: ContextAction) {
         match action {
             ContextAction::AddChart => self.add_chart_window(),
+            ContextAction::OpenConsole => self.open_console_window(),
             ContextAction::SwitchTheme => self.switch_theme(),
             ContextAction::DemoOne => self.status_msg = "右键菜单：演示按钮一".to_owned(),
             ContextAction::DemoTwo => self.status_msg = "右键菜单：演示按钮二".to_owned(),
@@ -230,9 +228,6 @@ impl StockApp {
     pub(crate) fn new_chart_pane(&mut self) -> usize {
         let mut ind = indicator::builtin().swap_remove(0);
         ind.set_palette(self.current_palette());
-        if ind.supports_overlay() {
-            ind.set_overlay_state(self.overlay);
-        }
         match self.win_mgr.free_chart_pane() {
             Some(free) => {
                 self.world.replace_pane(free, Pane::new(ind));
@@ -267,28 +262,6 @@ impl StockApp {
     }
 }
 
-pub(crate) struct GridProbe {
-    pub(crate) name: String,
-    pub(crate) rect: egui::Rect,
-
-    origin: egui::Pos2,
-}
-
-impl GridProbe {
-    fn off_grid(&self) -> [f32; 4] {
-        let off = |v: f32, o: f32| {
-            let d = (v - o) % PITCH;
-            if d < 0.0 { d + PITCH } else { d }
-        };
-        [
-            off(self.rect.min.x, self.origin.x),
-            off(self.rect.min.y, self.origin.y),
-            off(self.rect.max.x - LINE_W, self.origin.x),
-            off(self.rect.max.y - LINE_W, self.origin.y),
-        ]
-    }
-}
-
 pub(crate) struct StockApp {
     pub(crate) world: AppWorld,
 
@@ -298,8 +271,6 @@ pub(crate) struct StockApp {
     pub(crate) icons: IconSet,
 
     pub(crate) symbols: SymbolSet,
-
-    pub(crate) logo: Option<PixelImage>,
 
     pub(crate) cursors: Cursors,
 
@@ -336,14 +307,6 @@ pub(crate) struct StockApp {
 
     pub(crate) color_panel: ColorPanel,
 
-    pub(crate) show_grid: bool,
-
-    pub(crate) grid_probes: Vec<GridProbe>,
-
-    pub(crate) grid_cursor: Option<egui::Pos2>,
-
-    pub(crate) grid_origin: egui::Pos2,
-
     pub(crate) win_silent: bool,
 
     pub(crate) context_menu: ContextMenuState,
@@ -353,12 +316,6 @@ pub(crate) struct StockApp {
     pub(crate) pane_menu_anchor: egui::Rect,
 
     pub(crate) pane_menu_bar: egui::Rect,
-
-    pub(crate) overlay_menu: Option<usize>,
-
-    pub(crate) overlay_menu_anchor: egui::Rect,
-
-    pub(crate) overlay_menu_bar: egui::Rect,
 
     pub(crate) source: SourceView,
 
@@ -385,7 +342,7 @@ impl StockApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
         configure_tessellation(&cc.egui_ctx);
         configure_zero_spacing(&cc.egui_ctx);
-        set_theme(Theme::load(ThemeId::Classic));
+        set_theme(Theme::load(ThemeId::Dark));
 
         cc.egui_ctx.set_pixels_per_point(1.0);
 
@@ -405,7 +362,6 @@ impl StockApp {
             client_cover_ready,
             icons: IconSet::load_or_create(),
             symbols: SymbolSet::load(),
-            logo: PixelImage::load_logo_32(),
             cursors: Cursors::load(),
             pointer: PointerManager::new(mouse_feel()),
             tooltip: None,
@@ -429,18 +385,11 @@ impl StockApp {
             panel_buttons: Vec::new(),
             panel_press: None,
             color_panel: ColorPanel::new(),
-            show_grid: false,
-            grid_probes: Vec::new(),
-            grid_cursor: None,
-            grid_origin: egui::Pos2::ZERO,
             win_silent: false,
             context_menu: ContextMenuState::default(),
             pane_menu: None,
             pane_menu_anchor: egui::Rect::NOTHING,
             pane_menu_bar: egui::Rect::NOTHING,
-            overlay_menu: None,
-            overlay_menu_anchor: egui::Rect::NOTHING,
-            overlay_menu_bar: egui::Rect::NOTHING,
             source: SourceView::new(),
             console: DebugConsole::new(),
             debug_windows: DebugWindowSnapshot::default(),
@@ -504,6 +453,21 @@ impl StockApp {
         segs
     }
 
+    fn dismiss_popup_menus_on_keyboard(&mut self, ctx: &egui::Context) {
+        let pressed = ctx.input(|i| {
+            i.events
+                .iter()
+                .any(|event| matches!(event, egui::Event::Key { pressed: true, .. }))
+        });
+        if !pressed {
+            return;
+        }
+        self.menu = MenuState::default();
+        self.pane_menu = None;
+        self.source.editor.menu = MenuState::default();
+        self.context_menu.close();
+    }
+
     pub(crate) fn chart_status_segments(&self, pane: usize) -> Vec<String> {
         let view = &self.panes[pane].view;
         vec![
@@ -517,16 +481,6 @@ impl StockApp {
         self.win_mgr.top_chart_pane()
     }
 
-    pub(crate) fn probe(&mut self, name: &str, rect: egui::Rect) {
-        if self.show_grid {
-            self.grid_probes.push(GridProbe {
-                name: name.to_owned(),
-                rect,
-                origin: self.grid_origin,
-            });
-        }
-    }
-
     pub(crate) fn paint_status_bar(
         &mut self,
         painter: &egui::Painter,
@@ -534,7 +488,6 @@ impl StockApp {
         segs: &[String],
     ) {
         painter.rect_filled(band, egui::CornerRadius::ZERO, theme().status_bg);
-        self.probe("状态栏", band);
         hline_hard(painter, band.min.x, band.max.x, band.min.y, theme().line);
         let mut x = band.min.x;
         let mut first = true;
@@ -645,189 +598,7 @@ impl StockApp {
                 return true;
             }
         }
-        if self.overlay_menu.is_some() {
-            let count = Self::overlay_items().len();
-            if self
-                .overlay_menu_rect(count, window_bottom)
-                .is_some_and(|r| r.contains(p))
-            {
-                return true;
-            }
-        }
         false
-    }
-
-    pub(crate) fn paint_grid_test(&mut self, painter: &egui::Painter, layout: egui::Rect) {
-        let probes = std::mem::take(&mut self.grid_probes);
-        let mut bars: Vec<(egui::Rect, egui::Color32)> = Vec::with_capacity(probes.len() * 5);
-        for probe in &probes {
-            let off = probe.off_grid();
-            let aligned = off.iter().all(|d| *d == 0.0);
-            let color = if aligned {
-                theme().grid_ok
-            } else {
-                theme().grid_bad
-            };
-            bars.extend(border_rects(probe.rect).map(|r| (r, color)));
-
-            if off[0] != 0.0 {
-                bars.push((
-                    vline_rect(probe.rect.min.x, probe.rect.min.y, probe.rect.min.y + 4.0),
-                    color,
-                ));
-            }
-            if off[1] != 0.0 {
-                bars.push((
-                    hline_rect(probe.rect.min.x, probe.rect.min.x + 4.0, probe.rect.min.y),
-                    color,
-                ));
-            }
-            if off[2] != 0.0 {
-                bars.push((
-                    vline_rect(
-                        probe.rect.max.x - LINE_W,
-                        probe.rect.max.y - 4.0,
-                        probe.rect.max.y,
-                    ),
-                    color,
-                ));
-            }
-            if off[3] != 0.0 {
-                bars.push((
-                    hline_rect(
-                        probe.rect.max.x - 4.0,
-                        probe.rect.max.x,
-                        probe.rect.max.y - LINE_W,
-                    ),
-                    color,
-                ));
-            }
-        }
-        paint_rects_mesh(painter, &bars);
-
-        if let Some(p) = self.grid_cursor {
-            let cell = egui::Rect::from_min_size(
-                egui::pos2(
-                    layout.min.x + ((p.x - layout.min.x) / PITCH).floor() * PITCH,
-                    layout.min.y + ((p.y - layout.min.y) / PITCH).floor() * PITCH,
-                ),
-                egui::vec2(PITCH, PITCH),
-            );
-            let color = theme().grid_cursor;
-            let dot = egui::Rect::from_min_size(
-                egui::pos2(p.x.floor(), p.y.floor()),
-                egui::vec2(LINE_W, LINE_W),
-            );
-            let [a, b, c, d] = border_rects(cell);
-            paint_rects_mesh(
-                painter,
-                &[(a, color), (b, color), (c, color), (d, color), (dot, color)],
-            );
-        }
-
-        self.paint_grid_readout(painter, layout, &probes);
-        self.grid_probes = probes;
-    }
-
-    fn paint_grid_readout(
-        &mut self,
-        painter: &egui::Painter,
-        layout: egui::Rect,
-        probes: &[GridProbe],
-    ) {
-        let work = self.work_rect;
-        if !work.is_positive() {
-            return;
-        }
-        let rows = 4i32;
-        let w = cells(62).min(work.width());
-        let h = cells(rows * TEXT_ROWS);
-        let rect =
-            egui::Rect::from_min_size(egui::pos2(work.max.x - w, work.max.y - h), egui::vec2(w, h));
-        painter.rect_filled(rect, egui::CornerRadius::ZERO, theme().status_bg);
-
-        let bad = probes
-            .iter()
-            .filter(|p| p.off_grid().iter().any(|d| *d != 0.0))
-            .count();
-        let mut lines = Vec::with_capacity(rows as usize);
-        lines.push(format!(
-            "UI工程测试  元素 {} 块 / 没对齐 {} 块",
-            probes.len(),
-            bad
-        ));
-        match self.grid_cursor {
-            Some(p) => {
-                let cell_x = ((p.x - layout.min.x) / PITCH).floor();
-                let cell_y = ((p.y - layout.min.y) / PITCH).floor();
-                let off_x = (p.x - layout.min.x) % PITCH;
-                let off_y = (p.y - layout.min.y) % PITCH;
-                lines.push(format!(
-                    "光标 {:.0},{:.0}  格 {:.0},{:.0}  格内 {:.0},{:.0}",
-                    p.x.round(),
-                    p.y.round(),
-                    cell_x,
-                    cell_y,
-                    off_x,
-                    off_y
-                ));
-            }
-            None => lines.push("光标：不在窗口里".to_owned()),
-        }
-        let under = self
-            .grid_cursor
-            .and_then(|p| probes.iter().rev().find(|q| q.rect.contains(p)));
-        match under {
-            Some(q) => {
-                lines.push(format!(
-                    "压着 {}  {:.0},{:.0}  {:.0}x{:.0}  格 {:.0}x{:.0}",
-                    q.name,
-                    q.rect.min.x,
-                    q.rect.min.y,
-                    q.rect.width(),
-                    q.rect.height(),
-                    (q.rect.width() - LINE_W) / PITCH,
-                    (q.rect.height() - LINE_W) / PITCH
-                ));
-                let off = q.off_grid();
-                lines.push(format!(
-                    "四边偏差 左{:.0} 上{:.0} 右{:.0} 下{:.0}  {}",
-                    off[0],
-                    off[1],
-                    off[2],
-                    off[3],
-                    if off.iter().all(|d| *d == 0.0) {
-                        "全在网格线上"
-                    } else {
-                        "有网格溢出"
-                    }
-                ));
-            }
-            None => {
-                lines.push("压着：空白".to_owned());
-                lines.push("四边偏差：-".to_owned());
-            }
-        }
-        for (i, row) in lines.iter().enumerate() {
-            let y = rect.min.y + grid_line(i as i32 * TEXT_ROWS);
-            if i > 0 {
-                hline_hard(
-                    painter,
-                    rect.min.x + LINE_W,
-                    rect.max.x - LINE_W,
-                    y,
-                    theme().line,
-                );
-            }
-            self.text(
-                painter,
-                egui::pos2(text_left_x(rect.min.x, rect.min.x), y + CELL_CENTER),
-                egui::Align2::LEFT_CENTER,
-                row,
-                theme().text,
-            );
-        }
-        border_hard(painter, rect, theme().ctrl_border);
     }
 
     fn advance_software_pointer(&mut self, ctx: &egui::Context, layout: egui::Rect) {
@@ -946,6 +717,9 @@ impl StockApp {
     }
 
     pub(crate) fn cursor_kind(&self, ctx: &egui::Context) -> CursorKind {
+        if let Some(kind) = self.pointer.forced_hint {
+            return kind;
+        }
         if let Some(kind) = self.drag_session_kind() {
             return kind;
         }
@@ -1041,6 +815,7 @@ impl StockApp {
         let ctx = ui.ctx().clone();
 
         self.pointer.begin_frame();
+        self.dismiss_popup_menus_on_keyboard(&ctx);
 
         let (scrolled, now) = ctx.input(|i| (i.time_since_last_scroll() < 0.01, i.time));
         if scrolled {
@@ -1048,8 +823,6 @@ impl StockApp {
 
             ctx.request_repaint_after(Duration::from_secs_f64(WHEEL_HOLD_S));
         }
-
-        self.poll_compile();
 
         self.console.observe_status(&self.status_msg);
 
@@ -1063,18 +836,6 @@ impl StockApp {
 
         let areas = split_areas(layout);
 
-        self.grid_probes.clear();
-        self.grid_cursor = self.pointer.live;
-
-        self.grid_origin = layout.min;
-        for (name, area) in [
-            ("标题栏", areas[0]),
-            ("菜单栏", areas[1]),
-            ("功能区", areas[2]),
-            ("状态栏", areas[3]),
-        ] {
-            self.probe(name, area);
-        }
         self.paint_skeleton(&ui.painter().clone(), layout, areas);
         self.ui_titlebar(ui, areas[0]);
         let menubar_state = self.menu.clone();
@@ -1101,13 +862,6 @@ impl StockApp {
         let mut mgr = self.win_mgr.take();
         mgr.draw(self, ui, areas[2]);
         self.win_mgr = mgr;
-
-        if let Some(logo) = &self.logo {
-            logo.paint(
-                &ui.painter().clone(),
-                egui::Rect::from_min_size(areas[2].min, egui::vec2(32.0, 32.0)),
-            );
-        }
 
         let blank_right_click = ctx.input(|i| {
             (
@@ -1169,15 +923,9 @@ impl StockApp {
         self.ui_color_panel(ui, areas[2]);
 
         self.ui_pane_menu(ui);
-        self.ui_overlay_menu(ui);
-
         self.run_win_cmd();
 
         self.paint_tooltip(&ui.painter().clone(), layout);
-
-        if self.show_grid {
-            self.paint_grid_test(&ui.painter().clone(), layout);
-        }
 
         if let Some(action) = ui_context_menu(self, ui, layout) {
             self.run_context_action(ui, action);

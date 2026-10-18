@@ -56,14 +56,6 @@ impl Indicator for Bias {
         &self.title
     }
 
-    fn source(&self) -> &'static str {
-        include_str!("bias.rs")
-    }
-
-    fn path(&self) -> &'static str {
-        file!()
-    }
-
     fn value_range(&self, lo: f64, hi: f64) -> (f64, f64) {
         let m = lo.abs().max(hi.abs()).max(1.0);
         (-m, m)

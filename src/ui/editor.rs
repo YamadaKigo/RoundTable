@@ -14,8 +14,7 @@ pub(crate) const EDITOR_TABS: [MenuTab; 3] = [
         title: "文件",
         items: &[
             MenuNode::act("保存"),
-            MenuNode::act("编译"),
-            MenuNode::act("还原原始源码"),
+            MenuNode::act("还原原始指标代码"),
             MenuNode::act("关闭窗口"),
         ],
     },
@@ -36,10 +35,9 @@ pub(crate) const EDITOR_TABS: [MenuTab; 3] = [
     },
 ];
 
-pub(crate) const EDITOR_BUTTONS: [(IconKind, &str, EditorCmd); 8] = [
-    (IconKind::New, "还原原始源码", EditorCmd::Reload),
-    (IconKind::Save, "保存到源文件", EditorCmd::Save),
-    (IconKind::Compile, "编译（cargo check）", EditorCmd::Compile),
+pub(crate) const EDITOR_BUTTONS: [(IconKind, &str, EditorCmd); 7] = [
+    (IconKind::New, "还原原始指标代码", EditorCmd::Reload),
+    (IconKind::Save, "保存指标代码", EditorCmd::Save),
     (IconKind::Cut, "剪切选中", EditorCmd::Cut),
     (IconKind::Copy, "复制选中", EditorCmd::Copy),
     (IconKind::Paste, "粘贴", EditorCmd::Paste),
@@ -52,8 +50,6 @@ pub(crate) enum EditorCmd {
     None,
 
     Save,
-
-    Compile,
 
     Reload,
 
@@ -73,8 +69,7 @@ impl EditorCmd {
     fn of(label: &str) -> EditorCmd {
         match label {
             "保存" => EditorCmd::Save,
-            "编译" => EditorCmd::Compile,
-            "还原原始源码" => EditorCmd::Reload,
+            "还原原始指标代码" => EditorCmd::Reload,
             "关闭窗口" => EditorCmd::Close,
             "撤销" => EditorCmd::Undo,
             "剪切" => EditorCmd::Cut,
@@ -362,7 +357,7 @@ impl TextEditor {
         let caret_before = self.buf.cursor;
         let out = match cmd {
             EditorCmd::None => EditorCmd::None,
-            EditorCmd::Save | EditorCmd::Compile | EditorCmd::Reload | EditorCmd::Close => cmd,
+            EditorCmd::Save | EditorCmd::Reload | EditorCmd::Close => cmd,
             EditorCmd::Cut => {
                 let text = self.buf.cut();
                 if !text.is_empty() {
@@ -551,6 +546,11 @@ impl TextEditor {
             egui::pos2(panel.max.x - LINE_W, body_bottom),
         );
 
+        let window_active = !app.win_silent;
+        if !window_active {
+            self.focused = false;
+            ui.memory_mut(|m| m.surrender_focus(id));
+        }
         let resp = ui.interact(body, id, egui::Sense::click_and_drag());
         if resp.hovered() || resp.dragged() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
@@ -610,7 +610,7 @@ impl TextEditor {
             self.selecting = false;
         }
 
-        if focused {
+        if focused && window_active {
             ui.memory_mut(|m| {
                 m.set_focus_lock_filter(
                     id,
@@ -753,101 +753,21 @@ impl TextEditor {
             }
         }
 
-        let track = egui::Rect::from_min_max(
-            egui::pos2(bar_line + LINE_W, body_top),
-            egui::pos2(panel.max.x - LINE_W, body_bottom),
-        );
-        let travel_min = body_top;
-        let travel_max = panel.max.y;
         let total = self.buf.line_count().max(1) as f32;
-        let track_h = track.height();
-        let handle_h = (track_h * visible as f32 / total)
-            .round()
-            .clamp(SRC_BAR_W, track_h.max(SRC_BAR_W));
         let max_scroll = self.max_scroll();
-        let travel = (travel_max - travel_min - handle_h).max(1.0);
-
-        let handle_at = |scroll: usize| {
-            let t = if max_scroll == 0 {
-                0.0
-            } else {
-                scroll as f32 / max_scroll as f32
-            };
-            egui::Rect::from_min_size(
-                egui::pos2(track.min.x, (travel_min + travel * t).round()),
-                egui::vec2(track.width(), handle_h),
-            )
-        };
-        let handle = handle_at(self.scroll);
-
-        let bar = ui.interact(handle, id.with("vscroll"), egui::Sense::click_and_drag());
-        if bar.hovered() || bar.dragged() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
-
-            app.pointer.hint = CursorKind::Slider;
-        }
-
-        let (down, press, egui_pointer) = ui.input(|i| {
-            (
-                i.pointer.primary_down(),
-                i.pointer.press_origin(),
-                i.pointer.interact_pos(),
-            )
-        });
-
-        let pointer = app.pointer.live.or(egui_pointer);
-        let press = app.pointer.live.or(press);
-        if !down {
-            self.scroll_grab = None;
-        }
-        if down && self.scroll_grab.is_none() && bar.is_pointer_button_down_on() {
-            if let Some(p0) = press {
-                self.scroll_grab = Some(p0 - handle.min);
-            }
-        }
-        if let (true, Some(grab), Some(p)) = (down, self.scroll_grab, pointer) {
-            let top = p.y - grab.y;
-            let want = (top - travel_min) / travel;
-            let t = want.clamp(0.0, 1.0);
-            self.scroll = (t * max_scroll as f32).round() as usize;
-            if app.pointer.system && want != t {
-                let anchored = handle_at(self.scroll);
-                self.scroll_grab = Some(p - anchored.min);
-            }
-        }
-
-        let handle = handle_at(self.scroll);
-
-        if !app.pointer.system
-            && let Some(grab) = self.scroll_grab
-        {
-            app.pointer.pinned = Some(handle.min + grab);
-        }
-
-        painter.rect_filled(track, egui::CornerRadius::ZERO, theme().scroll_track);
-
-        painter.rect_filled(handle, egui::CornerRadius::ZERO, theme().scroll_thumb);
-        hline_hard(
+        vertical_scrollbar(
+            app,
+            ui,
             &painter,
-            handle.min.x,
-            handle.max.x,
-            handle.min.y,
-            theme().ctrl_border,
-        );
-        hline_hard(
-            &painter,
-            handle.min.x,
-            handle.max.x,
-            handle.max.y - LINE_W,
-            theme().ctrl_border,
-        );
-
-        vline_hard(
-            &painter,
-            bar_line,
+            id,
+            panel,
             body_top,
             body_bottom,
-            theme().ctrl_border,
+            visible,
+            total as usize,
+            max_scroll,
+            &mut self.scroll,
+            &mut self.scroll_grab,
         );
     }
 }
@@ -976,4 +896,126 @@ pub(crate) fn scrollbar_track(panel: egui::Rect) -> egui::Rect {
         egui::pos2(bar_line + LINE_W, panel.min.y + SRC_BODY_TOP),
         egui::pos2(panel.max.x - LINE_W, panel.max.y - LINE_W),
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn vertical_scrollbar(
+    app: &mut StockApp,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    id: egui::Id,
+    panel: egui::Rect,
+    body_top: f32,
+    body_bottom: f32,
+    visible: usize,
+    total: usize,
+    max_scroll: usize,
+    scroll: &mut usize,
+    scroll_grab: &mut Option<egui::Vec2>,
+) {
+    let bar_line = panel.max.x - 2.0 * LINE_W - SRC_BAR_W;
+    let track = egui::Rect::from_min_max(
+        egui::pos2(bar_line + LINE_W, body_top),
+        egui::pos2(panel.max.x - LINE_W, body_bottom),
+    );
+    let total = total.max(1) as f32;
+    let track_h = track.height();
+    let handle_h = (track_h * visible as f32 / total)
+        .round()
+        .clamp(SRC_BAR_W, track_h.max(SRC_BAR_W));
+    let travel = (track_h - handle_h).max(1.0);
+
+    let handle_at = |value: usize| {
+        let t = if max_scroll == 0 {
+            0.0
+        } else {
+            value as f32 / max_scroll as f32
+        };
+        egui::Rect::from_min_size(
+            egui::pos2(track.min.x, (body_top + travel * t).round()),
+            egui::vec2(track.width(), handle_h),
+        )
+    };
+    let handle = handle_at(*scroll);
+
+    let track_resp = ui.interact(
+        track,
+        id.with("vscroll_track"),
+        egui::Sense::click_and_drag(),
+    );
+    let bar = ui.interact(handle, id.with("vscroll"), egui::Sense::click_and_drag());
+    if bar.hovered() || bar.dragged() || track_resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        app.pointer.hint = CursorKind::Slider;
+    }
+
+    let (down, press, egui_pointer) = ui.input(|i| {
+        (
+            i.pointer.primary_down(),
+            i.pointer.press_origin(),
+            i.pointer.interact_pos(),
+        )
+    });
+
+    let pointer = app.pointer.live.or(egui_pointer);
+    let press = app.pointer.live.or(press);
+    if !down {
+        *scroll_grab = None;
+    }
+    if down
+        && scroll_grab.is_none()
+        && (bar.is_pointer_button_down_on() || track_resp.is_pointer_button_down_on())
+    {
+        if let Some(p0) = press {
+            *scroll_grab = Some(if handle.contains(p0) {
+                p0 - handle.min
+            } else {
+                egui::vec2(0.0, handle_h / 2.0)
+            });
+        }
+    }
+    if let (true, Some(grab), Some(p)) = (down, *scroll_grab, pointer) {
+        let top = p.y - grab.y;
+        let want = (top - body_top) / travel;
+        let t = want.clamp(0.0, 1.0);
+        *scroll = (t * max_scroll as f32).round() as usize;
+        if app.pointer.system && want != t {
+            let anchored = handle_at(*scroll);
+            *scroll_grab = Some(p - anchored.min);
+        }
+    }
+
+    let handle = handle_at(*scroll);
+
+    if !app.pointer.system
+        && let Some(grab) = *scroll_grab
+    {
+        app.pointer.pinned = Some(handle.min + grab);
+    }
+
+    painter.rect_filled(track, egui::CornerRadius::ZERO, theme().scroll_track);
+    painter.rect_filled(handle, egui::CornerRadius::ZERO, theme().scroll_thumb);
+    hline_hard(
+        painter,
+        handle.min.x,
+        handle.max.x,
+        handle.min.y,
+        theme().ctrl_border,
+    );
+    if handle.max.y < body_bottom {
+        hline_hard(
+            painter,
+            handle.min.x,
+            handle.max.x,
+            handle.max.y - LINE_W,
+            theme().ctrl_border,
+        );
+    }
+    vline_hard(
+        painter,
+        bar_line,
+        body_top,
+        body_bottom,
+        theme().ctrl_border,
+    );
 }

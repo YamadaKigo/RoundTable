@@ -121,14 +121,6 @@ impl Indicator for Candle {
         "蜡烛图"
     }
 
-    fn source(&self) -> &'static str {
-        include_str!("candle.rs")
-    }
-
-    fn path(&self) -> &'static str {
-        file!()
-    }
-
     fn compute(&self, bars: &[Bar]) -> Vec<DrawCmd> {
         let mut out = candles(
             bars,

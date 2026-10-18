@@ -80,14 +80,6 @@ impl Indicator for Kdj {
         &self.title
     }
 
-    fn source(&self) -> &'static str {
-        include_str!("kdj.rs")
-    }
-
-    fn path(&self) -> &'static str {
-        file!()
-    }
-
     fn value_range(&self, _lo: f64, _hi: f64) -> (f64, f64) {
         (RANGE_LO, RANGE_HI)
     }

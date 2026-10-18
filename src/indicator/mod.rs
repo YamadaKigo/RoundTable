@@ -102,6 +102,7 @@ pub struct Overlay {
     pub boll: bool,
 }
 
+#[allow(dead_code)]
 impl Overlay {
     pub const NONE: Self = Self {
         ma: 0,
@@ -541,10 +542,6 @@ pub fn status_field(label: &str, value: String, tmpl: &str, color: u32) -> DrawC
 pub trait Indicator {
     fn name(&self) -> &str;
 
-    fn source(&self) -> &'static str;
-
-    fn path(&self) -> &'static str;
-
     fn compute(&self, bars: &[Bar]) -> Vec<DrawCmd>;
 
     fn layout(&self) -> ChartLayout {
@@ -573,14 +570,17 @@ pub trait Indicator {
 
     fn set_palette(&mut self, _pal: Palette) {}
 
+    #[allow(dead_code)]
     fn supports_overlay(&self) -> bool {
         false
     }
 
+    #[allow(dead_code)]
     fn overlay_state(&self) -> Overlay {
         Overlay::NONE
     }
 
+    #[allow(dead_code)]
     fn set_overlay_state(&mut self, _ov: Overlay) {}
 }
 
@@ -609,4 +609,58 @@ pub fn default_layout() -> Vec<Box<dyn Indicator>> {
 
 pub fn builtin_names() -> Vec<String> {
     builtin().iter().map(|ind| ind.name().to_owned()).collect()
+}
+
+pub(crate) fn script_file(name: &str) -> &'static str {
+    if name == "蜡烛图" {
+        "candle.rti"
+    } else if name == "美国线" {
+        "bars.rti"
+    } else if name == "成交量" {
+        "volume.rti"
+    } else if name.starts_with("MACD") {
+        "macd.rti"
+    } else if name.starts_with("KDJ") {
+        "kdj.rti"
+    } else if name.starts_with("RSI") {
+        "rsi.rti"
+    } else if name.starts_with("BOLL") {
+        "boll.rti"
+    } else if name.starts_with("OBV") {
+        "obv.rti"
+    } else if name.starts_with("CCI") {
+        "cci.rti"
+    } else {
+        "bias.rti"
+    }
+}
+
+pub(crate) fn script_source(name: &str) -> String {
+    let file = script_file(name);
+    std::fs::read_to_string(crate::assets::scripts_dir().join(file))
+        .unwrap_or_else(|_| script_default(file).to_owned())
+}
+
+#[cfg(test)]
+pub(crate) fn script_path(name: &str) -> std::path::PathBuf {
+    crate::assets::scripts_dir().join(script_file(name))
+}
+
+pub(crate) fn user_script_path(pane: usize, name: &str) -> std::path::PathBuf {
+    crate::assets::user_indicators_dir().join(format!("pane{pane}_{}", script_file(name)))
+}
+
+fn script_default(file: &str) -> &'static str {
+    match file {
+        "candle.rti" => include_str!("../../assets/scripts/candle.rti"),
+        "bars.rti" => include_str!("../../assets/scripts/bars.rti"),
+        "volume.rti" => include_str!("../../assets/scripts/volume.rti"),
+        "macd.rti" => include_str!("../../assets/scripts/macd.rti"),
+        "kdj.rti" => include_str!("../../assets/scripts/kdj.rti"),
+        "rsi.rti" => include_str!("../../assets/scripts/rsi.rti"),
+        "boll.rti" => include_str!("../../assets/scripts/boll.rti"),
+        "obv.rti" => include_str!("../../assets/scripts/obv.rti"),
+        "cci.rti" => include_str!("../../assets/scripts/cci.rti"),
+        _ => include_str!("../../assets/scripts/bias.rti"),
+    }
 }

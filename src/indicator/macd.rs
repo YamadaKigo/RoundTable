@@ -57,14 +57,6 @@ impl Indicator for Macd {
         &self.title
     }
 
-    fn source(&self) -> &'static str {
-        include_str!("macd.rs")
-    }
-
-    fn path(&self) -> &'static str {
-        file!()
-    }
-
     fn value_range(&self, lo: f64, hi: f64) -> (f64, f64) {
         let m = lo.abs().max(hi.abs()).max(f64::EPSILON);
         (-m, m)

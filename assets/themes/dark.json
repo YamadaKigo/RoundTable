@@ -5,38 +5,38 @@
   "name": "深色",
   "colors": {
     "window": {
-      "title_bg": "#444444",
-      "menu_bg": "#222222",
-      "work_bg": "#000000",
-      "desktop_bg": "#111111",
+      "title_bg": "#555555",
+      "menu_bg": "#444444",
+      "work_bg": "#333333",
+      "desktop_bg": "#333333",
       "status_bg": "#333333",
-      "panel_bg": "#222222",
+      "panel_bg": "#333333",
       "splitter": "#555555",
-      "scroll_track": "#555555",
-      "scroll_thumb": "#333333",
-      "btn_face": "#333333",
-      "btn_hover": "#222222",
-      "btn_press": "#555555",
-      "sel_bg": "#222222",
+      "scroll_track": "#444444",
+      "scroll_thumb": "#555555",
+      "btn_face": "#555555",
+      "btn_hover": "#666666",
+      "btn_press": "#666666",
+      "sel_bg": "#444444",
       "symbol": "#FFFFFF",
-      "ctrl_border": "#FF0000",
-      "line": "#FF0000",
+      "ctrl_border": "#CC0000",
+      "line": "#CC0000",
       "text": "#FFFFFF",
       "text_white": "#FFFFFF",
-      "syn_comment": "#FF66FF"
+      "syn_comment": "#009900"
     },
     "chart": {
-      "chart_bg": "#000000",
-      "chart_line": "#FF0000",
-      "axis_bg": "#222222",
-      "tick": "#222222",
+      "chart_bg": "#222222",
+      "chart_line": "#CC0000",
+      "axis_bg": "#333333",
+      "tick": "#333333",
       "cross": "#666666",
-      "cross_label": "#111111",
-      "ind_zero": "#FF0000",
+      "cross_label": "#444444",
+      "ind_zero": "#CC0000",
       "candle_up": "#FF0000",
       "candle_down": "#00FFFF",
       "text_up": "#FF0000",
-      "text_down": "#009900"
+      "text_down": "#00FFFF"
     },
     "indicators": {
       "dif": "#3333CC",
@@ -55,11 +55,6 @@
       "bias": ["#3333CC", "#CC9900", "#FF00FF"],
       "ma": ["#3333CC", "#CC0066", "#009933", "#6600CC", "#009999", "#666666"],
       "ema": ["#FF00FF", "#FF8800", "#00CCCC", "#88AA00", "#8888FF", "#AA00AA"]
-    },
-    "debug": {
-      "grid_ok": "#FF55FF",
-      "grid_bad": "#0077FF",
-      "grid_cursor": "#FF3333"
     },
     "pointer": {
       "pointer_trail": "#FF3333",

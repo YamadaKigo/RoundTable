@@ -146,6 +146,21 @@ pub(crate) fn hsv_to_rgb(h: u16, s: u8, v: u8) -> (u8, u8, u8) {
     (to(r), to(g), to(b))
 }
 
+pub(crate) fn selection_cross_rects(center: egui::Pos2) -> [egui::Rect; 2] {
+    let cx = center.x.round();
+    let cy = center.y.round();
+    [
+        egui::Rect::from_min_size(
+            egui::pos2(cx - 3.0 * LINE_W, cy - LINE_W),
+            egui::vec2(6.0 * LINE_W, 2.0 * LINE_W),
+        ),
+        egui::Rect::from_min_size(
+            egui::pos2(cx - LINE_W, cy - 3.0 * LINE_W),
+            egui::vec2(2.0 * LINE_W, 6.0 * LINE_W),
+        ),
+    ]
+}
+
 pub(crate) fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (u16, u8, u8) {
     let rf = r as f32 / 255.0;
     let gf = g as f32 / 255.0;
@@ -173,11 +188,11 @@ pub(crate) fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (u16, u8, u8) {
 }
 
 pub(crate) fn contrast_on(rgb: (u8, u8, u8)) -> egui::Color32 {
-    let luma = 299 * rgb.0 as u32 + 587 * rgb.1 as u32 + 114 * rgb.2 as u32;
-    if luma < 128 * 1000 {
-        theme().text_white
+    let luma = (299 * rgb.0 as u32 + 587 * rgb.1 as u32 + 114 * rgb.2 as u32) / 1000;
+    if luma >= 128 {
+        egui::Color32::BLACK
     } else {
-        theme().text
+        egui::Color32::WHITE
     }
 }
 
@@ -285,6 +300,9 @@ pub(crate) enum ColorDrag {
 #[derive(Clone)]
 pub(crate) struct ColorPanel {
     pub(crate) win: Win,
+    pub(crate) minimized: bool,
+    pub(crate) pinned: bool,
+    pub(crate) restore: (egui::Pos2, egui::Vec2),
     pub(crate) target: ColorTarget,
 
     pub(crate) h: u16,
@@ -308,6 +326,12 @@ impl ColorPanel {
     pub(crate) fn new() -> Self {
         Self {
             win: Win::new(WIN_ID_COLOR, CP_DEFAULT_X, CP_DEFAULT_Y, CP_W, CP_H),
+            minimized: false,
+            pinned: false,
+            restore: (
+                egui::pos2(CP_DEFAULT_X, CP_DEFAULT_Y),
+                egui::vec2(CP_W, CP_H),
+            ),
             target: ColorTarget::Up,
             h: 0,
             s: 0,
@@ -371,6 +395,12 @@ impl StockApp {
         let (up, down) = (self.up_color, self.down_color);
         let cp = &mut self.color_panel;
         cp.win.open = true;
+        if cp.minimized {
+            cp.minimized = false;
+            cp.win.pos = cp.restore.0;
+            cp.win.size = cp.restore.1;
+            cp.win.min_size.y = CP_H;
+        }
         cp.pending_up = up;
         cp.pending_down = down;
         cp.target = target;
@@ -386,11 +416,39 @@ impl StockApp {
             return;
         }
 
-        let out = cp
-            .win
-            .begin(self, ui, work, "颜色设置", WinKeys::CloseOnly, false, false);
+        let out = cp.win.begin(
+            self,
+            ui,
+            work,
+            "颜色设置",
+            WinKeys::MinAndClose,
+            false,
+            cp.pinned,
+            cp.minimized,
+        );
 
-        self.probe("颜色面板", cp.win.rect());
+        if out.pin {
+            cp.pinned = !cp.pinned;
+        }
+        if out.minimize {
+            if cp.minimized {
+                cp.minimized = false;
+                cp.win.pos = cp.restore.0;
+                cp.win.size = cp.restore.1;
+                cp.win.min_size.y = CP_H;
+            } else {
+                cp.restore = (cp.win.pos, cp.win.size);
+                cp.minimized = true;
+                cp.win.size.y = WIN_TITLE_H;
+                cp.win.min_size.y = WIN_TITLE_H;
+            }
+            cp.win.end_sessions();
+        }
+        if cp.minimized {
+            cp.win.end(ui, false);
+            self.color_panel = cp;
+            return;
+        }
         if out.close {
             cp.close_cancelled();
             self.color_panel = cp;
@@ -487,7 +545,12 @@ impl StockApp {
             cp.drag = ColorDrag::Hue;
 
             if let Some(p) = pointer {
-                cp.drag_off.x = p.x - (hue.min.x + hue_handle_left(cp.h));
+                let handle_x = hue.min.x + hue_handle_left(cp.h);
+                cp.drag_off.x = if p.x >= handle_x && p.x < handle_x + CP_HANDLE_W {
+                    p.x - handle_x
+                } else {
+                    CP_HANDLE_W / 2.0
+                };
             }
         }
         if cp.drag == ColorDrag::Hue {
@@ -647,22 +710,9 @@ impl StockApp {
         cp.win.end(ui, false);
 
         let mark = contrast_on(cp.rgb);
-        painter.rect_filled(
-            egui::Rect::from_min_size(
-                egui::pos2(sel_center.x - 2.0, sel_center.y),
-                egui::vec2(5.0, LINE_W),
-            ),
-            egui::CornerRadius::ZERO,
-            mark,
-        );
-        painter.rect_filled(
-            egui::Rect::from_min_size(
-                egui::pos2(sel_center.x, sel_center.y - 2.0),
-                egui::vec2(LINE_W, 5.0),
-            ),
-            egui::CornerRadius::ZERO,
-            mark,
-        );
+        let [horizontal, vertical] = selection_cross_rects(sel_center);
+        painter.rect_filled(horizontal, egui::CornerRadius::ZERO, mark);
+        painter.rect_filled(vertical, egui::CornerRadius::ZERO, mark);
 
         let hex_edge = theme().ctrl_border;
         vline_hard(
@@ -758,9 +808,8 @@ impl StockApp {
             egui::vec2(CP_HANDLE_W, row.height()),
         );
 
-        let over_track = ui
-            .allocate_rect(track, egui::Sense::click_and_drag())
-            .hovered();
+        let track_resp = ui.allocate_rect(track, egui::Sense::click_and_drag());
+        let over_track = track_resp.hovered();
 
         let knob = ui.interact(
             rest,
@@ -771,11 +820,17 @@ impl StockApp {
         if knob.hovered() || over_track || *drag == ColorDrag::Slider(slot) {
             self.pointer.hint = CursorKind::Slider;
         }
-        if knob.is_pointer_button_down_on() && *drag == ColorDrag::None {
+        if (knob.is_pointer_button_down_on() || track_resp.is_pointer_button_down_on())
+            && *drag == ColorDrag::None
+        {
             *drag = ColorDrag::Slider(slot);
 
             if let Some(p) = pointer {
-                drag_off.x = (p.x - rest_x).clamp(0.0, CP_HANDLE_W - LINE_W);
+                drag_off.x = if p.x >= rest_x && p.x < rest_x + CP_HANDLE_W {
+                    (p.x - rest_x).clamp(0.0, CP_HANDLE_W - LINE_W)
+                } else {
+                    CP_HANDLE_W / 2.0
+                };
             }
         }
         let drag_x = if *drag == ColorDrag::Slider(slot) {

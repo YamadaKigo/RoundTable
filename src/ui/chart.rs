@@ -255,9 +255,16 @@ impl StockApp {
             return;
         }
 
+        let Some(focused) = self.win_mgr.focused_pane() else {
+            for pane in &mut self.panes {
+                pane.view.pan = None;
+            }
+            return;
+        };
         let hover = ui.input(|i| i.pointer.hover_pos());
-        let over_plot =
-            hover.and_then(|p| plots.iter().position(|r| r.contains(p)).map(|i| (i, p)));
+        let over_plot = hover
+            .filter(|p| plots[focused].contains(*p))
+            .map(|p| (focused, p));
 
         if let Some((pane, p)) = over_plot {
             let notches = self.take_wheel_notches(ui, Some(p), pane);
@@ -317,8 +324,14 @@ impl StockApp {
             }
             return;
         }
+        let Some(pane) = self.win_mgr.focused_pane() else {
+            for pane in &mut self.panes {
+                pane.view.crosshair = None;
+            }
+            return;
+        };
         let hover = ui.input(|i| i.pointer.hover_pos());
-        let dragging = self.panes.iter().any(|pane| pane.view.pan.is_some());
+        let dragging = self.panes[pane].view.pan.is_some();
         let point = hover.or_else(|| {
             if dragging {
                 ui.input(|i| i.pointer.latest_pos())
@@ -333,17 +346,12 @@ impl StockApp {
             return;
         };
 
-        let pane = match plots.iter().position(|r| r.contains(p)) {
-            Some(i) => Some(i),
-            None if dragging => self.panes.iter().position(|pane| pane.view.pan.is_some()),
-            None => None,
-        };
-        let Some(pane) = pane else {
+        if !dragging && !plots[pane].contains(p) {
             for pane in &mut self.panes {
                 pane.view.crosshair = None;
             }
             return;
-        };
+        }
 
         if !dragging && self.floating_at(p, ui.max_rect().max.y) {
             for pane in &mut self.panes {
@@ -419,16 +427,6 @@ impl StockApp {
         }
 
         self.ui_pane_title(ui, pane, title);
-
-        self.probe("图表栏", title);
-        if let Some(s) = status {
-            self.probe("图表状态带", s);
-        }
-        self.probe("绘图区", main);
-        if let Some(t) = time {
-            self.probe("时间带", t);
-        }
-        self.probe("图表窗状态栏", chart_bar(area));
 
         let bar_segs = self.chart_status_segments(pane);
         let bar = chart_bar(area);
@@ -839,16 +837,7 @@ impl StockApp {
         );
     }
 
-    pub(crate) const PANE_TABS_KLINE: [&'static str; 3] = ["叠加", "切换", "代码"];
-    pub(crate) const PANE_TABS_PLAIN: [&'static str; 2] = ["切换", "代码"];
-
-    fn pane_title_tabs(&self, pane: usize) -> &'static [&'static str] {
-        if self.panes[pane].indicator.supports_overlay() {
-            &Self::PANE_TABS_KLINE
-        } else {
-            &Self::PANE_TABS_PLAIN
-        }
-    }
+    pub(crate) const PANE_TABS: [&'static str; 2] = ["切换", "代码"];
 
     #[allow(dead_code)]
     pub(crate) fn pane_button_rects(title: egui::Rect, widths: &[f32]) -> Vec<egui::Rect> {
@@ -861,15 +850,8 @@ impl StockApp {
         pane: usize,
         title: egui::Rect,
     ) -> Vec<egui::Rect> {
-        let tabs = self.pane_title_tabs(pane);
-        let overlay_slot = self.panes[pane].indicator.supports_overlay().then_some(0);
-        let switch_slot = usize::from(overlay_slot.is_some());
-        let code_slot = switch_slot + 1;
-
-        let open = if self.overlay_menu == Some(pane) {
-            overlay_slot
-        } else if self.pane_menu == Some(pane) {
-            Some(switch_slot)
+        let open = if self.pane_menu == Some(pane) {
+            Some(0)
         } else {
             None
         };
@@ -878,7 +860,7 @@ impl StockApp {
             self,
             ui,
             title,
-            tabs,
+            &Self::PANE_TABS,
             MenuAlign::Right,
             open,
             Some(&name),
@@ -886,38 +868,22 @@ impl StockApp {
         );
 
         match out.clicked {
-            Some(i) if Some(i) == overlay_slot => {
-                self.overlay_menu = if self.overlay_menu == Some(pane) {
-                    None
-                } else {
-                    Some(pane)
-                };
-                self.pane_menu = None;
-            }
-            Some(i) if i == switch_slot => {
+            Some(0) => {
                 self.pane_menu = if self.pane_menu == Some(pane) {
                     None
                 } else {
                     Some(pane)
                 };
-                self.overlay_menu = None;
             }
-            Some(i) if i == code_slot => {
+            Some(1) => {
                 self.request_win(WinCmd::OpenSource(pane));
-                self.overlay_menu = None;
                 self.pane_menu = None;
             }
             _ => {}
         }
 
-        if self.overlay_menu == Some(pane) {
-            if let Some(i) = overlay_slot {
-                self.overlay_menu_anchor = out.rects[i];
-                self.overlay_menu_bar = title;
-            }
-        }
         if self.pane_menu == Some(pane) {
-            self.pane_menu_anchor = out.rects[switch_slot];
+            self.pane_menu_anchor = out.rects[0];
             self.pane_menu_bar = title;
         }
         out.rects

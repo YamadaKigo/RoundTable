@@ -1,6 +1,9 @@
 use crate::grid::*;
 use eframe::egui;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+include!(concat!(env!("OUT_DIR"), "/embedded_fonts.rs"));
 
 pub(crate) const FONT_SIZE: f32 = 16.0;
 
@@ -9,8 +12,6 @@ pub(crate) const TEXT_BOX_H: f32 = 2.0 * GRID + LINE_W;
 pub(crate) const ADV_WIDE: f32 = 2.0 * PITCH;
 
 pub(crate) const ADV_ASCII: f32 = PITCH;
-
-pub(crate) const ASCII_FROM_CJK: bool = false;
 
 pub(crate) const fn char_advance(c: char) -> f32 {
     if is_wide_char(c) { ADV_WIDE } else { ADV_ASCII }
@@ -217,6 +218,15 @@ unsafe extern "system" {
 }
 
 pub(crate) fn load_private_font(file: &str) -> bool {
+    if let Some(path) = embedded_font_path(file)
+        && register_private_font(&path)
+    {
+        return true;
+    }
+    if register_private_font(&crate::assets::fonts_dir().join(file)) {
+        return true;
+    }
+
     let mut dir = [0u16; 260];
     let mut paths: Vec<String> = Vec::new();
     unsafe {
@@ -228,13 +238,35 @@ pub(crate) fn load_private_font(file: &str) -> bool {
     }
     paths.push(file.to_owned());
     for p in paths {
-        let wide: Vec<u16> = p.encode_utf16().chain(std::iter::once(0)).collect();
-        let ok = unsafe { AddFontResourceExW(wide.as_ptr(), 0x10, 0) };
-        if ok > 0 {
+        if register_private_font(Path::new(&p)) {
             return true;
         }
     }
     false
+}
+
+fn embedded_font_path(file: &str) -> Option<PathBuf> {
+    let bytes = embedded_font(file)?;
+    let dir = crate::assets::user_root().join("fonts");
+    let path = dir.join(file);
+    let current = std::fs::metadata(&path).ok().map(|meta| meta.len());
+    if current != Some(bytes.len() as u64) {
+        std::fs::create_dir_all(&dir).ok()?;
+        std::fs::write(&path, bytes).ok()?;
+    }
+    Some(path)
+}
+
+fn register_private_font(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let wide: Vec<u16> = path
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe { AddFontResourceExW(wide.as_ptr(), 0x10, 0) > 0 }
 }
 
 #[derive(Clone, Copy)]
@@ -273,6 +305,10 @@ impl HardText {
             let dc_tt = CreateCompatibleDC(0);
             if dc_tt == 0 {
                 return None;
+            }
+
+            for file in ["simsun.ttc", "simsunb.ttf"] {
+                load_private_font(file);
             }
 
             let mut font_tt = 0isize;
@@ -382,7 +418,7 @@ impl HardText {
             let texture = ctx.load_texture("rt_hard_text", blank, egui::TextureOptions::NEAREST);
 
             eprintln!(
-                "[文字] 宋体 16px（基线 {}px）+ Fixedsys 8x16（字格基线 {}px）",
+                "[文字] 宋体 16px（基线 {}px），ASCII Fixedsys 12pt（字格基线 {}px）",
                 cjk_ascent, ascii_ascent
             );
             Some(Self {
@@ -419,7 +455,7 @@ impl HardText {
     pub(crate) fn rasterize(&mut self, c: char) -> Option<Glyph> {
         if is_wide_char(c) {
             self.rasterize_outline(c, true)
-        } else if self.font_ras != 0 && !ASCII_FROM_CJK {
+        } else if self.font_ras != 0 {
             self.rasterize_raster(c)
         } else {
             self.rasterize_outline(c, false)
@@ -431,9 +467,10 @@ impl HardText {
             e: [0x0001_0000, 0, 0, 0x0001_0000],
         };
         let mut gm = GlyphMetrics::default();
+        let dc = self.dc_tt;
         unsafe {
             let need = GetGlyphOutlineW(
-                self.dc_tt,
+                dc,
                 c as u32,
                 GGO_BITMAP,
                 &mut gm,
@@ -458,7 +495,7 @@ impl HardText {
 
             let mut buf = vec![0u8; need as usize];
             let got = GetGlyphOutlineW(
-                self.dc_tt,
+                dc,
                 c as u32,
                 GGO_BITMAP,
                 &mut gm,
@@ -551,7 +588,7 @@ impl HardText {
             self.texture
                 .set_partial([ax, ay], patch, egui::TextureOptions::NEAREST);
 
-            let ox = if c == '0' { -1 } else { 0 };
+            let ox = ascii_glyph_offset(c);
             Some(Glyph {
                 w: RAS_CELL_W,
                 h: RAS_CELL_H,
@@ -651,6 +688,10 @@ impl Drop for HardText {
             }
         }
     }
+}
+
+pub(crate) const fn ascii_glyph_offset(c: char) -> i32 {
+    if c == '0' { -1 } else { 0 }
 }
 
 pub(crate) fn split_areas(layout: egui::Rect) -> [egui::Rect; 4] {
