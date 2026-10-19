@@ -425,6 +425,7 @@ impl StockApp {
             false,
             cp.pinned,
             cp.minimized,
+            false,
         );
 
         if out.pin {

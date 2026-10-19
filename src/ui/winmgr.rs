@@ -46,6 +46,7 @@ pub(crate) struct ManagedWin {
     pub(crate) pane: usize,
 
     pub(crate) pinned: bool,
+    pub(crate) exclusive: bool,
 
     pin_seq: u64,
 
@@ -167,6 +168,7 @@ impl WinMgr {
             restore: (egui::Pos2::ZERO, size),
             pane,
             pinned: false,
+            exclusive: false,
             pin_seq: 0,
             mini_seq: 0,
             mini_w: MINI_W,
@@ -215,6 +217,10 @@ impl WinMgr {
 
         if work.is_positive() {
             self.wins[i].w.clamp_into(work);
+            let id = self.wins[i].w.id;
+            if self.exclusive_blocks(id, self.wins[i].w.rect()) {
+                self.wins[i].w.pos = self.free_position(self.wins[i].w.size, work);
+            }
         }
         self.wins[i].restore = (self.wins[i].w.pos, self.wins[i].w.size);
         self.toggle_pin(i);
@@ -277,6 +283,10 @@ impl WinMgr {
                 (work.center().y - size.y / 2.0).round(),
             );
             self.wins[i].w.clamp_into(work);
+            let id = self.wins[i].w.id;
+            if self.exclusive_blocks(id, self.wins[i].w.rect()) {
+                self.wins[i].w.pos = self.free_position(size, work);
+            }
         }
         self.wins[i].w.guard_open_click();
         self.wins[i].restore = (self.wins[i].w.pos, self.wins[i].w.size);
@@ -316,6 +326,7 @@ impl WinMgr {
         self.wins.push(w);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn activate_id(&mut self, id: u64) {
         self.pending = Some(id);
     }
@@ -348,6 +359,27 @@ impl WinMgr {
             if w.w.open {
                 w.w.clamp_into(work);
             }
+        }
+    }
+
+    fn update_move_guards(&mut self) {
+        let exclusive: Vec<(u64, egui::Rect)> = self
+            .wins
+            .iter()
+            .filter(|w| w.w.open && !w.minimized && w.exclusive)
+            .map(|w| (w.w.id, w.w.rect()))
+            .collect();
+        for window in &mut self.wins {
+            let guards = if window.exclusive || window.minimized {
+                Vec::new()
+            } else {
+                exclusive
+                    .iter()
+                    .copied()
+                    .filter(|(id, _)| *id != window.w.id)
+                    .collect()
+            };
+            window.w.set_move_guards(guards);
         }
     }
 
@@ -401,7 +433,11 @@ impl WinMgr {
     }
 
     pub(crate) fn toggle_pin(&mut self, i: usize) {
-        self.wins[i].pinned = !self.wins[i].pinned;
+        self.set_pin(i, !self.wins[i].pinned);
+    }
+
+    pub(crate) fn set_pin(&mut self, i: usize, pinned: bool) {
+        self.wins[i].pinned = pinned;
         if self.wins[i].pinned {
             self.wins[i].pin_seq = self.next_pin;
             self.next_pin += 1;
@@ -409,6 +445,21 @@ impl WinMgr {
             self.wins[i].pin_seq = 0;
         }
         self.wins[i].w.end_sessions();
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn toggle_exclusive(&mut self, i: usize) {
+        self.wins[i].exclusive = !self.wins[i].exclusive;
+    }
+
+    fn exclusive_blocks(&self, id: u64, rect: egui::Rect) -> bool {
+        self.wins.iter().any(|window| {
+            window.w.id != id
+                && window.w.open
+                && !window.minimized
+                && window.exclusive
+                && interior_overlap(rect, window.w.rect())
+        })
     }
 
     #[cfg(test)]
@@ -502,14 +553,15 @@ impl WinMgr {
     pub(crate) fn add_chart(&mut self, work: egui::Rect, pane: usize) -> usize {
         let size = egui::vec2(NEW_WIN_W.min(work.width()), NEW_WIN_H.min(work.height()));
         let mut pos = work.min;
-        for k in 0..=self.wins.len() {
+        for k in 0..=self.wins.len() + 32 {
             let step = CASCADE_STEP * k as f32;
             let want = egui::pos2(work.min.x + step, work.min.y + step);
             pos = egui::pos2(
                 clamp_soft(want.x, work.min.x, work.max.x - size.x),
                 clamp_soft(want.y, work.min.y, work.max.y - size.y),
             );
-            if !self.occupied(pos) {
+            let rect = egui::Rect::from_min_size(pos, size);
+            if !self.occupied(pos) && !self.exclusive_blocks(u64::MAX, rect) {
                 break;
             }
         }
@@ -532,6 +584,25 @@ impl WinMgr {
 
     fn occupied(&self, p: egui::Pos2) -> bool {
         self.occupied_except(p, usize::MAX)
+    }
+
+    fn free_position(&self, size: egui::Vec2, work: egui::Rect) -> egui::Pos2 {
+        if !work.is_positive() {
+            return work.min;
+        }
+        for k in 0..=self.wins.len() + 32 {
+            let step = CASCADE_STEP * k as f32;
+            let want = egui::pos2(work.min.x + step, work.min.y + step);
+            let pos = egui::pos2(
+                clamp_soft(want.x, work.min.x, work.max.x - size.x),
+                clamp_soft(want.y, work.min.y, work.max.y - size.y),
+            );
+            let rect = egui::Rect::from_min_size(pos, size);
+            if !self.occupied(pos) && !self.exclusive_blocks(u64::MAX, rect) {
+                return pos;
+            }
+        }
+        work.min
     }
 
     fn occupied_except(&self, p: egui::Pos2, skip: usize) -> bool {
@@ -563,6 +634,9 @@ impl WinMgr {
     }
 
     pub(crate) fn dock(&mut self, i: usize, r: egui::Rect) {
+        if self.exclusive_blocks(self.wins[i].w.id, r) {
+            return;
+        }
         self.wins[i].w.pos = r.min;
         self.wins[i].w.size = r.size();
         self.wins[i].restore = (r.min, r.size());
@@ -603,11 +677,16 @@ impl WinMgr {
 
     pub(crate) fn restore(&mut self, i: usize) {
         let (pos, size) = self.wins[i].restore;
+        let rect = egui::Rect::from_min_size(pos, size);
+        if self.exclusive_blocks(self.wins[i].w.id, rect) {
+            return;
+        }
         self.wins[i].w.pos = pos;
         self.wins[i].w.size = size;
         self.wins[i].minimized = false;
     }
 
+    #[allow(dead_code)]
     fn toggle_minimize(&mut self, app: &mut StockApp, i: usize) {
         let id = self.wins[i].w.id;
         if self.wins[i].minimized {
@@ -658,6 +737,7 @@ impl WinMgr {
             }
         }
         self.clamp_all(work);
+        self.update_move_guards();
 
         if !self.drag_active()
             && let Some(p) = ui.input(|i| i.pointer.latest_pos())
@@ -668,30 +748,38 @@ impl WinMgr {
             let id = self.wins[i].w.id;
             if self.focused_id != Some(id) {
                 self.focused_id = Some(id);
-                self.activate(i);
             }
         }
 
-        if ui.input(|i| i.pointer.primary_pressed()) {
-            if let Some(p) = ui.input(|i| i.pointer.interact_pos()) {
-                if !app.floating_at(p, ui.max_rect().max.y) {
-                    if let Some(i) = self.press_owner_at(p) {
-                        self.activate(i);
-                    }
+        let (primary_pressed, pointer, press_origin, interact_pos) = ui.input(|i| {
+            (
+                i.pointer.primary_pressed(),
+                i.pointer.latest_pos(),
+                i.pointer.press_origin(),
+                i.pointer.interact_pos(),
+            )
+        });
+        if primary_pressed {
+            let p = interact_pos.or(press_origin).or(pointer);
+            if let Some(p) = p
+                && !app.floating_at(p, ui.max_rect().max.y)
+            {
+                if let Some(i) = self.press_owner_at(p) {
+                    let id = self.wins[i].w.id;
+                    self.focused_id = Some(id);
+                    self.activate(i);
                 }
             }
+        }
 
-            if let Some(p) = ui.input(|i| i.pointer.press_origin()) {
-                if !app.floating_at(p, ui.max_rect().max.y) {
-                    if let Some(i) = self.press_owner_at(p) {
-                        if edge_at(self.wins[i].rect(), p, EDGE_BAND).any()
-                            && !self.wins[i].w.edge_guard.contains(p)
-                        {
-                            self.wins[i].w.begin_resize(p);
-                        }
-                    }
-                }
-            }
+        if primary_pressed
+            && let Some(p) = press_origin.or(interact_pos)
+            && !app.floating_at(p, ui.max_rect().max.y)
+            && let Some(i) = self.press_owner_at(p)
+            && edge_at(self.wins[i].rect(), p, EDGE_BAND).any()
+            && !self.wins[i].w.edge_guard.contains(p)
+        {
+            self.wins[i].w.begin_resize(p);
         }
 
         let panes = app.panes.len();
@@ -704,9 +792,9 @@ impl WinMgr {
             }
             let pane = self.wins[i].pane;
             let body = ManagedWin::body(self.rect_of(i));
-            let layout = app.panes[pane].indicator.layout();
+            let layout = app.panes[pane].chart_layout();
             let (_, _, main, _) = chart_rows(body, layout);
-            self.plots[pane] = frame_rects(main).0;
+            self.plots[pane] = frame_rects_with_axis(main, app.panes[pane].show_axis()).0;
         }
     }
 
@@ -744,9 +832,9 @@ impl WinMgr {
             WinKind::Panel => app.ui_panel(ui, body),
             WinKind::Chart => {
                 let pane = self.wins[i].pane;
-                let layout = app.panes[pane].indicator.layout();
+                let layout = app.panes[pane].chart_layout();
                 let (_, _, main, _) = chart_rows(body, layout);
-                self.plots[pane] = frame_rects(main).0;
+                self.plots[pane] = frame_rects_with_axis(main, app.panes[pane].show_axis()).0;
                 if app.win_silent {
                     app.panes[pane].view.crosshair = None;
                     app.panes[pane].view.pan = None;
@@ -792,12 +880,22 @@ impl WinMgr {
                 false,
                 self.wins[i].pinned,
                 true,
+                self.wins[i].exclusive,
             );
             match hit {
-                Some(SysButton::Pin) => self.toggle_pin(i),
-                Some(SysButton::Minimize) => self.toggle_minimize(app, i),
-                Some(SysButton::Close) => self.close_win(app, i),
-
+                Some(SysButton::Exclusive) => {
+                    self.wins[i].exclusive = !self.wins[i].exclusive;
+                }
+                Some(SysButton::Pin) => {
+                    let pinned = !self.wins[i].pinned;
+                    self.set_pin(i, pinned);
+                }
+                Some(SysButton::Minimize) => {
+                    self.restore(i);
+                }
+                Some(SysButton::Close) => {
+                    self.close_win(app, i);
+                }
                 Some(SysButton::Maximize) => {}
                 None => {}
             }
@@ -806,6 +904,7 @@ impl WinMgr {
 
         let work = self.work;
         let pinned = self.wins[i].pinned;
+        let exclusive = self.wins[i].exclusive;
         let out = self.wins[i].w.begin(
             app,
             ui,
@@ -815,15 +914,24 @@ impl WinMgr {
             busy,
             pinned,
             false,
+            exclusive,
         );
-        if out.pin {
-            self.toggle_pin(i);
+        if out.exclusive {
+            self.wins[i].exclusive = !self.wins[i].exclusive;
+        } else if out.pin {
+            let pinned = !self.wins[i].pinned;
+            self.set_pin(i, pinned);
         } else if out.close {
             self.close_win(app, i);
         } else if out.maximize {
-            self.wins[i].w.toggle_maximize(work);
-        } else if out.minimize {
-            self.toggle_minimize(app, i);
+            let maximized = !self.wins[i].w.maximized;
+            let id = self.wins[i].w.id;
+            if !(maximized && self.exclusive_blocks(id, work)) {
+                self.wins[i].w.toggle_maximize(work);
+            }
+        } else if out.minimize && !self.wins[i].minimized {
+            let width = Self::mini_width(app, &name);
+            self.minimize(i, width);
         }
 
         out.panel.map(ManagedWin::body)

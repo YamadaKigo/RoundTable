@@ -276,8 +276,46 @@ pub(crate) fn hline_hard(painter: &egui::Painter, x0: f32, x1: f32, y: f32, colo
     painter.rect_filled(hline_rect(x0, x1, y), egui::CornerRadius::ZERO, color);
 }
 
+pub(crate) fn hline_hard_width(
+    painter: &egui::Painter,
+    x0: f32,
+    x1: f32,
+    y: f32,
+    color: egui::Color32,
+    width: u32,
+) {
+    let width = width.max(1) as f32;
+    painter.rect_filled(
+        egui::Rect::from_min_size(
+            egui::pos2(x0, px_center(y) - width / 2.0),
+            egui::vec2(x1 - x0, width),
+        ),
+        egui::CornerRadius::ZERO,
+        color,
+    );
+}
+
 pub(crate) fn vline_hard(painter: &egui::Painter, x: f32, y0: f32, y1: f32, color: egui::Color32) {
     painter.rect_filled(vline_rect(x, y0, y1), egui::CornerRadius::ZERO, color);
+}
+
+pub(crate) fn vline_hard_width(
+    painter: &egui::Painter,
+    x: f32,
+    y0: f32,
+    y1: f32,
+    color: egui::Color32,
+    width: u32,
+) {
+    let width = width.max(1) as f32;
+    painter.rect_filled(
+        egui::Rect::from_min_size(
+            egui::pos2(px_center(x) - width / 2.0, y0),
+            egui::vec2(width, y1 - y0),
+        ),
+        egui::CornerRadius::ZERO,
+        color,
+    );
 }
 
 pub(crate) fn hline_rect(x0: f32, x1: f32, y: f32) -> egui::Rect {
@@ -382,4 +420,27 @@ pub(crate) fn polyline_hard(painter: &egui::Painter, pts: &[(f32, f32)], color: 
         }
     }
     painter.add(egui::Shape::mesh(mesh));
+}
+
+pub(crate) fn polyline_hard_width(
+    painter: &egui::Painter,
+    pts: &[(f32, f32)],
+    color: egui::Color32,
+    width: u32,
+) {
+    let width = width.max(1);
+    if width == 1 {
+        polyline_hard(painter, pts, color);
+        return;
+    }
+    let lo = (width as f32 - 1.0) / 2.0;
+    let mut shifted = Vec::with_capacity(pts.len());
+    for dy in 0..width {
+        for dx in 0..width {
+            shifted.clear();
+            let offset = egui::vec2(dx as f32 - lo, dy as f32 - lo);
+            shifted.extend(pts.iter().map(|(x, y)| (*x + offset.x, *y + offset.y)));
+            polyline_hard(painter, &shifted, color);
+        }
+    }
 }

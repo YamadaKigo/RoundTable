@@ -19,6 +19,7 @@ enum Op {
 #[derive(Clone)]
 enum Expr {
     Num(f64),
+    Str(String),
     Var(String),
     Call(String, Vec<Expr>),
     Binary(Op, Box<Expr>, Box<Expr>),
@@ -32,6 +33,8 @@ enum DrawKind {
     Zero,
     Candle,
     Ohlc,
+    Pagoda,
+    Close,
     Volume,
 }
 
@@ -47,14 +50,55 @@ enum Statement {
     Draw(DrawStmt),
 }
 
+#[derive(Clone, Default)]
+pub(crate) struct ScriptSettings {
+    pub(crate) show_status: Option<bool>,
+    pub(crate) show_time: Option<bool>,
+    pub(crate) show_axis: Option<bool>,
+}
+
+#[derive(Clone)]
+enum AxisSpec {
+    Auto { zero: bool },
+    Fixed { values: Vec<f64>, zero: bool },
+}
+
+#[derive(Clone)]
+struct StatusStmt {
+    label: Expr,
+    value: Expr,
+    color: Option<Expr>,
+    tmpl: Option<Expr>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ScriptStatus {
+    label: String,
+    values: Vec<f64>,
+    color: u32,
+    tmpl: String,
+}
+
+#[derive(Clone)]
+pub(crate) struct ScriptRender {
+    pub(crate) cmds: Vec<DrawCmd>,
+    pub(crate) settings: ScriptSettings,
+    status: Vec<ScriptStatus>,
+    axis: Option<AxisSpec>,
+}
+
 #[derive(Clone)]
 pub(crate) struct ScriptProgram {
     statements: Vec<Statement>,
+    settings: ScriptSettings,
+    status: Vec<StatusStmt>,
+    axis: Option<AxisSpec>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
 enum Token {
     Number(f64),
+    Str(String),
     Ident(String),
     Plus,
     Minus,
@@ -80,6 +124,9 @@ impl ScriptProgram {
         let tokens = tokenize(source)?;
         let mut parser = Parser { tokens, at: 0 };
         let mut statements = Vec::new();
+        let mut settings = ScriptSettings::default();
+        let mut status = Vec::new();
+        let mut axis = None;
         while parser.peek() != &Token::End {
             let name = parser.ident()?;
             if parser.accept(&Token::Colon) || parser.accept(&Token::Equal) {
@@ -93,16 +140,82 @@ impl ScriptProgram {
             }
             let args = parser.args()?;
             parser.accept(&Token::Semi);
+            match name.as_str() {
+                "STATUS" => {
+                    settings.show_status = Some(switch_arg(&name, &args)?);
+                    continue;
+                }
+                "TIME" => {
+                    settings.show_time = Some(switch_arg(&name, &args)?);
+                    continue;
+                }
+                "AXIS" => {
+                    settings.show_axis = Some(switch_arg(&name, &args)?);
+                    continue;
+                }
+                "AXIS_FIXED" => {
+                    if args.is_empty() {
+                        return Err("AXIS_FIXED 需要至少一个刻度".to_owned());
+                    }
+                    let values = args
+                        .iter()
+                        .map(number_expr)
+                        .collect::<Result<Vec<_>, _>>()?;
+                    axis = Some(AxisSpec::Fixed {
+                        values,
+                        zero: false,
+                    });
+                    settings.show_axis = Some(true);
+                    continue;
+                }
+                "AXIS_DYNAMIC" | "AXIS_AUTO" => {
+                    let zero = args.first().map(bool_expr).transpose()?.unwrap_or(false);
+                    axis = Some(AxisSpec::Auto { zero });
+                    settings.show_axis = Some(true);
+                    continue;
+                }
+                "AXIS_ZERO" => {
+                    axis = Some(AxisSpec::Auto { zero: true });
+                    settings.show_axis = Some(true);
+                    continue;
+                }
+                "STATUS_FIELD" => {
+                    if args.len() < 2 || args.len() > 4 {
+                        return Err(
+                            "STATUS_FIELD 需要 2 到 4 个参数：标签、数值、颜色、格式".to_owned()
+                        );
+                    }
+                    status.push(StatusStmt {
+                        label: args[0].clone(),
+                        value: args[1].clone(),
+                        color: args.get(2).cloned(),
+                        tmpl: args.get(3).cloned(),
+                    });
+                    settings.show_status = Some(true);
+                    continue;
+                }
+                _ => {}
+            }
             let kind = draw_kind(&name).ok_or_else(|| format!("未知命令 {name}"))?;
             statements.push(Statement::Draw(DrawStmt { kind, args }));
         }
         if statements.is_empty() {
             return Err("指标代码不能为空".to_owned());
         }
-        Ok(Self { statements })
+        Ok(Self {
+            statements,
+            settings,
+            status,
+            axis,
+        })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn compute(&self, bars: &[Bar], pal: &Palette) -> Result<Vec<DrawCmd>, String> {
+        Ok(self.render(bars, pal)?.cmds)
+    }
+
+    pub(crate) fn render(&self, bars: &[Bar], pal: &Palette) -> Result<ScriptRender, String> {
         let len = bars.len();
         let mut env = base_env(bars);
         let mut out = Vec::new();
@@ -115,8 +228,177 @@ impl ScriptProgram {
                 Statement::Draw(draw) => draw_commands(draw, &env, bars, pal, &mut out)?,
             }
         }
-        Ok(out)
+        let mut status = Vec::with_capacity(self.status.len());
+        for item in &self.status {
+            status.push(ScriptStatus {
+                label: static_text(&item.label)?,
+                values: eval(&item.value, &env, len)?,
+                color: item
+                    .color
+                    .as_ref()
+                    .map(|color| color_expr(color, pal))
+                    .transpose()?
+                    .filter(|color| *color != u32::MAX)
+                    .unwrap_or_else(indicator::chart_text),
+                tmpl: item
+                    .tmpl
+                    .as_ref()
+                    .map(static_text)
+                    .transpose()?
+                    .unwrap_or_else(|| "0.00".to_owned()),
+            });
+        }
+        Ok(ScriptRender {
+            cmds: out,
+            settings: self.settings.clone(),
+            status,
+            axis: self.axis.clone(),
+        })
     }
+}
+
+impl ScriptRender {
+    pub(crate) fn value_range(&self, lo: f64, hi: f64) -> (f64, f64) {
+        match &self.axis {
+            Some(AxisSpec::Fixed { values, zero }) => {
+                let mut lo = values.iter().copied().reduce(f64::min).unwrap_or(lo);
+                let mut hi = values.iter().copied().reduce(f64::max).unwrap_or(hi);
+                if *zero {
+                    lo = lo.min(0.0);
+                    hi = hi.max(0.0);
+                }
+                (lo, hi)
+            }
+            Some(AxisSpec::Auto { zero: true }) => (lo.min(0.0), hi.max(0.0)),
+            _ => (lo, hi),
+        }
+    }
+
+    pub(crate) fn layout(&self, base: indicator::ChartLayout) -> indicator::ChartLayout {
+        let status_rows = match self.settings.show_status {
+            Some(false) => 0,
+            Some(true) => base.status_rows.max(2),
+            None if !self.status.is_empty() => base.status_rows.max(2),
+            None => base.status_rows,
+        };
+        let time_rows = match self.settings.show_time {
+            Some(false) => 0,
+            Some(true) => base.time_rows.max(2),
+            None => base.time_rows,
+        };
+        indicator::ChartLayout::new(status_rows, time_rows)
+    }
+
+    pub(crate) fn axis(&self, ctx: &indicator::ChartCtx) -> Option<Vec<DrawCmd>> {
+        if self.settings.show_axis == Some(false) {
+            return Some(Vec::new());
+        }
+        match &self.axis {
+            None => None,
+            Some(AxisSpec::Fixed { values, zero }) => {
+                let mut out = Vec::new();
+                let mut values = values.clone();
+                if *zero && !values.iter().any(|value| value.abs() < f64::EPSILON) {
+                    values.push(0.0);
+                }
+                values.sort_by(f64::total_cmp);
+                values.dedup_by(|a, b| (*a - *b).abs() < 1e-12);
+                for value in values {
+                    if !value.is_finite() || value < ctx.lo || value > ctx.hi {
+                        continue;
+                    }
+                    out.push(DrawCmd::HLine {
+                        p: value,
+                        color: indicator::chart_tick(),
+                        w: 1,
+                    });
+                    out.push(DrawCmd::AxisText {
+                        p: value,
+                        s: format_axis_value(value),
+                        fg: indicator::chart_text(),
+                        bg: 0,
+                    });
+                }
+                Some(out)
+            }
+            Some(AxisSpec::Auto { zero }) => {
+                let mut out = indicator::axis_ticks(
+                    ctx,
+                    3,
+                    indicator::chart_text(),
+                    indicator::chart_tick(),
+                    format_axis_value,
+                );
+                if *zero && ctx.lo <= 0.0 && ctx.hi >= 0.0 {
+                    out.push(DrawCmd::HLine {
+                        p: 0.0,
+                        color: indicator::chart_zero(),
+                        w: 1,
+                    });
+                }
+                Some(out)
+            }
+        }
+    }
+
+    pub(crate) fn time(&self, ctx: &indicator::ChartCtx) -> Option<Vec<DrawCmd>> {
+        match self.settings.show_time {
+            Some(false) => Some(Vec::new()),
+            Some(true) => Some(indicator::time_labels(ctx, indicator::chart_text())),
+            None => None,
+        }
+    }
+
+    pub(crate) fn status(&self, ctx: &indicator::ChartCtx) -> Option<Vec<DrawCmd>> {
+        if self.settings.show_status == Some(false) {
+            return Some(Vec::new());
+        }
+        if self.status.is_empty() {
+            return None;
+        }
+        let index = ctx.focus_bar()?;
+        Some(
+            self.status
+                .iter()
+                .map(|item| {
+                    indicator::status_field(
+                        &item.label,
+                        format_status_value(item.values.get(index).copied(), &item.tmpl),
+                        &item.tmpl,
+                        item.color,
+                    )
+                })
+                .collect(),
+        )
+    }
+}
+
+fn format_axis_value(value: f64) -> String {
+    if value.abs() >= 1_000_000.0 {
+        format!("{:.2}M", value / 1_000_000.0)
+    } else if value.abs() >= 1000.0 {
+        format!("{value:.0}")
+    } else if value.abs() >= 10.0 {
+        format!("{value:.1}")
+    } else {
+        format!("{value:.2}")
+    }
+}
+
+fn format_status_value(value: Option<f64>, tmpl: &str) -> String {
+    let Some(value) = value.filter(|value| value.is_finite()) else {
+        return "--".to_owned();
+    };
+    let decimals = tmpl
+        .split_once('.')
+        .map(|(_, tail)| tail.chars().take_while(char::is_ascii_digit).count())
+        .unwrap_or(0)
+        .min(6);
+    let mut out = format!("{value:.decimals$}");
+    if tmpl.contains('%') {
+        out.push('%');
+    }
+    out
 }
 
 fn tokenize(source: &str) -> Result<Vec<Token>, String> {
@@ -133,6 +415,38 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             while i < chars.len() && chars[i] != '\n' {
                 i += 1;
             }
+            continue;
+        }
+        if c == '"' {
+            i += 1;
+            let mut text = String::new();
+            let mut closed = false;
+            while i < chars.len() {
+                match chars[i] {
+                    '"' => {
+                        closed = true;
+                        i += 1;
+                        break;
+                    }
+                    '\\' if i + 1 < chars.len() => {
+                        i += 1;
+                        text.push(match chars[i] {
+                            'n' => '\n',
+                            't' => '\t',
+                            other => other,
+                        });
+                        i += 1;
+                    }
+                    other => {
+                        text.push(other);
+                        i += 1;
+                    }
+                }
+            }
+            if !closed {
+                return Err("字符串缺少右引号".to_owned());
+            }
+            out.push(Token::Str(text));
             continue;
         }
         if c.is_ascii_digit() || c == '.' {
@@ -309,6 +623,7 @@ impl Parser {
     fn primary(&mut self) -> Result<Expr, String> {
         match self.take() {
             Token::Number(v) => Ok(Expr::Num(v)),
+            Token::Str(s) => Ok(Expr::Str(s)),
             Token::Minus => Ok(Expr::Binary(
                 Op::Sub,
                 Box::new(Expr::Num(0.0)),
@@ -333,6 +648,47 @@ impl Parser {
     }
 }
 
+fn single_arg(name: &str, args: &[Expr]) -> Result<Expr, String> {
+    if args.len() != 1 {
+        return Err(format!("{name} 需要 1 个参数"));
+    }
+    Ok(args[0].clone())
+}
+
+fn switch_arg(name: &str, args: &[Expr]) -> Result<bool, String> {
+    if args.is_empty() {
+        Ok(true)
+    } else {
+        bool_expr(&single_arg(name, args)?)
+    }
+}
+
+fn number_expr(expr: &Expr) -> Result<f64, String> {
+    match expr {
+        Expr::Num(value) => Ok(*value),
+        Expr::Binary(Op::Sub, left, right) => {
+            if number_expr(left)? == 0.0 {
+                Ok(-number_expr(right)?)
+            } else {
+                Err("配置参数必须是常数".to_owned())
+            }
+        }
+        _ => Err("配置参数必须是常数".to_owned()),
+    }
+}
+
+fn bool_expr(expr: &Expr) -> Result<bool, String> {
+    Ok(number_expr(expr)? != 0.0)
+}
+
+fn static_text(expr: &Expr) -> Result<String, String> {
+    match expr {
+        Expr::Str(text) => Ok(text.clone()),
+        Expr::Var(name) => Ok(name.clone()),
+        _ => Err("这里需要字符串或标签名".to_owned()),
+    }
+}
+
 fn draw_kind(name: &str) -> Option<DrawKind> {
     match name {
         "LINE" => Some(DrawKind::Line),
@@ -341,6 +697,8 @@ fn draw_kind(name: &str) -> Option<DrawKind> {
         "ZERO" => Some(DrawKind::Zero),
         "CANDLE" => Some(DrawKind::Candle),
         "OHLC" => Some(DrawKind::Ohlc),
+        "PAGODA" | "RENKO" => Some(DrawKind::Pagoda),
+        "CLOSE" | "CLOSELINE" => Some(DrawKind::Close),
         "VOL" => Some(DrawKind::Volume),
         _ => None,
     }
@@ -360,6 +718,7 @@ fn base_env(bars: &[Bar]) -> HashMap<String, Vec<f64>> {
 fn eval(expr: &Expr, env: &HashMap<String, Vec<f64>>, len: usize) -> Result<Vec<f64>, String> {
     match expr {
         Expr::Num(v) => Ok(vec![*v; len]),
+        Expr::Str(_) => Err("字符串不能参与数值计算".to_owned()),
         Expr::Var(name) => env
             .get(name)
             .cloned()
@@ -546,120 +905,351 @@ fn draw_commands(
     pal: &Palette,
     out: &mut Vec<DrawCmd>,
 ) -> Result<(), String> {
+    let color_arg = |index: usize| {
+        draw.args
+            .get(index)
+            .map(|expr| color_expr(expr, pal))
+            .transpose()
+    };
     match draw.kind {
         DrawKind::Candle => {
-            out.extend(indicator::candles(
-                bars,
-                pal.candle_up,
-                pal.candle_down,
-                pal.candle_suspended,
-            ));
+            if draw.args.len() > 3 {
+                return Err("CANDLE 最多接受 3 个参数：上涨色、下跌色、线宽".to_owned());
+            }
+            let up = color_arg(0)?
+                .filter(|color| *color != u32::MAX)
+                .unwrap_or(pal.candle_up);
+            let down = color_arg(1)?
+                .filter(|color| *color != u32::MAX)
+                .unwrap_or(pal.candle_down);
+            let w = draw.args.get(2).map(line_width).transpose()?.unwrap_or(1);
+            for (i, bar) in bars.iter().enumerate() {
+                let color = if bar.vol <= 0.0 {
+                    pal.candle_suspended
+                } else if bar.c >= bar.o {
+                    up
+                } else {
+                    down
+                };
+                if w == 1 {
+                    out.push(DrawCmd::Candle {
+                        i,
+                        o: bar.o,
+                        h: bar.h,
+                        l: bar.l,
+                        c: bar.c,
+                        color,
+                    });
+                } else {
+                    out.push(DrawCmd::StyledCandle {
+                        i,
+                        o: bar.o,
+                        h: bar.h,
+                        l: bar.l,
+                        c: bar.c,
+                        color,
+                        w,
+                    });
+                }
+            }
         }
-        DrawKind::Ohlc => out.extend(indicator::ohlc_bars(bars, pal.candle_up, pal.candle_down)),
+        DrawKind::Ohlc => {
+            if draw.args.len() > 3 {
+                return Err("OHLC 最多接受 3 个参数：上涨色、下跌色、线宽".to_owned());
+            }
+            let up = color_arg(0)?
+                .filter(|color| *color != u32::MAX)
+                .unwrap_or(pal.candle_up);
+            let down = color_arg(1)?
+                .filter(|color| *color != u32::MAX)
+                .unwrap_or(pal.candle_down);
+            let w = draw.args.get(2).map(line_width).transpose()?.unwrap_or(1);
+            for (i, bar) in bars.iter().enumerate() {
+                let color = if bar.c >= bar.o { up } else { down };
+                if w == 1 {
+                    out.push(DrawCmd::Ohlc {
+                        i,
+                        o: bar.o,
+                        h: bar.h,
+                        l: bar.l,
+                        c: bar.c,
+                        color,
+                    });
+                } else {
+                    out.push(DrawCmd::StyledOhlc {
+                        i,
+                        o: bar.o,
+                        h: bar.h,
+                        l: bar.l,
+                        c: bar.c,
+                        color,
+                        w,
+                    });
+                }
+            }
+        }
+        DrawKind::Pagoda => {
+            if draw.args.len() > 3 {
+                return Err("PAGODA 最多接受 3 个参数：上涨色、下跌色、线宽".to_owned());
+            }
+            let up = color_arg(0)?
+                .filter(|color| *color != u32::MAX)
+                .unwrap_or(pal.candle_up);
+            let down = color_arg(1)?
+                .filter(|color| *color != u32::MAX)
+                .unwrap_or(pal.candle_down);
+            let w = draw.args.get(2).map(line_width).transpose()?.unwrap_or(1);
+            for (i, bar) in bars.iter().enumerate() {
+                out.push(DrawCmd::Pagoda {
+                    i,
+                    o: bar.o,
+                    h: bar.h,
+                    l: bar.l,
+                    c: bar.c,
+                    color: if bar.c >= bar.o { up } else { down },
+                    w,
+                });
+            }
+        }
+        DrawKind::Close => {
+            if draw.args.len() > 3 {
+                return Err("CLOSE 最多接受 3 个参数：上涨色、下跌色、线宽".to_owned());
+            }
+            let up = color_arg(0)?
+                .filter(|color| *color != u32::MAX)
+                .unwrap_or(pal.candle_up);
+            let down = color_arg(1)?
+                .filter(|color| *color != u32::MAX)
+                .unwrap_or(pal.candle_down);
+            let w = draw.args.get(2).map(line_width).transpose()?.unwrap_or(1);
+            for i in 0..bars.len() {
+                let (p0, p1) = if i == 0 {
+                    (bars[i].c, bars[i].c)
+                } else {
+                    (bars[i - 1].c, bars[i].c)
+                };
+                out.push(DrawCmd::CloseLine {
+                    i,
+                    p0,
+                    p1,
+                    color: if p1 >= p0 { up } else { down },
+                    w,
+                });
+            }
+        }
         DrawKind::Volume => {
-            out.extend(indicator::volume_bars(bars, pal.candle_up, pal.candle_down))
+            if draw.args.is_empty() {
+                out.extend(indicator::volume_bars(bars, pal.candle_up, pal.candle_down));
+                return Ok(());
+            }
+            if draw.args.len() > 4 {
+                return Err("VOL 最多接受 4 个参数：上涨色、下跌色、空心、线宽".to_owned());
+            }
+            let up = color_arg(0)?
+                .filter(|color| *color != u32::MAX)
+                .unwrap_or(pal.candle_up);
+            let down = color_arg(1)?
+                .filter(|color| *color != u32::MAX)
+                .unwrap_or(pal.candle_down);
+            let hollow = draw.args.get(2).map(bool_expr).transpose()?.unwrap_or(true);
+            let w = draw.args.get(3).map(line_width).transpose()?.unwrap_or(1);
+            for (i, bar) in bars.iter().enumerate() {
+                let color = if bar.c >= bar.o { up } else { down };
+                if w == 1 {
+                    out.push(DrawCmd::Bar {
+                        i,
+                        v0: 0.0,
+                        v1: bar.vol,
+                        color,
+                        hollow,
+                    });
+                } else {
+                    out.push(DrawCmd::StyledBar {
+                        i,
+                        v0: 0.0,
+                        v1: bar.vol,
+                        color,
+                        hollow,
+                        w,
+                    });
+                }
+            }
         }
-        DrawKind::Zero => out.push(DrawCmd::HLine {
-            p: 0.0,
-            color: indicator::chart_zero(),
-            w: 1,
-        }),
-        DrawKind::Line | DrawKind::Hist | DrawKind::HLine => {
-            if draw.args.is_empty() || draw.args.len() > 2 {
-                return Err("绘图命令需要数值和颜色".to_owned());
+        DrawKind::Zero => {
+            if !draw.args.is_empty() {
+                return Err("ZERO 不接受参数".to_owned());
+            }
+            out.push(DrawCmd::HLine {
+                p: 0.0,
+                color: indicator::chart_zero(),
+                w: 1,
+            });
+        }
+        DrawKind::Line => {
+            if draw.args.is_empty() || draw.args.len() > 3 {
+                return Err("LINE 需要数值，可附加颜色和线宽".to_owned());
             }
             let values = eval(&draw.args[0], env, bars.len())?;
-            let color = draw.args.get(1).map(|expr| color(expr, pal)).transpose()?;
-            match draw.kind {
-                DrawKind::Line => {
-                    let color = color.filter(|c| *c != u32::MAX).unwrap_or(pal.text_up);
-                    out.push(DrawCmd::Polyline {
-                        pts: values
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, v)| v.is_finite())
-                            .map(|(i, v)| (i, *v))
-                            .collect(),
-                        color,
-                        w: 1,
-                    });
-                }
-                DrawKind::Hist => {
-                    for (i, value) in values.iter().copied().enumerate() {
-                        if !value.is_finite() {
-                            continue;
-                        }
-                        out.push(DrawCmd::Bar {
-                            i,
-                            v0: 0.0,
-                            v1: value,
-                            hollow: false,
-                            color: color.filter(|c| *c != u32::MAX).unwrap_or(if value >= 0.0 {
-                                pal.candle_up
-                            } else {
-                                pal.candle_down
-                            }),
-                        });
-                    }
-                }
-                DrawKind::HLine => {
-                    let Some(value) = values.into_iter().rev().find(|v| v.is_finite()) else {
-                        return Ok(());
-                    };
-                    out.push(DrawCmd::HLine {
-                        p: value,
-                        color: color
-                            .filter(|c| *c != u32::MAX)
-                            .unwrap_or_else(indicator::chart_zero),
-                        w: 1,
-                    });
-                }
-                _ => {}
+            let color = color_arg(1)?
+                .filter(|color| *color != u32::MAX)
+                .unwrap_or(pal.text_up);
+            let w = draw.args.get(2).map(line_width).transpose()?.unwrap_or(1);
+            out.push(DrawCmd::Polyline {
+                pts: values
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, value)| value.is_finite())
+                    .map(|(i, value)| (i, *value))
+                    .collect(),
+                color,
+                w,
+            });
+        }
+        DrawKind::Hist => {
+            if draw.args.is_empty() || draw.args.len() > 4 {
+                return Err("HIST 需要数值，可附加颜色、空心和线宽".to_owned());
             }
+            let values = eval(&draw.args[0], env, bars.len())?;
+            let color = color_arg(1)?;
+            let hollow = draw
+                .args
+                .get(2)
+                .map(bool_expr)
+                .transpose()?
+                .unwrap_or(false);
+            let w = draw.args.get(3).map(line_width).transpose()?.unwrap_or(1);
+            for (i, value) in values.iter().copied().enumerate() {
+                if !value.is_finite() {
+                    continue;
+                }
+                let color = color
+                    .filter(|color| *color != u32::MAX)
+                    .unwrap_or(if value >= 0.0 {
+                        pal.candle_up
+                    } else {
+                        pal.candle_down
+                    });
+                if w == 1 {
+                    out.push(DrawCmd::Bar {
+                        i,
+                        v0: 0.0,
+                        v1: value,
+                        hollow,
+                        color,
+                    });
+                } else {
+                    out.push(DrawCmd::StyledBar {
+                        i,
+                        v0: 0.0,
+                        v1: value,
+                        hollow,
+                        color,
+                        w,
+                    });
+                }
+            }
+        }
+        DrawKind::HLine => {
+            if draw.args.is_empty() || draw.args.len() > 3 {
+                return Err("HLINE 需要数值，可附加颜色和线宽".to_owned());
+            }
+            let values = eval(&draw.args[0], env, bars.len())?;
+            let color = color_arg(1)?;
+            let w = draw.args.get(2).map(line_width).transpose()?.unwrap_or(1);
+            let Some(value) = values.into_iter().rev().find(|value| value.is_finite()) else {
+                return Ok(());
+            };
+            out.push(DrawCmd::HLine {
+                p: value,
+                color: color
+                    .filter(|color| *color != u32::MAX)
+                    .unwrap_or_else(indicator::chart_zero),
+                w,
+            });
         }
     }
     Ok(())
 }
 
-fn color(expr: &Expr, pal: &Palette) -> Result<u32, String> {
+fn line_width(expr: &Expr) -> Result<u32, String> {
+    Ok(number_expr(expr)?.round().clamp(1.0, 16.0) as u32)
+}
+
+fn color_expr(expr: &Expr, pal: &Palette) -> Result<u32, String> {
     match expr {
-        Expr::Num(v) => Ok(*v as u32),
-        Expr::Var(name) => match name.as_str() {
-            "AUTO" => Ok(u32::MAX),
-            "UP" => Ok(pal.candle_up),
-            "DOWN" => Ok(pal.candle_down),
-            "TEXT" => Ok(indicator::chart_text()),
-            "ZERO" => Ok(indicator::chart_zero()),
-            "DIF" => Ok(pal.dif),
-            "DEA" => Ok(pal.dea),
-            "K" => Ok(pal.kdj_k),
-            "D" => Ok(pal.kdj_d),
-            "J" => Ok(pal.kdj_j),
-            "RSI1" => Ok(pal.rsi_1),
-            "RSI2" => Ok(pal.rsi_2),
-            "RSI3" => Ok(pal.rsi_3),
-            "BOLL_MID" => Ok(pal.boll_mid),
-            "BOLL_UP" => Ok(pal.boll_up),
-            "BOLL_DOWN" => Ok(pal.boll_down),
-            "OBV" => Ok(pal.obv),
-            "CCI" => Ok(pal.cci),
-            "BIAS1" => Ok(pal.bias[0]),
-            "BIAS2" => Ok(pal.bias[1]),
-            "BIAS3" => Ok(pal.bias[2]),
-            "MA1" => Ok(pal.ma[0]),
-            "MA2" => Ok(pal.ma[1]),
-            "MA3" => Ok(pal.ma[2]),
-            "MA4" => Ok(pal.ma[3]),
-            "MA5" => Ok(pal.ma[4]),
-            "MA6" => Ok(pal.ma[5]),
-            "EMA1" => Ok(pal.ema[0]),
-            "EMA2" => Ok(pal.ema[1]),
-            "EMA3" => Ok(pal.ema[2]),
-            "EMA4" => Ok(pal.ema[3]),
-            "EMA5" => Ok(pal.ema[4]),
-            "EMA6" => Ok(pal.ema[5]),
-            _ => Err(format!("未知颜色 {name}")),
+        Expr::Num(value) => Ok(*value as u32 & 0x00FF_FFFF),
+        Expr::Str(text) => parse_color_text(text),
+        Expr::Var(name) => named_color(name, pal),
+        Expr::Call(name, args) => match name.as_str() {
+            "COLOR" | "CUSTOM_COLOR" => {
+                let value = single_arg(name, args)?;
+                match value {
+                    Expr::Str(text) => parse_color_text(&text),
+                    other => Ok(number_expr(&other)? as u32 & 0x00FF_FFFF),
+                }
+            }
+            "SYSTEM_COLOR" | "SYSCOLOR" | "PALETTE" => {
+                let name = static_text(&single_arg(name, args)?)?;
+                named_color(&name, pal)
+            }
+            "RGB" => {
+                if args.len() != 3 {
+                    return Err("RGB 需要 3 个 0 到 255 的参数".to_owned());
+                }
+                let r = number_expr(&args[0])?.round().clamp(0.0, 255.0) as u32;
+                let g = number_expr(&args[1])?.round().clamp(0.0, 255.0) as u32;
+                let b = number_expr(&args[2])?.round().clamp(0.0, 255.0) as u32;
+                Ok((r << 16) | (g << 8) | b)
+            }
+            _ => Err(format!("未知颜色函数 {name}")),
         },
-        _ => Err("颜色必须是名称或 0xRRGGBB".to_owned()),
+        _ => Err("颜色必须是名称、0xRRGGBB 或颜色函数".to_owned()),
+    }
+}
+
+fn parse_color_text(text: &str) -> Result<u32, String> {
+    let value = text.trim().trim_start_matches('#');
+    if value.len() != 6 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(format!("颜色 {text} 必须是 #RRGGBB"));
+    }
+    u32::from_str_radix(value, 16).map_err(|error| error.to_string())
+}
+
+fn named_color(name: &str, pal: &Palette) -> Result<u32, String> {
+    match name {
+        "AUTO" => Ok(u32::MAX),
+        "UP" => Ok(pal.candle_up),
+        "DOWN" => Ok(pal.candle_down),
+        "TEXT" => Ok(indicator::chart_text()),
+        "ZERO" => Ok(indicator::chart_zero()),
+        "DIF" => Ok(pal.dif),
+        "DEA" => Ok(pal.dea),
+        "K" => Ok(pal.kdj_k),
+        "D" => Ok(pal.kdj_d),
+        "J" => Ok(pal.kdj_j),
+        "RSI1" => Ok(pal.rsi_1),
+        "RSI2" => Ok(pal.rsi_2),
+        "RSI3" => Ok(pal.rsi_3),
+        "BOLL_MID" => Ok(pal.boll_mid),
+        "BOLL_UP" => Ok(pal.boll_up),
+        "BOLL_DOWN" => Ok(pal.boll_down),
+        "OBV" => Ok(pal.obv),
+        "CCI" => Ok(pal.cci),
+        "BIAS1" => Ok(pal.bias[0]),
+        "BIAS2" => Ok(pal.bias[1]),
+        "BIAS3" => Ok(pal.bias[2]),
+        "MA1" => Ok(pal.ma[0]),
+        "MA2" => Ok(pal.ma[1]),
+        "MA3" => Ok(pal.ma[2]),
+        "MA4" => Ok(pal.ma[3]),
+        "MA5" => Ok(pal.ma[4]),
+        "MA6" => Ok(pal.ma[5]),
+        "EMA1" => Ok(pal.ema[0]),
+        "EMA2" => Ok(pal.ema[1]),
+        "EMA3" => Ok(pal.ema[2]),
+        "EMA4" => Ok(pal.ema[3]),
+        "EMA5" => Ok(pal.ema[4]),
+        "EMA6" => Ok(pal.ema[5]),
+        _ => Err(format!("未知颜色 {name}")),
     }
 }

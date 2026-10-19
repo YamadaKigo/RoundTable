@@ -20,25 +20,39 @@ pub(crate) fn paint_candle(
     y_high: f32,
     y_low: f32,
 ) {
-    let x = px_center(left + (bar_w - LINE_W) / 2.0);
-    painter.line_segment(
-        [egui::pos2(x, y_high), egui::pos2(x, y_low)],
-        egui::Stroke::new(LINE_W, color),
+    paint_candle_w(
+        painter, left, bar_w, rising, color, 1, y_open, y_close, y_high, y_low,
     );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn paint_candle_w(
+    painter: &egui::Painter,
+    left: f32,
+    bar_w: f32,
+    rising: bool,
+    color: egui::Color32,
+    width: u32,
+    y_open: f32,
+    y_close: f32,
+    y_high: f32,
+    y_low: f32,
+) {
+    let x = px_center(left + (bar_w - LINE_W) / 2.0);
+    vline_hard_width(painter, x, y_high, y_low, color, width);
 
     let top = (y_open - 0.5).round().min((y_close - 0.5).round());
     let height = ((y_open - 0.5).round() - (y_close - 0.5).round()).abs() + LINE_W;
-    let rect = egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(bar_w, height));
-
-    let hollow = rising && bar_w >= 3.0 && height >= 3.0;
-    painter.rect_filled(rect, egui::CornerRadius::ZERO, color);
-    if hollow {
-        let inner = egui::Rect::from_min_max(
-            egui::pos2(rect.min.x + LINE_W, rect.min.y + LINE_W),
-            egui::pos2(rect.max.x - LINE_W, rect.max.y - LINE_W),
-        );
-        painter.rect_filled(inner, egui::CornerRadius::ZERO, theme().chart_bg);
-    }
+    paint_bar(
+        painter,
+        left,
+        bar_w,
+        rising,
+        width,
+        color,
+        top,
+        top + height,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -52,15 +66,78 @@ pub(crate) fn paint_ohlc(
     y_high: f32,
     y_low: f32,
 ) {
-    let center = px_center(left + (bar_w - LINE_W) / 2.0);
-    painter.line_segment(
-        [egui::pos2(center, y_high), egui::pos2(center, y_low)],
-        egui::Stroke::new(LINE_W, color),
+    paint_ohlc_w(
+        painter, left, bar_w, color, 1, y_open, y_close, y_high, y_low,
     );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn paint_ohlc_w(
+    painter: &egui::Painter,
+    left: f32,
+    bar_w: f32,
+    color: egui::Color32,
+    width: u32,
+    y_open: f32,
+    y_close: f32,
+    y_high: f32,
+    y_low: f32,
+) {
+    let center = px_center(left + (bar_w - LINE_W) / 2.0);
+    vline_hard_width(painter, center, y_high, y_low, color, width);
 
     let right = left + bar_w;
-    hline_hard(painter, center, right, y_close, color);
-    hline_hard(painter, left, center, y_open, color);
+    hline_hard_width(painter, center, right, y_close, color, width);
+    hline_hard_width(painter, left, center, y_open, color, width);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn paint_bar(
+    painter: &egui::Painter,
+    left: f32,
+    bar_w: f32,
+    hollow: bool,
+    width: u32,
+    color: egui::Color32,
+    y0: f32,
+    y1: f32,
+) {
+    let rect = egui::Rect::from_min_max(
+        egui::pos2(left, y0.min(y1)),
+        egui::pos2(left + bar_w, y0.max(y1)),
+    );
+    painter.rect_filled(rect, egui::CornerRadius::ZERO, color);
+    let width = width.max(1) as f32;
+    if hollow && rect.width() > 2.0 * width && rect.height() > 2.0 * width {
+        let inner = egui::Rect::from_min_max(
+            egui::pos2(rect.min.x + width, rect.min.y + width),
+            egui::pos2(rect.max.x - width, rect.max.y - width),
+        );
+        painter.rect_filled(inner, egui::CornerRadius::ZERO, theme().chart_bg);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn paint_pagoda(
+    painter: &egui::Painter,
+    left: f32,
+    bar_w: f32,
+    color: egui::Color32,
+    width: u32,
+    y_open: f32,
+    y_close: f32,
+    y_high: f32,
+    y_low: f32,
+) {
+    let center = px_center(left + (bar_w - LINE_W) / 2.0);
+    let top = y_open.min(y_close);
+    let bottom = y_open.max(y_close);
+    hline_hard_width(painter, left, left + bar_w, y_high, color, width);
+    hline_hard_width(painter, left, left + bar_w, y_low, color, width);
+    vline_hard_width(painter, left, top, bottom, color, width);
+    vline_hard_width(painter, left + bar_w - LINE_W, top, bottom, color, width);
+    let step = if y_close >= y_open { bottom } else { top };
+    hline_hard_width(painter, center, left + bar_w, step, color, width);
 }
 
 pub(crate) fn chart_rows(
@@ -113,7 +190,19 @@ pub(crate) fn chart_bar(area: egui::Rect) -> egui::Rect {
     )
 }
 
+#[allow(dead_code)]
 pub(crate) fn frame_rects(area: egui::Rect) -> (egui::Rect, egui::Rect) {
+    frame_rects_with_axis(area, true)
+}
+
+pub(crate) fn frame_rects_with_axis(area: egui::Rect, show_axis: bool) -> (egui::Rect, egui::Rect) {
+    if !show_axis {
+        let plot = egui::Rect::from_min_max(
+            egui::pos2(area.min.x + LINE_W, area.min.y),
+            egui::pos2(area.max.x, area.max.y),
+        );
+        return (plot, egui::Rect::NOTHING);
+    }
     let edge = area.max.x - AXIS_W;
     let plot = egui::Rect::from_min_max(
         egui::pos2(area.min.x + LINE_W, area.min.y),
@@ -186,22 +275,34 @@ pub(crate) fn pane_range(cmds: &[DrawCmd], from: usize, to: usize) -> (f64, f64)
     let (mut lo, mut hi) = (f64::MAX, f64::MIN);
     for cmd in cmds {
         match cmd {
-            DrawCmd::Candle { i, h, l, .. } => {
+            DrawCmd::Candle { i, h, l, .. } | DrawCmd::StyledCandle { i, h, l, .. } => {
                 if vis(*i) {
                     lo = lo.min(*l);
                     hi = hi.max(*h);
                 }
             }
-            DrawCmd::Bar { i, v0, v1, .. } => {
+            DrawCmd::Bar { i, v0, v1, .. } | DrawCmd::StyledBar { i, v0, v1, .. } => {
                 if vis(*i) {
                     lo = lo.min(*v0).min(*v1);
                     hi = hi.max(*v0).max(*v1);
                 }
             }
-            DrawCmd::Ohlc { i, h, l, .. } => {
+            DrawCmd::Ohlc { i, h, l, .. } | DrawCmd::StyledOhlc { i, h, l, .. } => {
                 if vis(*i) {
                     lo = lo.min(*l);
                     hi = hi.max(*h);
+                }
+            }
+            DrawCmd::CloseLine { i, p0, p1, .. } => {
+                if vis(*i) {
+                    lo = lo.min(*p0).min(*p1);
+                    hi = hi.max(*p0).max(*p1);
+                }
+            }
+            DrawCmd::Pagoda { i, o, h, l, c, .. } => {
+                if vis(*i) {
+                    lo = lo.min(*l).min(*o).min(*c);
+                    hi = hi.max(*h).max(*o).max(*c);
                 }
             }
             DrawCmd::Polyline { pts, .. } => {
@@ -239,7 +340,7 @@ pub(crate) fn pane_range(cmds: &[DrawCmd], from: usize, to: usize) -> (f64, f64)
 impl StockApp {
     pub(crate) fn pane_view_range(&self, pane: usize, from: usize, to: usize) -> (f64, f64) {
         let (lo, hi) = pane_range(&self.panes[pane].cmds, from, to);
-        self.panes[pane].indicator.value_range(lo, hi)
+        self.panes[pane].chart_value_range(lo, hi)
     }
 
     pub(crate) fn chart_interact(
@@ -394,20 +495,23 @@ impl StockApp {
 
     pub(crate) fn ui_chart(&mut self, ui: &mut egui::Ui, pane: usize, area: egui::Rect) {
         let painter = ui.painter().clone();
-        let layout = self.panes[pane].indicator.layout();
+        let layout = self.panes[pane].chart_layout();
         let (title, status, main, time) = chart_rows(area, layout);
-        let (plot, axis) = frame_rects(main);
+        let show_axis = self.panes[pane].show_axis();
+        let (plot, axis) = frame_rects_with_axis(main, show_axis);
 
         painter.rect_filled(area, egui::CornerRadius::ZERO, theme().work_bg);
         painter.rect_filled(plot, egui::CornerRadius::ZERO, theme().chart_bg);
-        painter.rect_filled(
-            egui::Rect::from_min_max(
-                egui::pos2(axis.min.x, main.min.y - LINE_W),
-                egui::pos2(axis.max.x, main.max.y),
-            ),
-            egui::CornerRadius::ZERO,
-            theme().axis_bg,
-        );
+        if show_axis {
+            painter.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(axis.min.x, main.min.y - LINE_W),
+                    egui::pos2(axis.max.x, main.max.y),
+                ),
+                egui::CornerRadius::ZERO,
+                theme().axis_bg,
+            );
+        }
 
         hline_hard(
             &painter,
@@ -493,22 +597,24 @@ impl StockApp {
             };
             let ind = &self.panes[pane].indicator;
             (
-                ind.axis(&ctx),
-                ind.time(&ctx),
-                ind.status(&ctx),
+                self.panes[pane].chart_axis(&ctx),
+                self.panes[pane].chart_time(&ctx),
+                self.panes[pane].chart_status(&ctx),
                 ind.overlay(&ctx),
             )
         };
 
         self.replay_cmds(&painter, &geom, &axis_cmds);
         self.replay_cmds(&painter, &geom, &data);
-        vline_hard(
-            &painter,
-            axis.min.x,
-            axis.min.y,
-            axis.max.y,
-            theme().chart_line,
-        );
+        if show_axis {
+            vline_hard(
+                &painter,
+                axis.min.x,
+                axis.min.y,
+                axis.max.y,
+                theme().chart_line,
+            );
+        }
         self.replay_cmds(&painter, &geom, &time_cmds);
         self.replay_cmds(&painter, &geom, &status_cmds);
         self.replay_cmds(&painter, &geom, &overlay_cmds);
@@ -545,6 +651,31 @@ impl StockApp {
                         map.y(*l),
                     );
                 }
+                DrawCmd::StyledCandle {
+                    i,
+                    o,
+                    h,
+                    l,
+                    c,
+                    color,
+                    w,
+                } => {
+                    if !map.visible(*i) {
+                        continue;
+                    }
+                    paint_candle_w(
+                        painter,
+                        map.x_left(*i),
+                        map.bar_w,
+                        c >= o,
+                        color32(*color),
+                        *w,
+                        map.y(*o),
+                        map.y(*c),
+                        map.y(*h),
+                        map.y(*l),
+                    );
+                }
                 DrawCmd::Bar {
                     i,
                     v0,
@@ -571,6 +702,28 @@ impl StockApp {
                         painter.rect_filled(inner, egui::CornerRadius::ZERO, theme().chart_bg);
                     }
                 }
+                DrawCmd::StyledBar {
+                    i,
+                    v0,
+                    v1,
+                    color,
+                    hollow,
+                    w,
+                } => {
+                    if !map.visible(*i) {
+                        continue;
+                    }
+                    paint_bar(
+                        painter,
+                        map.x_left(*i),
+                        map.bar_w,
+                        *hollow,
+                        *w,
+                        color32(*color),
+                        map.y(*v0),
+                        map.y(*v1),
+                    );
+                }
                 DrawCmd::Ohlc {
                     i,
                     o,
@@ -593,6 +746,72 @@ impl StockApp {
                         map.y(*l),
                     );
                 }
+                DrawCmd::StyledOhlc {
+                    i,
+                    o,
+                    h,
+                    l,
+                    c,
+                    color,
+                    w,
+                } => {
+                    if !map.visible(*i) {
+                        continue;
+                    }
+                    paint_ohlc_w(
+                        painter,
+                        map.x_left(*i),
+                        map.bar_w,
+                        color32(*color),
+                        *w,
+                        map.y(*o),
+                        map.y(*c),
+                        map.y(*h),
+                        map.y(*l),
+                    );
+                }
+                DrawCmd::CloseLine {
+                    i,
+                    p0,
+                    p1,
+                    color,
+                    w,
+                } => {
+                    if !map.visible(*i) {
+                        continue;
+                    }
+                    let x = map.line_x(*i);
+                    polyline_hard_width(
+                        painter,
+                        &[(x, map.y(*p0)), (x - map.advance, map.y(*p1))],
+                        color32(*color),
+                        *w,
+                    );
+                }
+                DrawCmd::Pagoda {
+                    i,
+                    o,
+                    h,
+                    l,
+                    c,
+                    color,
+                    w,
+                } => {
+                    if !map.visible(*i) {
+                        continue;
+                    }
+                    paint_pagoda(
+                        painter,
+                        map.x_left(*i),
+                        map.bar_w,
+                        color32(*color),
+                        *w,
+                        map.y(*o),
+                        map.y(*c),
+                        map.y(*h),
+                        map.y(*l),
+                    );
+                }
                 DrawCmd::Polyline { pts, color, w } | DrawCmd::Overlay { pts, color, w } => {
                     debug_assert!(*w >= 1, "折线宽度至少 1px");
                     let mut run: Vec<(f32, f32)> = Vec::new();
@@ -603,7 +822,7 @@ impl StockApp {
                     }
 
                     if run.len() > 1 {
-                        polyline_hard(painter, &run, color32(*color));
+                        polyline_hard_width(painter, &run, color32(*color), *w);
                     }
                 }
                 DrawCmd::Line {
@@ -627,23 +846,25 @@ impl StockApp {
                     debug_assert!(*w >= 1, "参考线宽度至少 1px");
 
                     if *p >= map.lo && *p <= map.hi {
-                        hline_hard(
+                        hline_hard_width(
                             painter,
                             geom.plot.min.x,
                             geom.plot.max.x,
                             map.y(*p),
                             color32(*color),
+                            *w,
                         );
                     }
                 }
                 DrawCmd::VLine { i, color, w } => {
                     debug_assert!(*w >= 1, "竖线宽度至少 1px");
-                    vline_hard(
+                    vline_hard_width(
                         painter,
                         map.line_at(*i),
                         geom.plot.min.y,
                         geom.plot.max.y,
                         color32(*color),
+                        *w,
                     );
                 }
                 DrawCmd::Text { i, p, s, color } => {
@@ -659,6 +880,9 @@ impl StockApp {
                 DrawCmd::AxisText { p, s, fg, bg } => {
                     let y = map.y(*p);
                     if *bg == 0 {
+                        if !geom.axis.is_positive() {
+                            continue;
+                        }
                         self.text(
                             painter,
                             egui::pos2(Self::axis_tick_x(geom.axis), y),
@@ -671,7 +895,11 @@ impl StockApp {
                             continue;
                         }
                         let w = self.cross_label_w(s);
-                        let x0 = Self::cross_axis_label_x(geom.axis, w);
+                        let x0 = if geom.axis.is_positive() {
+                            Self::cross_axis_label_x(geom.axis, w)
+                        } else {
+                            (geom.plot.max.x - w - LINE_W).max(geom.plot.min.x)
+                        };
 
                         let y0 = floating_label_top(
                             y,

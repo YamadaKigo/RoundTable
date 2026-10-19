@@ -13,14 +13,18 @@ pub(crate) fn ensure_pane_computed(world: &mut AppWorld, pane: usize) {
     }
     let script = world.panes[pane].script.clone();
     let cmds = if let Some(script) = script {
-        match script.compute(&world.bars, &world.panes_palette) {
-            Ok(cmds) => cmds,
+        match script.render(&world.bars, &world.panes_palette) {
+            Ok(render) => {
+                world.panes[pane].script_render = Some(render.clone());
+                render.cmds
+            }
             Err(error) => {
                 world.panes[pane].script_error = Some(error);
                 Vec::new()
             }
         }
     } else {
+        world.panes[pane].script_render = None;
         world.panes[pane].indicator.compute(&world.bars)
     };
     world.panes[pane].cmds = cmds;

@@ -7,7 +7,7 @@ fn main() {
 
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let mut arms = String::new();
-    for file in ["simsun.ttc", "vgafix.fon"] {
+    for file in ["simsun.ttc", "svgafix.fon"] {
         let path = Path::new("assets/fonts").join(file);
         if path.is_file() {
             let absolute = fs::canonicalize(path).expect("font path");

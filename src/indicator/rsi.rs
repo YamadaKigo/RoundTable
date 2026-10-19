@@ -31,17 +31,25 @@ impl Rsi {
 
     fn series(&self, bars: &[Bar], n: usize) -> Vec<Option<f64>> {
         let mut out = vec![None; bars.len()];
-        if bars.len() < 2 || n == 0 {
+        if n == 0 {
             return out;
         }
-        let (mut up, mut dn) = (0.0, 0.0);
+        let mut up = 0.0;
+        let mut dn = 0.0;
         for i in 1..bars.len() {
             let diff = bars[i].c - bars[i - 1].c;
-            let u = diff.max(0.0);
-            let d = (-diff).max(0.0);
-
-            up = (u + (n - 1) as f64 * up) / n as f64;
-            dn = (d + (n - 1) as f64 * dn) / n as f64;
+            up += diff.max(0.0);
+            dn += (-diff).max(0.0);
+            if i > n {
+                let old = bars[i - n].c - bars[i - n - 1].c;
+                up -= old.max(0.0);
+                dn -= (-old).max(0.0);
+            }
+            if i < n {
+                continue;
+            }
+            let up = up / n as f64;
+            let dn = dn / n as f64;
             let sum = up + dn;
             out[i] = Some(if sum.abs() > f64::EPSILON {
                 up / sum * 100.0
@@ -180,10 +188,13 @@ mod tests {
         assert_eq!(rsi.value_range(0.0, 0.0), (0.0, 100.0));
         let cmds = rsi.compute(&bars);
         let pal = Palette::default();
-        for color in [pal.rsi_1, pal.rsi_2, pal.rsi_3] {
+        for (k, color) in [pal.rsi_1, pal.rsi_2, pal.rsi_3].into_iter().enumerate() {
             let pts = polyline(&cmds, color);
-            assert_eq!(pts.len(), bars.len() - 1);
-            assert_eq!(pts[0].0, 1, "第一根没有昨收，RSI 该从第 2 根起");
+            assert_eq!(pts.len(), bars.len() - rsi.periods[k]);
+            assert_eq!(
+                pts[0].0, rsi.periods[k],
+                "RSI 该等到完整 N 根涨跌窗口后再出值"
+            );
         }
         for p in REF_LINES {
             assert!(

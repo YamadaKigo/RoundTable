@@ -4,7 +4,7 @@
 
 ```text
 simsun.ttc
-vgafix.fon
+svgafix.fon
 ```
 
 存在这些文件时，构建脚本会把字体字节打包进可执行文件，运行时提取到 `userdata/fonts` 后再私有注册，因此目标机器无需安装对应字体。

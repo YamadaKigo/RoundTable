@@ -35,6 +35,7 @@ impl ChartView {
 pub(crate) struct Pane {
     pub(crate) indicator: Box<dyn indicator::Indicator>,
     pub(crate) cmds: Vec<indicator::DrawCmd>,
+    pub(crate) script_render: Option<crate::script::ScriptRender>,
     pub(crate) height: i32,
     pub(crate) dirty: bool,
     pub(crate) view: ChartView,
@@ -50,6 +51,7 @@ impl Pane {
         Self {
             indicator,
             cmds: Vec::new(),
+            script_render: None,
             height: 0,
             dirty: true,
             view: ChartView::new(),
@@ -57,6 +59,48 @@ impl Pane {
             script_source,
             script_error: None,
         }
+    }
+
+    pub(crate) fn chart_layout(&self) -> indicator::ChartLayout {
+        self.script_render.as_ref().map_or_else(
+            || self.indicator.layout(),
+            |render| render.layout(self.indicator.layout()),
+        )
+    }
+
+    pub(crate) fn show_axis(&self) -> bool {
+        self.script_render
+            .as_ref()
+            .and_then(|render| render.settings.show_axis)
+            .unwrap_or(true)
+    }
+
+    pub(crate) fn chart_axis(&self, ctx: &indicator::ChartCtx) -> Vec<indicator::DrawCmd> {
+        self.script_render
+            .as_ref()
+            .and_then(|render| render.axis(ctx))
+            .unwrap_or_else(|| self.indicator.axis(ctx))
+    }
+
+    pub(crate) fn chart_time(&self, ctx: &indicator::ChartCtx) -> Vec<indicator::DrawCmd> {
+        self.script_render
+            .as_ref()
+            .and_then(|render| render.time(ctx))
+            .unwrap_or_else(|| self.indicator.time(ctx))
+    }
+
+    pub(crate) fn chart_status(&self, ctx: &indicator::ChartCtx) -> Vec<indicator::DrawCmd> {
+        self.script_render
+            .as_ref()
+            .and_then(|render| render.status(ctx))
+            .unwrap_or_else(|| self.indicator.status(ctx))
+    }
+
+    pub(crate) fn chart_value_range(&self, lo: f64, hi: f64) -> (f64, f64) {
+        self.script_render.as_ref().map_or_else(
+            || self.indicator.value_range(lo, hi),
+            |render| render.value_range(lo, hi),
+        )
     }
 }
 

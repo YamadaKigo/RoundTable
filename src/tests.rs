@@ -1948,6 +1948,126 @@ fn indicator_script_functions_compute_series() {
 }
 
 #[test]
+fn indicator_script_customizes_bands_axes_styles_and_status() {
+    use crate::indicator::{ChartCtx, DrawCmd};
+
+    let bars = data::random_walk::generate(BAR_SEED, 64, BAR_START);
+    let source = concat!(
+        "STATUS(1);\n",
+        "TIME(1);\n",
+        "AXIS_FIXED(0,20,50,80,100);\n",
+        "CANDLE(SYSTEM_COLOR(UP),COLOR(0x00FF00),2);\n",
+        "LINE(C,COLOR(\"#112233\"),3);\n",
+        "HIST(C-O,AUTO,1,2);\n",
+        "STATUS_FIELD(\"C\",C,SYSTEM_COLOR(TEXT),\"0.00\");\n",
+    );
+    let program = crate::script::ScriptProgram::parse(source).expect("自定义脚本应能解析");
+    let render = program
+        .render(&bars, &indicator::Palette::default())
+        .expect("自定义脚本应能计算");
+
+    assert_eq!(render.settings.show_status, Some(true));
+    assert_eq!(render.settings.show_time, Some(true));
+    assert_eq!(render.settings.show_axis, Some(true));
+    assert_eq!(
+        render.layout(crate::indicator::ChartLayout::NONE),
+        crate::indicator::ChartLayout::new(2, 2)
+    );
+    assert!(render.cmds.iter().any(|cmd| matches!(
+        cmd,
+        DrawCmd::StyledCandle {
+            color: 0xFF0000,
+            w: 2,
+            ..
+        }
+    )));
+    assert!(render.cmds.iter().any(|cmd| matches!(
+        cmd,
+        DrawCmd::Polyline {
+            color: 0x112233,
+            w: 3,
+            ..
+        }
+    )));
+    assert!(render.cmds.iter().any(|cmd| matches!(
+        cmd,
+        DrawCmd::StyledBar {
+            hollow: true,
+            w: 2,
+            ..
+        }
+    )));
+
+    let ctx = ChartCtx {
+        bars: &bars,
+        cmds: &render.cmds,
+        from: 0,
+        to: bars.len(),
+        visible: bars.len(),
+        advance: 1.0,
+        time_step: 5,
+        lo: 0.0,
+        hi: 100.0,
+        cursor_bar: None,
+        cursor_index: None,
+        cursor_value: None,
+    };
+    assert_eq!(render.value_range(10.0, 90.0), (0.0, 100.0));
+    let axis = render.axis(&ctx).expect("固定纵轴应有指令");
+    assert_eq!(
+        axis.iter()
+            .filter(|cmd| matches!(cmd, DrawCmd::AxisText { .. }))
+            .count(),
+        5
+    );
+    let status = render.status(&ctx).expect("自定义状态栏应有指令");
+    assert!(matches!(
+        status.as_slice(),
+        [DrawCmd::StatusField { label, .. }] if label == "C"
+    ));
+    assert!(render.time(&ctx).is_some_and(|cmds| !cmds.is_empty()));
+}
+
+#[test]
+fn indicator_script_can_hide_all_three_bands() {
+    let bars = data::random_walk::generate(BAR_SEED, 32, BAR_START);
+    let source = "STATUS(0);\nTIME(0);\nAXIS(0);\nLINE(C,TEXT);\n";
+    let program = crate::script::ScriptProgram::parse(source).expect("开关脚本应能解析");
+    let render = program
+        .render(&bars, &indicator::Palette::default())
+        .expect("开关脚本应能计算");
+    assert_eq!(
+        render.layout(crate::indicator::ChartLayout::new(2, 2)),
+        crate::indicator::ChartLayout::NONE
+    );
+    assert_eq!(render.settings.show_axis, Some(false));
+}
+
+#[test]
+fn indicator_script_draws_pagoda_and_close_lines() {
+    use crate::indicator::DrawCmd;
+
+    let bars = data::random_walk::generate(BAR_SEED, 16, BAR_START);
+    let program = crate::script::ScriptProgram::parse("PAGODA();\nCLOSE();\n")
+        .expect("宝塔线和收盘线应能解析");
+    let cmds = program
+        .compute(&bars, &indicator::Palette::default())
+        .expect("宝塔线和收盘线应能计算");
+    assert_eq!(
+        cmds.iter()
+            .filter(|cmd| matches!(cmd, DrawCmd::Pagoda { .. }))
+            .count(),
+        bars.len()
+    );
+    assert_eq!(
+        cmds.iter()
+            .filter(|cmd| matches!(cmd, DrawCmd::CloseLine { .. }))
+            .count(),
+        bars.len()
+    );
+}
+
+#[test]
 fn indicator_code_window_shows_the_script() {
     let ctx = egui::Context::default();
     configure_tessellation(&ctx);
@@ -5522,6 +5642,199 @@ fn pinned_windows_follow_pin_order_above_regular_windows() {
 }
 
 #[test]
+fn exclusive_window_rejects_other_windows_entering_its_rect() {
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    let mut app = blank_app();
+    app.text_engine = HardText::new(&ctx);
+    app.replace_bars(data::random_walk::generate(BAR_SEED, 64, BAR_START));
+    let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(140), cells(80)));
+    win_frame(&mut app, &ctx, work, Vec::new());
+    app.add_chart_window();
+    win_frame(&mut app, &ctx, work, Vec::new());
+
+    let panel = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|window| window.kind == WinKind::Panel)
+        .unwrap();
+    app.win_mgr.wins[panel].w.pos = egui::pos2(work.max.x - cells(24), work.min.y);
+    let charts: Vec<usize> = app
+        .win_mgr
+        .wins
+        .iter()
+        .enumerate()
+        .filter(|(_, window)| window.kind == WinKind::Chart)
+        .map(|(index, _)| index)
+        .collect();
+    let exclusive_id = app.win_mgr.wins[charts[0]].w.id;
+    let mover_id = app.win_mgr.wins[charts[1]].w.id;
+    app.win_mgr.wins[charts[0]].w.pos = egui::pos2(100.0, 100.0);
+    app.win_mgr.wins[charts[0]].w.size = egui::vec2(200.0, 180.0);
+    app.win_mgr.wins[charts[0]].exclusive = true;
+    app.win_mgr.wins[charts[1]].w.pos = egui::pos2(520.0, 100.0);
+    app.win_mgr.wins[charts[1]].w.size = egui::vec2(150.0, 100.0);
+    win_frame(&mut app, &ctx, work, Vec::new());
+
+    let mover = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|window| window.w.id == mover_id)
+        .unwrap();
+    let start = app.win_mgr.wins[mover].w.title_band().center();
+    let target = start - egui::vec2(60.0, 0.0);
+    let blocked_target = target - egui::vec2(300.0, 0.0);
+    let press = |pos| {
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    };
+    let release = |pos| {
+        vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]
+    };
+    win_frame(&mut app, &ctx, work, press(start));
+    win_frame(
+        &mut app,
+        &ctx,
+        work,
+        vec![egui::Event::PointerMoved(target)],
+    );
+    let stopped = app
+        .win_mgr
+        .wins
+        .iter()
+        .find(|window| window.w.id == mover_id)
+        .unwrap()
+        .w
+        .rect();
+    win_frame(
+        &mut app,
+        &ctx,
+        work,
+        vec![egui::Event::PointerMoved(blocked_target)],
+    );
+    let slide_target = blocked_target + egui::vec2(0.0, 60.0);
+    win_frame(
+        &mut app,
+        &ctx,
+        work,
+        vec![egui::Event::PointerMoved(slide_target)],
+    );
+    let mover_rect = app
+        .win_mgr
+        .wins
+        .iter()
+        .find(|window| window.w.id == mover_id)
+        .unwrap()
+        .w
+        .rect();
+    win_frame(&mut app, &ctx, work, release(slide_target));
+    let exclusive_rect = app
+        .win_mgr
+        .wins
+        .iter()
+        .find(|window| window.w.id == exclusive_id)
+        .unwrap()
+        .w
+        .rect();
+    assert!(crate::ui::floatwin::shares_border(
+        mover_rect,
+        exclusive_rect
+    ));
+    assert!(!crate::ui::floatwin::interior_overlap(
+        mover_rect,
+        exclusive_rect
+    ));
+    assert!(
+        mover_rect.min.x < 520.0,
+        "窗口被独占区域挡住之前应该先向左移动"
+    );
+    assert_eq!(
+        mover_rect.min.x,
+        exclusive_rect.max.x - LINE_W,
+        "碰撞后窗口应停在独占窗口的 1px 边框线上"
+    );
+    assert!(
+        mover_rect.min.x < stopped.min.x,
+        "窗口应先靠近独占区域，再吸附到共享边框"
+    );
+    assert!(
+        mover_rect.min.y > stopped.min.y,
+        "碰撞到独占窗口边缘后仍应能沿边缘滑动"
+    );
+}
+
+#[test]
+fn blank_workspace_drag_does_not_move_or_select_windows() {
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    let mut app = blank_app();
+    app.text_engine = HardText::new(&ctx);
+    app.replace_bars(data::random_walk::generate(BAR_SEED, 64, BAR_START));
+    let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(140), cells(80)));
+    win_frame(&mut app, &ctx, work, Vec::new());
+    app.add_chart_window();
+    win_frame(&mut app, &ctx, work, Vec::new());
+
+    let charts: Vec<usize> = app
+        .win_mgr
+        .wins
+        .iter()
+        .enumerate()
+        .filter(|(_, window)| window.kind == WinKind::Chart)
+        .map(|(index, _)| index)
+        .collect();
+    for (index, x) in charts.iter().zip([180.0, 620.0]) {
+        app.win_mgr.wins[*index].w.pos = egui::pos2(x, 120.0);
+    }
+    win_frame(&mut app, &ctx, work, Vec::new());
+    let before: Vec<egui::Pos2> = app.win_mgr.wins.iter().map(|window| window.w.pos).collect();
+
+    let start = work.min + egui::vec2(20.0, 500.0);
+    let end = start + egui::vec2(320.0, 120.0);
+    let press = vec![
+        egui::Event::PointerMoved(start),
+        egui::Event::PointerButton {
+            pos: start,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        },
+    ];
+    win_frame(&mut app, &ctx, work, press);
+    win_frame(&mut app, &ctx, work, vec![egui::Event::PointerMoved(end)]);
+    win_frame(
+        &mut app,
+        &ctx,
+        work,
+        vec![egui::Event::PointerButton {
+            pos: end,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    let after: Vec<egui::Pos2> = app.win_mgr.wins.iter().map(|window| window.w.pos).collect();
+    assert_eq!(before, after);
+    assert!(!app.win_mgr.drag_active());
+}
+
+#[test]
 fn child_pin_button_toggles_from_the_title_bar() {
     let ctx = egui::Context::default();
     configure_tessellation(&ctx);
@@ -6997,11 +7310,12 @@ fn key_symbol_ink(
                     false,
                     false,
                     true,
+                    false,
                 );
             }
             _ => {
                 paint_sys_button(
-                    &mut app, &painter, btn, false, kind, maximized, false, false,
+                    &mut app, &painter, btn, false, kind, maximized, false, false, false,
                 );
             }
         }
@@ -7375,7 +7689,17 @@ fn dump_zoom_for_visual_check() {
                 egui::pos2(20.0 + 25.0 * i as f32, 20.0),
                 egui::vec2(SYS_BTN_W, SYS_BTN_H),
             );
-            paint_sys_button(&mut app, &painter, btn, false, kind, i == 1, false, i == 0);
+            paint_sys_button(
+                &mut app,
+                &painter,
+                btn,
+                false,
+                kind,
+                i == 1,
+                false,
+                i == 0,
+                false,
+            );
         }
     });
     absorb_textures(&mut out.textures_delta);

@@ -13,6 +13,8 @@ pub struct Obv {
     pal: Palette,
 }
 
+pub const OBV_MA_PERIOD: usize = 30;
+
 fn series(bars: &[Bar]) -> Vec<f64> {
     let mut out = Vec::with_capacity(bars.len());
     let mut total = 0.0;
@@ -26,6 +28,20 @@ fn series(bars: &[Bar]) -> Vec<f64> {
             }
         }
         out.push(total);
+    }
+    out
+}
+
+fn average(values: &[f64], n: usize) -> Vec<Option<f64>> {
+    let mut out = vec![None; values.len()];
+    if n == 0 || values.len() < n {
+        return out;
+    }
+    let mut sum: f64 = values[..n].iter().sum();
+    out[n - 1] = Some(sum / n as f64);
+    for i in n..values.len() {
+        sum += values[i] - values[i - n];
+        out[i] = Some(sum / n as f64);
     }
     out
 }
@@ -48,6 +64,7 @@ impl Indicator for Obv {
             return Vec::new();
         }
         let values = series(bars);
+        let average = average(&values, OBV_MA_PERIOD);
         vec![
             DrawCmd::HLine {
                 p: 0.0,
@@ -59,6 +76,15 @@ impl Indicator for Obv {
                 color: self.pal.obv,
                 w: 1,
             },
+            DrawCmd::Polyline {
+                pts: average
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(i, value)| value.map(|value| (i, value)))
+                    .collect(),
+                color: self.pal.ma[0],
+                w: 1,
+            },
         ]
     }
 
@@ -67,6 +93,10 @@ impl Indicator for Obv {
             return Vec::new();
         };
         let value = series(ctx.bars).get(index).copied();
+        let average = average(&series(ctx.bars), OBV_MA_PERIOD)
+            .get(index)
+            .copied()
+            .flatten();
         vec![
             DrawCmd::StatusText {
                 s: self.name().to_owned(),
@@ -77,6 +107,12 @@ impl Indicator for Obv {
                 value.map_or_else(|| "--".to_owned(), fmt_volume),
                 "0000.0万",
                 self.pal.obv,
+            ),
+            status_field(
+                "OBVMA",
+                average.map_or_else(|| "--".to_owned(), fmt_volume),
+                "0000.0",
+                self.pal.ma[0],
             ),
         ]
     }

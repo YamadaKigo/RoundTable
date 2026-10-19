@@ -139,6 +139,7 @@ impl Overlay {
     }
 }
 
+#[derive(Clone)]
 pub enum DrawCmd {
     Candle {
         i: usize,
@@ -149,12 +150,31 @@ pub enum DrawCmd {
         color: u32,
     },
 
+    StyledCandle {
+        i: usize,
+        o: f64,
+        h: f64,
+        l: f64,
+        c: f64,
+        color: u32,
+        w: u32,
+    },
+
     Bar {
         i: usize,
         v0: f64,
         v1: f64,
         color: u32,
         hollow: bool,
+    },
+
+    StyledBar {
+        i: usize,
+        v0: f64,
+        v1: f64,
+        color: u32,
+        hollow: bool,
+        w: u32,
     },
 
     Ohlc {
@@ -164,6 +184,34 @@ pub enum DrawCmd {
         l: f64,
         c: f64,
         color: u32,
+    },
+
+    StyledOhlc {
+        i: usize,
+        o: f64,
+        h: f64,
+        l: f64,
+        c: f64,
+        color: u32,
+        w: u32,
+    },
+
+    CloseLine {
+        i: usize,
+        p0: f64,
+        p1: f64,
+        color: u32,
+        w: u32,
+    },
+
+    Pagoda {
+        i: usize,
+        o: f64,
+        h: f64,
+        l: f64,
+        c: f64,
+        color: u32,
+        w: u32,
     },
 
     Overlay {

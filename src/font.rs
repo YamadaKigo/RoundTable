@@ -62,7 +62,7 @@ pub(crate) const FIXED_PITCH_MODERN: u32 = 0x31;
 
 pub(crate) const GDI_FACES: [&str; 4] = ["宋体", "新宋体", "SimSun", "NSimSun"];
 
-pub(crate) const ASCII_FON_FILES: [&str; 2] = ["vgafix.fon", "8514fix.fon"];
+pub(crate) const ASCII_FON_FILES: [&str; 2] = ["svgafix.fon", "8514fix.fon"];
 
 pub(crate) const RAS_DIB_W: i32 = 32;
 pub(crate) const RAS_DIB_H: i32 = 32;

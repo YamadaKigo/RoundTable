@@ -7,6 +7,7 @@ use eframe::egui;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum SysButton {
+    Exclusive,
     Pin,
     Minimize,
     Maximize,
@@ -19,8 +20,11 @@ impl SysButton {
         maximized: bool,
         restore_minimized: bool,
         pinned: bool,
+        exclusive: bool,
     ) -> SymbolKind {
         match self {
+            SysButton::Exclusive if exclusive => SymbolKind::ExclusiveOn,
+            SysButton::Exclusive => SymbolKind::Exclusive,
             SysButton::Pin if pinned => SymbolKind::Unpin,
             SysButton::Pin => SymbolKind::Pin,
             SysButton::Minimize if restore_minimized => SymbolKind::Restore,
@@ -33,6 +37,7 @@ impl SysButton {
 
     pub(crate) fn label(self, pinned: bool) -> &'static str {
         match self {
+            SysButton::Exclusive => "独占",
             SysButton::Pin if pinned => "解除置顶",
             SysButton::Pin => "置顶",
             SysButton::Minimize => "最小化",
@@ -85,6 +90,7 @@ pub(crate) fn paint_sys_button(
     maximized: bool,
     restore_minimized: bool,
     pinned: bool,
+    exclusive: bool,
 ) {
     let face = if hot {
         theme().btn_hover
@@ -94,7 +100,8 @@ pub(crate) fn paint_sys_button(
     painter.rect_filled(rect, egui::CornerRadius::ZERO, face);
     border_hard(painter, rect, theme().ctrl_border);
 
-    let content = ButtonContent::Symbol(kind.symbol(maximized, restore_minimized, pinned));
+    let content =
+        ButtonContent::Symbol(kind.symbol(maximized, restore_minimized, pinned, exclusive));
     debug_assert_eq!(content.class(), ButtonClass::Text);
     let ButtonContent::Symbol(symbol) = content else {
         return;
@@ -132,7 +139,7 @@ impl StockApp {
             let slot = match kind {
                 SysButton::Minimize => 0,
                 SysButton::Close => 1,
-                SysButton::Pin | SysButton::Maximize => continue,
+                SysButton::Exclusive | SysButton::Pin | SysButton::Maximize => continue,
             };
             let rect = buttons[slot];
             let resp = ui.interact(rect, egui::Id::new(("rt_sys_btn", i)), egui::Sense::click());
@@ -142,6 +149,7 @@ impl StockApp {
                 rect,
                 resp.hovered(),
                 kind,
+                false,
                 false,
                 false,
                 false,
@@ -155,7 +163,7 @@ impl StockApp {
                     SysButton::Close => {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
-                    SysButton::Pin | SysButton::Maximize => {}
+                    SysButton::Exclusive | SysButton::Pin | SysButton::Maximize => {}
                 }
             }
         }

@@ -95,3 +95,22 @@ New-Symbol 'unpin' {
     )
     Set-Ink $bmp $points
 }
+
+New-Symbol 'exclusive' {
+    param($bmp)
+    $points = @()
+    $points += (4..11 | ForEach-Object { @($_, 4) })
+    $points += (4..11 | ForEach-Object { @($_, 11) })
+    $points += (4..11 | ForEach-Object { @(4, $_) })
+    $points += (4..11 | ForEach-Object { @(11, $_) })
+    Set-Ink $bmp $points
+}
+
+New-Symbol 'exclusive_on' {
+    param($bmp)
+    for ($y = 4; $y -le 11; $y++) {
+        for ($x = 4; $x -le 11; $x++) {
+            $bmp.SetPixel($x, $y, $ink)
+        }
+    }
+}
