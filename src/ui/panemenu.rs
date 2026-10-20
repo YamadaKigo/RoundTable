@@ -68,9 +68,9 @@ impl StockApp {
 
         let outside_click = ui.ctx().input(|i| {
             i.pointer.primary_clicked()
-                && i.pointer
-                    .interact_pos()
-                    .is_some_and(|p| !panel.contains(p) && !self.pane_menu_bar.contains(p))
+                && i.pointer.interact_pos().is_some_and(|p| {
+                    !panel.expand(grid_line(1)).contains(p) && !self.pane_menu_bar.contains(p)
+                })
         });
         if outside_click {
             self.pane_menu = None;

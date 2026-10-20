@@ -1102,13 +1102,6 @@ impl StockApp {
         menu_item_rects(title, widths, MenuAlign::Left)
     }
 
-    pub(crate) fn pane_name_x(title: egui::Rect, buttons: &[egui::Rect]) -> f32 {
-        let after = buttons
-            .last()
-            .map_or(title.min.x + TEXT_INSET_X, |rect| rect.max.x);
-        text_left_x(after, title.min.x)
-    }
-
     pub(crate) fn ui_pane_title(
         &mut self,
         ui: &mut egui::Ui,
@@ -1120,7 +1113,6 @@ impl StockApp {
         } else {
             None
         };
-        let name = self.panes[pane].indicator.name().to_owned();
         let out = menu_bar_ui(
             self,
             ui,
@@ -1129,13 +1121,6 @@ impl StockApp {
             MenuAlign::Left,
             open,
             MenuBarStyle::PANE_BAR,
-        );
-        self.text(
-            &ui.painter().clone(),
-            egui::pos2(Self::pane_name_x(title, &out.rects), title.center().y),
-            egui::Align2::LEFT_CENTER,
-            &name,
-            theme().menu_text,
         );
 
         match out.clicked {

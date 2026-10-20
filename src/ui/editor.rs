@@ -570,6 +570,7 @@ impl TextEditor {
         );
         if ui
             .input(|i| i.pointer.hover_pos())
+            .filter(|_| window_active)
             .is_some_and(|p| text_area.contains(p))
         {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Text);

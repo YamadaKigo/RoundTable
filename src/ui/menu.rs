@@ -196,30 +196,46 @@ fn menu_hit_rect(rect: egui::Rect) -> egui::Rect {
 impl MenuPanel {
     pub(crate) fn left(anchor: egui::Rect, w: f32, rows: usize, window_bottom: f32) -> Self {
         let h = cells(MENU_ROW_ROWS * rows as i32);
+        let frame = grid_line(1);
         let below = anchor.max.y - LINE_W;
-        let y = if below + h > window_bottom {
-            anchor.min.y + LINE_W - h
+        let outer_h = h + 2.0 * frame;
+        let y = if below + outer_h > window_bottom {
+            anchor.min.y + LINE_W - outer_h
         } else {
             below
         };
         Self {
-            rect: egui::Rect::from_min_size(egui::pos2(anchor.min.x, y), egui::vec2(w, h)),
+            rect: egui::Rect::from_min_size(
+                egui::pos2(anchor.min.x + frame, y + frame),
+                egui::vec2(w, h),
+            ),
             rows,
         }
     }
 
     pub(crate) fn bounded(anchor: egui::Rect, w: f32, rows: usize, bounds: egui::Rect) -> Self {
         let h = cells(MENU_ROW_ROWS * rows as i32);
-        let x = snap_into(anchor.min.x, bounds.min.x, bounds.max.x - LINE_W - w);
+        let frame = grid_line(1);
+        let outer_w = w + 2.0 * frame;
+        let outer_h = h + 2.0 * frame;
+        let x = snap_into(
+            anchor.min.x,
+            bounds.min.x,
+            (bounds.max.x - LINE_W - outer_w).max(bounds.min.x),
+        );
         let below = anchor.max.y - LINE_W;
-        let y_want = if below + h <= bounds.max.y - LINE_W {
+        let y_want = if below + outer_h <= bounds.max.y - LINE_W {
             below
         } else {
-            anchor.min.y + LINE_W - h
+            anchor.min.y + LINE_W - outer_h
         };
-        let y = snap_into(y_want, bounds.min.y, bounds.max.y - LINE_W - h);
+        let y = snap_into(
+            y_want,
+            bounds.min.y,
+            (bounds.max.y - LINE_W - outer_h).max(bounds.min.y),
+        );
         Self {
-            rect: egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, h)),
+            rect: egui::Rect::from_min_size(egui::pos2(x + frame, y + frame), egui::vec2(w, h)),
             rows,
         }
     }
@@ -236,12 +252,15 @@ impl MenuPanel {
 
     pub(crate) fn flyout(row: egui::Rect, w: f32, rows: usize, bounds: egui::Rect) -> Self {
         let h = cells(MENU_ROW_ROWS * rows as i32);
+        let frame = grid_line(1);
+        let outer_w = w + 2.0 * frame;
+        let outer_h = h + 2.0 * frame;
 
         let right_open = row.max.x - LINE_W;
-        let x_want = if right_open + w <= bounds.max.x - LINE_W {
+        let x_want = if right_open + outer_w <= bounds.max.x - LINE_W {
             right_open
         } else {
-            row.min.x - w + LINE_W
+            row.min.x - outer_w + LINE_W
         };
 
         let y_want = row.min.y - LINE_W;
@@ -251,13 +270,13 @@ impl MenuPanel {
                     snap_into(
                         x_want,
                         bounds.min.x,
-                        (bounds.max.x - LINE_W - w).max(bounds.min.x),
-                    ),
+                        (bounds.max.x - LINE_W - outer_w).max(bounds.min.x),
+                    ) + frame,
                     snap_into(
                         y_want,
                         bounds.min.y,
-                        (bounds.max.y - LINE_W - h).max(bounds.min.y),
-                    ),
+                        (bounds.max.y - LINE_W - outer_h).max(bounds.min.y),
+                    ) + frame,
                 ),
                 egui::vec2(w, h),
             ),
@@ -266,7 +285,7 @@ impl MenuPanel {
     }
 
     pub(crate) fn paint_bg(&self, painter: &egui::Painter) {
-        painter.rect_filled(self.rect, egui::CornerRadius::ZERO, theme().menu_bg);
+        painter.rect_filled(self.frame_rect(), egui::CornerRadius::ZERO, theme().menu_bg);
     }
 
     pub(crate) fn paint_row_hover(&self, painter: &egui::Painter, row: egui::Rect) {
@@ -275,7 +294,12 @@ impl MenuPanel {
     }
 
     pub(crate) fn paint_border(&self, painter: &egui::Painter) {
+        border_hard(painter, self.frame_rect(), theme().menu_border);
         border_hard(painter, self.rect, theme().menu_border);
+    }
+
+    pub(crate) fn frame_rect(&self) -> egui::Rect {
+        self.rect.expand(grid_line(1))
     }
 
     pub(crate) fn ui_rows(
@@ -553,8 +577,12 @@ fn ui_menu_popup_inner(
         }
     }
     let mut keep_rects = keep.to_vec();
-    keep_rects.extend(chain.iter().map(|(p, _)| p.rect));
-    if pointer.is_some_and(|p| chain.iter().any(|(panel, _)| panel.rect.contains(p))) {
+    keep_rects.extend(chain.iter().map(|(panel, _)| panel.frame_rect()));
+    if pointer.is_some_and(|p| {
+        chain
+            .iter()
+            .any(|(panel, _)| panel.frame_rect().contains(p))
+    }) {
         app.pointer.force_hint(CursorKind::Normal, ui);
     }
     close_on_outside_click(ui, &keep_rects, state);

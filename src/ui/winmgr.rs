@@ -81,7 +81,7 @@ impl ManagedWin {
 
     fn edge_guard(&self) -> egui::Rect {
         match self.kind {
-            WinKind::Source => crate::ui::editor::scrollbar_track(self.w.rect()),
+            WinKind::Source => crate::ui::editor::scrollbar_track(self.w.inner_rect()),
             WinKind::Chart | WinKind::Panel | WinKind::Console | WinKind::Color => {
                 egui::Rect::NOTHING
             }
@@ -251,7 +251,7 @@ impl WinMgr {
             SRC_TITLE,
             0,
             egui::vec2(SRC_W, SRC_H),
-            egui::vec2(SRC_W, SRC_H),
+            egui::vec2(SRC_MIN_W, SRC_MIN_H),
         );
         if !self.place_default(i, work) {
             self.wins[i].w.open = false;
@@ -1312,13 +1312,6 @@ impl WinMgr {
         let gap = self.taskbar_gap;
         painter.rect_filled(gap, egui::CornerRadius::ZERO, theme().taskbar_bg);
         border_hard(&painter, gap, theme().taskbar_border);
-        vline_hard(
-            &painter,
-            gap.center().x,
-            gap.min.y,
-            gap.max.y,
-            theme().taskbar_border,
-        );
 
         let [up, down] = self.taskbar_pager_rects();
         let up_content = ButtonContent::Symbol(SymbolKind::PageUp);

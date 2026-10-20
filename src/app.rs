@@ -490,12 +490,16 @@ impl StockApp {
     }
 
     pub(crate) fn status_segments(&self) -> Vec<String> {
-        let mut segs = vec![current_time_text(), format!("{:.0} FPS", self.fps)];
+        let mut segs = vec![current_time_text()];
 
         if !self.status_msg.is_empty() {
             segs.push(self.status_msg.clone());
         }
         segs
+    }
+
+    pub(crate) fn fps_segment(&self) -> String {
+        format!("{:.0} FPS", self.fps)
     }
 
     fn dismiss_popup_menus_on_keyboard(&mut self, ctx: &egui::Context) {
@@ -532,13 +536,48 @@ impl StockApp {
         band: egui::Rect,
         segs: &[String],
     ) {
-        self.paint_status_bar_colors(
+        let background = theme().status_bg;
+        let text = theme().status_text;
+        let border = theme().status_border;
+        painter.rect_filled(band, egui::CornerRadius::ZERO, background);
+        hline_hard(painter, band.min.x, band.max.x, band.min.y, border);
+
+        let fps = self.fps_segment();
+        let fps_w = snap_cells_up(self.text_width(&fps) + 2.0 * TEXT_PAD_X);
+        let fps_min = (band.max.x - fps_w).max(band.min.x);
+        let mut x = band.min.x;
+        for (i, seg) in segs.iter().enumerate() {
+            let w = snap_cells_up(self.text_width(seg) + 2.0 * TEXT_PAD_X);
+            if x + w > fps_min {
+                break;
+            }
+            if i > 0 {
+                vline_hard(painter, x, band.min.y + LINE_W, band.max.y - LINE_W, border);
+            }
+            self.text(
+                painter,
+                egui::pos2(text_left_x(x, band.min.x), band.center().y),
+                egui::Align2::LEFT_CENTER,
+                seg,
+                text,
+            );
+            x += w - LINE_W;
+        }
+        if fps_min > band.min.x {
+            vline_hard(
+                painter,
+                fps_min,
+                band.min.y + LINE_W,
+                band.max.y - LINE_W,
+                border,
+            );
+        }
+        self.text(
             painter,
-            band,
-            segs,
-            theme().status_bg,
-            theme().status_text,
-            theme().status_border,
+            egui::pos2(fps_min + fps_w / 2.0, band.center().y),
+            egui::Align2::CENTER_CENTER,
+            &fps,
+            text,
         );
     }
 
@@ -660,7 +699,7 @@ impl StockApp {
             let count = indicator::builtin_names().len();
             if self
                 .pane_menu_rect(count, window_bottom)
-                .is_some_and(|r| r.contains(p))
+                .is_some_and(|r| r.expand(grid_line(1)).contains(p))
             {
                 return true;
             }

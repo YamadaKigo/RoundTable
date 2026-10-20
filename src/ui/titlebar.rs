@@ -120,7 +120,7 @@ pub(crate) fn paint_sys_button(
 
     let content =
         ButtonContent::Symbol(kind.symbol(maximized, restore_minimized, pinned, exclusive));
-    debug_assert_eq!(content.class(), ButtonClass::Text);
+    debug_assert_eq!(content.class(), ButtonClass::Icon);
     let ButtonContent::Symbol(symbol) = content else {
         return;
     };

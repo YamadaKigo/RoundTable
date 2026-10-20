@@ -1912,21 +1912,22 @@ fn pane_menu_lists_builtins_and_swaps_the_indicator() {
     app.pane_menu = Some(PANE_CANDLE);
     app.pane_menu_anchor = buttons[0];
     let panel = app.pane_menu_rect(names.len(), WINDOW_H).unwrap();
+    let frame = panel.expand(grid_line(1));
     assert_eq!(
-        panel.min.x, buttons[0].min.x,
-        "面板左边缘没和「切换」按钮对齐"
+        frame.min.x, buttons[0].min.x,
+        "菜单装饰框没和「切换」按钮对齐"
     );
     assert_eq!(
-        panel.min.y,
+        frame.min.y,
         buttons[0].max.y - LINE_W,
-        "面板上沿没压在标题栏下沿那条线上"
+        "菜单装饰框上沿没压在标题栏下沿那条线上"
     );
     assert_eq!(
         panel.height(),
         cells(PANE_MENU_ROW_ROWS * names.len() as i32)
     );
     assert_eq!(
-        (panel.min.x - kline.min.x) % 9.0,
+        (frame.min.x - kline.min.x) % 9.0,
         0.0,
         "面板左边不在网格线上"
     );
@@ -1965,36 +1966,46 @@ fn pane_menu_flips_up_when_it_would_overflow_the_window() {
     let (title, _, _, _) = chart_rows(kline, crate::indicator::ChartLayout::new(2, 2));
     app.pane_menu_anchor = StockApp::pane_button_rects(title, &widths)[0];
     let panel = app.pane_menu_rect(names.len(), WINDOW_H).unwrap();
+    let frame = panel.expand(grid_line(1));
     assert_eq!(
-        panel.min.y,
+        frame.min.y,
         app.pane_menu_anchor.max.y - LINE_W,
-        "没压在标题栏下沿那条线上"
+        "菜单装饰框没压在标题栏下沿那条线上"
     );
-    assert_eq!((panel.min.y) % PITCH, 0.0, "面板上沿不在网格线上");
-    assert_eq!((panel.max.y - LINE_W) % PITCH, 0.0, "面板下沿不在网格线上");
+    assert_eq!((frame.min.y) % PITCH, 0.0, "装饰框上沿不在网格线上");
+    assert_eq!(
+        (frame.max.y - LINE_W) % PITCH,
+        0.0,
+        "装饰框下沿不在网格线上"
+    );
     assert_eq!(panel.height(), h);
 
     let (title, _, _, _) = chart_rows(ind, crate::indicator::ChartLayout::new(2, 2));
     app.pane_menu_anchor = StockApp::pane_button_rects(title, &widths)[0];
     let anchor = app.pane_menu_anchor;
     let panel = app.pane_menu_rect(names.len(), anchor.max.y).unwrap();
+    let frame = panel.expand(grid_line(1));
     assert_eq!(
-        panel.max.y - LINE_W,
+        frame.max.y - LINE_W,
         anchor.min.y,
-        "翻上去之后没压在标题栏上沿那条线上"
+        "翻上去之后装饰框没压在标题栏上沿那条线上"
     );
     assert_eq!(panel.height(), h);
-    assert_eq!((panel.min.y) % PITCH, 0.0, "翻上去之后面板上沿不在网格线上");
     assert_eq!(
-        (panel.max.y - LINE_W) % PITCH,
+        (frame.min.y) % PITCH,
         0.0,
-        "翻上去之后面板下沿不在网格线上"
+        "翻上去之后装饰框上沿不在网格线上"
     );
-    assert!(panel.max.y <= anchor.max.y, "翻上去之后盖住了按钮那一行");
+    assert_eq!(
+        (frame.max.y - LINE_W) % PITCH,
+        0.0,
+        "翻上去之后装饰框下沿不在网格线上"
+    );
+    assert!(frame.max.y <= anchor.max.y, "翻上去之后盖住了按钮那一行");
 }
 
 #[test]
-fn pane_title_puts_action_buttons_left_and_the_name_after_them() {
+fn pane_title_puts_action_buttons_left_without_a_text_label() {
     let work = left_work();
     let [kline, _b0, _vol, _b1, _ind] = StockApp::left_rows(work, KLINE_H_DEFAULT, VOL_H_DEFAULT);
     let (title, _, _, _) = chart_rows(kline, crate::indicator::ChartLayout::new(2, 2));
@@ -2023,9 +2034,6 @@ fn pane_title_puts_action_buttons_left_and_the_name_after_them() {
         }
         assert_eq!(b.height(), PANE_BTN_H);
     }
-    let name_x = StockApp::pane_name_x(title, &buttons);
-    assert!(name_x > buttons.last().unwrap().max.x);
-    assert!(name_x < title.max.x, "图表名不该贴到最右边");
 }
 
 #[test]
@@ -3480,21 +3488,20 @@ fn status_bar_has_solid_dividers_on_the_grid() {
 
     let mut want = Vec::new();
     let mut sx = status.min.x;
-    let mut first = true;
-    for seg in app.status_segments() {
+    let fps = app.fps_segment();
+    let fps_w = snap_cells_up(app.text_width(&fps) + 2.0 * TEXT_PAD_X);
+    let fps_min = status.max.x - fps_w;
+    for (i, seg) in app.status_segments().into_iter().enumerate() {
         let w = snap_cells_up(app.text_width(&seg) + 2.0 * TEXT_PAD_X);
-        if sx + w > status.max.x {
+        if sx + w > fps_min {
             break;
         }
-        if !first {
+        if i > 0 {
             want.push(sx - status.min.x);
         }
         sx += w - LINE_W;
-        first = false;
     }
-    if !first {
-        want.push(sx - status.min.x);
-    }
+    want.push(fps_min - status.min.x);
     assert!(want.len() >= 1, "状态栏至少要有几条分割线才测得出");
 
     let mut raw = egui::RawInput::default();
@@ -4274,7 +4281,7 @@ fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
     assert!(app.win_mgr.wins[src].w.resizable);
     assert_eq!(
         app.win_mgr.wins[src].w.min_size,
-        egui::vec2(SRC_W + 2.0 * WIN_FRAME, SRC_H + 2.0 * WIN_FRAME)
+        egui::vec2(SRC_MIN_W + 2.0 * WIN_FRAME, SRC_MIN_H + 2.0 * WIN_FRAME)
     );
 }
 
@@ -5463,6 +5470,17 @@ fn menu_popup_has_dividers_and_three_level_submenus() {
         TOP_TABS[0].items.len(),
         layout,
     );
+    let frame = panel.rect.expand(grid_line(1));
+    assert_eq!(
+        grid[frame.min.y as usize][frame.min.x as usize],
+        Some(theme().menu_border),
+        "弹出菜单缺少外圈装饰边框"
+    );
+    assert_eq!(
+        grid[panel.rect.min.y as usize][panel.rect.min.x as usize],
+        Some(theme().menu_border),
+        "弹出菜单缺少内圈边框"
+    );
     for j in 0..panel.rows.saturating_sub(1) {
         let seam = (panel.row(j).max.y - LINE_W) as usize;
         for col in [panel.rect.min.x + 3.0, panel.rect.max.x - 4.0] {
@@ -5530,13 +5548,14 @@ fn menu_popup_has_dividers_and_three_level_submenus() {
     let row2 = panel.row(recent).center();
     frame(&mut app, hover(row2));
     let sub2 = MenuPanel::flyout(panel.row(recent), MENU_PANEL_W, 3, layout);
+    let sub2_frame = sub2.rect.expand(grid_line(1));
     assert_eq!(
         app.menu.path,
         vec![recent],
         "压住「最近打开」没开第二级子菜单"
     );
     assert_eq!(
-        sub2.rect.min.x,
+        sub2_frame.min.x,
         panel.row(recent).max.x - LINE_W,
         "子菜单没挂在父行右边"
     );
@@ -6193,7 +6212,7 @@ fn text_buttons_include_symbols_and_icon_buttons_keep_icons() {
     );
     assert_eq!(
         ButtonContent::Symbol(SymbolKind::Pin).class(),
-        ButtonClass::Text
+        ButtonClass::Icon
     );
     assert_eq!(
         ButtonContent::Icon(IconKind::Save).class(),
@@ -6896,6 +6915,44 @@ fn status_bar_starts_with_the_current_time_field() {
     assert_eq!(time.len(), 8, "时间格式应为 HH:MM:SS");
     assert_eq!(time.as_bytes()[2], b':');
     assert_eq!(time.as_bytes()[5], b':');
+}
+
+#[test]
+fn status_bar_pins_fps_to_the_right_edge() {
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    let mut app = blank_app();
+    app.text_engine = HardText::new(&ctx);
+    if app.text_engine.is_none() {
+        return;
+    }
+    app.fps = 58.0;
+    app.status_msg = "性能".to_owned();
+    let grid = render_events_in(&ctx, &mut app, vec![]);
+    let status = split_areas(egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        egui::vec2(WINDOW_W, WINDOW_H),
+    ))[4];
+    let fps = app.fps_segment();
+    let fps_w = snap_cells_up(app.text_width(&fps) + 2.0 * TEXT_PAD_X);
+    let right_start = status.max.x - fps_w;
+    let ink: Vec<usize> = (status.min.y as usize..status.max.y as usize)
+        .flat_map(|y| (right_start as usize..status.max.x as usize).map(move |x| (y, x)))
+        .filter(|&(y, x)| grid[y][x] == Some(theme().status_text))
+        .map(|(_, x)| x)
+        .collect();
+    assert!(!ink.is_empty(), "状态栏右侧没有 FPS 文字");
+    assert_eq!(
+        right_start + fps_w,
+        status.max.x,
+        "FPS 字段没有贴住状态栏最右边"
+    );
+    assert_eq!(
+        grid[status.center().y as usize][right_start as usize],
+        Some(theme().status_border),
+        "FPS 字段左边线缺失"
+    );
 }
 
 #[test]
@@ -8734,6 +8791,7 @@ fn sys_key_symbols_are_squares_centered_in_the_key() {
     configure_tessellation(&ctx);
     ctx.set_pixels_per_point(1.0);
     set_theme(Theme::CLASSIC);
+    assert_eq!(SYMBOL_PX, 17, "系统图标尺寸不是 17px");
     let btn = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(SYS_BTN_W, SYS_BTN_H));
     for kind in [
         SysButton::Pin,
@@ -10259,6 +10317,176 @@ fn source_window_minimizes_like_any_other_child_window() {
 }
 
 #[test]
+fn source_window_resizes_from_the_right_border_and_has_a_minimum_size() {
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    let mut app = blank_app();
+    app.text_engine = HardText::new(&ctx);
+    let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(130), cells(90)));
+    let frame = |app: &mut StockApp, events: Vec<egui::Event>| win_frame(app, &ctx, work, events);
+    frame(&mut app, vec![]);
+    app.open_source_window(PANE_CANDLE);
+    frame(&mut app, vec![]);
+    let source = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|window| window.kind == WinKind::Source)
+        .unwrap();
+    app.win_mgr.wins[source].w.pos = work.min;
+    frame(&mut app, vec![]);
+    let before = app.win_mgr.wins[source].w.rect();
+    let right = egui::pos2(before.max.x - WIN_FRAME / 2.0, before.center().y);
+    frame(
+        &mut app,
+        vec![
+            egui::Event::PointerMoved(right),
+            egui::Event::PointerButton {
+                pos: right,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    frame(
+        &mut app,
+        vec![egui::Event::PointerMoved(right + egui::vec2(80.0, 0.0))],
+    );
+    frame(
+        &mut app,
+        vec![egui::Event::PointerButton {
+            pos: right + egui::vec2(80.0, 0.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert!(
+        app.win_mgr.wins[source].w.rect().width() > before.width() + 40.0,
+        "源码窗口右边框不能改变尺寸"
+    );
+
+    let rect = app.win_mgr.wins[source].w.rect();
+    let right = egui::pos2(rect.max.x - WIN_FRAME / 2.0, rect.center().y);
+    frame(
+        &mut app,
+        vec![
+            egui::Event::PointerMoved(right),
+            egui::Event::PointerButton {
+                pos: right,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    frame(&mut app, vec![egui::Event::PointerMoved(work.min)]);
+    frame(
+        &mut app,
+        vec![egui::Event::PointerButton {
+            pos: work.min,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert_eq!(
+        app.win_mgr.wins[source].w.rect().width(),
+        SRC_MIN_W + 2.0 * WIN_FRAME,
+        "源码窗口没有缩到设定的最小宽度"
+    );
+}
+
+#[test]
+fn overlapped_source_text_does_not_override_the_front_window_cursor() {
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    let mut app = blank_app();
+    app.text_engine = HardText::new(&ctx);
+    app.replace_bars(data::random_walk::generate(BAR_SEED, 64, BAR_START));
+    let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(130), cells(90)));
+    let frame = |app: &mut StockApp, events: Vec<egui::Event>| win_frame(app, &ctx, work, events);
+    frame(&mut app, vec![]);
+    app.open_source_window(PANE_CANDLE);
+    frame(&mut app, vec![]);
+    let source = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|window| window.kind == WinKind::Source)
+        .unwrap();
+    let source_id = app.win_mgr.wins[source].w.id;
+    let chart = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|window| window.kind == WinKind::Chart)
+        .unwrap();
+    let chart_id = app.win_mgr.wins[chart].w.id;
+    app.win_mgr.wins[source].w.pos = work.min;
+    app.win_mgr.wins[source].w.size = egui::vec2(cells(80), cells(50));
+    app.win_mgr.wins[chart].w.pos = work.min + egui::vec2(cells(20), cells(12));
+    app.win_mgr.wins[chart].w.size = egui::vec2(cells(35), cells(24));
+    app.win_mgr.activate(chart);
+    frame(&mut app, vec![]);
+    let chart = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|window| window.w.id == chart_id)
+        .unwrap();
+    let title = app.win_mgr.wins[chart].w.title_band().center();
+    for events in [
+        vec![egui::Event::PointerMoved(title)],
+        vec![
+            egui::Event::PointerMoved(title),
+            egui::Event::PointerButton {
+                pos: title,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+        vec![egui::Event::PointerButton {
+            pos: title,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    ] {
+        frame(&mut app, events);
+    }
+    let chart = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|window| window.w.id == chart_id)
+        .unwrap();
+    assert_eq!(
+        app.win_mgr.live_index().map(|i| app.win_mgr.wins[i].w.id),
+        Some(chart_id),
+        "图表窗没有成为前窗"
+    );
+    let overlap = app.win_mgr.wins[chart].w.rect().center();
+    let source = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|window| window.w.id == source_id)
+        .unwrap();
+    assert!(app.win_mgr.wins[source].w.rect().contains(overlap));
+    frame(&mut app, vec![egui::Event::PointerMoved(overlap)]);
+    assert_ne!(
+        app.cursor_kind(&ctx),
+        CursorKind::Text,
+        "前窗遮住代码区时仍显示了下层文本指针"
+    );
+}
+
+#[test]
 fn main_window_has_a_one_grid_decorative_border() {
     let ctx = egui::Context::default();
     configure_tessellation(&ctx);
@@ -11277,7 +11505,7 @@ fn taskbar_menu_and_minimized_items_have_a_two_cell_bordered_gap() {
     let mut app = blank_app();
     app.text_engine = HardText::new(&ctx);
     let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(70)));
-    win_frame(&mut app, &ctx, work, vec![]);
+    let grid = win_frame(&mut app, &ctx, work, vec![]);
     let gap = app.win_mgr.taskbar_gap_rect_for_test();
     assert_eq!(gap.width(), cells(2), "任务栏留白不是两个单元格");
     assert_eq!(
@@ -11285,6 +11513,11 @@ fn taskbar_menu_and_minimized_items_have_a_two_cell_bordered_gap() {
         gap.max.x - LINE_W,
         "最小化项目没有接在留白右边框上"
     );
+    let row = gap.center().y as usize;
+    let lines = (gap.min.x as usize..gap.max.x as usize)
+        .filter(|&x| grid[row][x] == Some(theme().taskbar_border))
+        .count();
+    assert_eq!(lines, 2, "两个单元格的留白里出现了多余竖线");
 }
 
 #[test]

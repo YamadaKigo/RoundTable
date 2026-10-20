@@ -2,7 +2,7 @@ use crate::grid::LINE_W;
 use crate::ui::icon::decode_png_rgba;
 use eframe::egui;
 
-pub(crate) const SYMBOL_PX: usize = 16;
+pub(crate) const SYMBOL_PX: usize = 17;
 pub(crate) const SYMBOL_W: f32 = SYMBOL_PX as f32;
 pub(crate) const SYMBOL_H: f32 = SYMBOL_W;
 pub(crate) const SYMBOL_TRANSPARENT_RGB: (u8, u8, u8) = (0xFF, 0x00, 0xFF);
@@ -81,13 +81,20 @@ impl SymbolImage {
     }
 
     fn from_rgba(data: &egui::IconData) -> Option<Self> {
-        if data.width as usize != SYMBOL_PX || data.height as usize != SYMBOL_PX {
+        let (w, h) = (data.width as usize, data.height as usize);
+        if w == 0 || h == 0 {
             return None;
         }
         let mut mask = [false; SYMBOL_PX * SYMBOL_PX];
-        for (i, px) in data.rgba.chunks_exact(4).enumerate() {
-            let rgb = (px[0], px[1], px[2]);
-            mask[i] = px[3] >= 128 && rgb != SYMBOL_TRANSPARENT_RGB;
+        for y in 0..SYMBOL_PX {
+            for x in 0..SYMBOL_PX {
+                let sx = (x * w / SYMBOL_PX).min(w - 1);
+                let sy = (y * h / SYMBOL_PX).min(h - 1);
+                let i = (sy * w + sx) * 4;
+                let px = &data.rgba[i..i + 4];
+                let rgb = (px[0], px[1], px[2]);
+                mask[y * SYMBOL_PX + x] = px[3] >= 128 && rgb != SYMBOL_TRANSPARENT_RGB;
+            }
         }
         Some(Self { mask })
     }

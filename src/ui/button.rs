@@ -55,8 +55,10 @@ impl ButtonContent {
 
     pub(crate) fn class(&self) -> ButtonClass {
         match self {
-            ButtonContent::Text(_) | ButtonContent::Symbol(_) => ButtonClass::Text,
-            ButtonContent::Icon(_) | ButtonContent::IconText(..) => ButtonClass::Icon,
+            ButtonContent::Text(_) => ButtonClass::Text,
+            ButtonContent::Symbol(_) | ButtonContent::Icon(_) | ButtonContent::IconText(..) => {
+                ButtonClass::Icon
+            }
         }
     }
 }

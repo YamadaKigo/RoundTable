@@ -185,6 +185,10 @@ pub(crate) const SRC_COLS: i32 = 80;
 pub(crate) const SRC_ROWS: i32 = 61;
 pub(crate) const SRC_W: f32 = cells(SRC_COLS);
 pub(crate) const SRC_H: f32 = cells(SRC_ROWS);
+pub(crate) const SRC_MIN_COLS: i32 = 40;
+pub(crate) const SRC_MIN_ROWS: i32 = 30;
+pub(crate) const SRC_MIN_W: f32 = cells(SRC_MIN_COLS);
+pub(crate) const SRC_MIN_H: f32 = cells(SRC_MIN_ROWS);
 pub(crate) const SRC_TITLE_ROWS: i32 = PANE_TITLE_ROWS;
 pub(crate) const SRC_TITLE_H: f32 = cells(SRC_TITLE_ROWS);
 
@@ -259,6 +263,7 @@ const _: () = assert!((PANE_BTN_W as i32 - 1) % 9 == 0 && (PANE_BTN_H as i32 - 1
 const _: () = assert!((PANE_MENU_W as i32 - 1) % 9 == 0 && (PANE_MENU_ROW_H as i32 - 1) % 9 == 0);
 const _: () = assert!((OVERLAY_MENU_W as i32 - 1) % 9 == 0);
 const _: () = assert!((SRC_W as i32 - 1) % 9 == 0 && (SRC_H as i32 - 1) % 9 == 0);
+const _: () = assert!((SRC_MIN_W as i32 - 1) % 9 == 0 && (SRC_MIN_H as i32 - 1) % 9 == 0);
 const _: () = assert!((SRC_TITLE_H as i32 - 1) % 9 == 0 && (SRC_GUTTER_W as i32 - 1) % 9 == 0);
 
 const _: () =
