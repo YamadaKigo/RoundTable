@@ -1,6 +1,6 @@
 use super::{
     ChartCtx, ChartLayout, DrawCmd, Indicator, Palette, axis_ticks, chart_cross, chart_cross_bg,
-    chart_text, chart_tick, chart_zero, crosshair, status_field,
+    chart_text, chart_tick, chart_zero, crosshair, format_value, status_field,
 };
 use crate::data::random_walk::Bar;
 
@@ -69,7 +69,7 @@ impl Default for Rsi {
 
 fn fmt_value(v: Option<f64>) -> String {
     match v {
-        Some(v) => format!("{v:.2}"),
+        Some(v) => format_value(v),
         None => "--".to_owned(),
     }
 }
@@ -88,9 +88,7 @@ impl Indicator for Rsi {
     }
 
     fn axis(&self, ctx: &ChartCtx) -> Vec<DrawCmd> {
-        axis_ticks(ctx, VALUE_TICKS, chart_text(), chart_tick(), |v| {
-            format!("{v:.0}")
-        })
+        axis_ticks(ctx, VALUE_TICKS, chart_text(), chart_tick(), format_value)
     }
 
     fn compute(&self, bars: &[Bar]) -> Vec<DrawCmd> {
@@ -132,7 +130,6 @@ impl Indicator for Rsi {
             out.push(status_field(
                 &format!("RSI{}", n),
                 fmt_value(v),
-                "000.00",
                 colors[k.min(2)],
             ));
         }
@@ -140,9 +137,13 @@ impl Indicator for Rsi {
     }
 
     fn overlay(&self, ctx: &ChartCtx) -> Vec<DrawCmd> {
-        crosshair(ctx, chart_cross(), chart_text(), chart_cross_bg(), |v| {
-            format!("{v:.2}")
-        })
+        crosshair(
+            ctx,
+            chart_cross(),
+            chart_text(),
+            chart_cross_bg(),
+            format_value,
+        )
     }
 
     fn set_palette(&mut self, pal: Palette) {

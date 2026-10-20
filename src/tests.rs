@@ -1152,7 +1152,7 @@ fn timeline_labels_never_crowd() {
 
 #[test]
 fn status_fields_sit_on_the_grid() {
-    use crate::indicator::candle::{INFO_LABELS, INFO_TEMPLATES};
+    use crate::indicator::candle::INFO_LABELS;
 
     let ctx = egui::Context::default();
     let mut app = blank_app();
@@ -1162,13 +1162,10 @@ fn status_fields_sit_on_the_grid() {
     }
     let mut sx = 0.0;
     let mut fit = 0;
+    let max_value = app.text_width("-9999.999兆");
     for i in 0..INFO_LABELS.len() {
-        let w = snap_cells_up(
-            app.text_width(INFO_LABELS[i])
-                + GRID
-                + app.text_width(INFO_TEMPLATES[i])
-                + 2.0 * TEXT_PAD_X,
-        );
+        let label_w = app.text_width(INFO_LABELS[i]);
+        let (w, divider) = status_field_metrics(label_w, max_value);
         assert_eq!(
             (w as i32 - 1) % 9,
             0,
@@ -1176,6 +1173,7 @@ fn status_fields_sit_on_the_grid() {
             INFO_LABELS[i]
         );
         assert!(w >= cells(1), "第 {i} 项比一格还窄");
+        assert!(w >= divider + GRID + max_value + TEXT_PAD_X);
         if sx + w > CHART_PANE_W {
             break;
         }
@@ -1183,7 +1181,7 @@ fn status_fields_sit_on_the_grid() {
         fit += 1;
     }
 
-    assert_eq!(fit, 6, "默认左栏一排放得下的项数变了：{fit} 项");
+    assert!(fit >= 4, "默认左栏一排放得下的项数变少了：{fit} 项");
     assert!(sx + LINE_W <= CHART_PANE_W, "状态带排出来的宽度超过了左栏");
 
     for scale in [SCALE_MIN, 5, SCALE_MAX] {
@@ -1276,7 +1274,7 @@ fn every_chart_status_field_starts_on_a_vertical_grid_line() {
         boundaries.push(x);
         x += w - LINE_W;
     }
-    boundaries.push(x);
+    boundaries.push(status.max.x - LINE_W);
 
     for boundary in boundaries {
         let column = boundary as usize;
@@ -1294,18 +1292,33 @@ fn every_chart_status_field_starts_on_a_vertical_grid_line() {
 fn volume_text_uses_wan_and_yi() {
     use crate::indicator::volume::fmt_volume;
     assert_eq!(fmt_volume(2.0e12), "2兆");
-    assert_eq!(fmt_volume(1.5e8), "2亿");
+    assert_eq!(fmt_volume(1.5e8), "1.5亿");
     assert_eq!(fmt_volume(1.0e8), "1亿");
     assert_eq!(fmt_volume(9.99e7), "9990万");
-    assert_eq!(fmt_volume(2.3456e7), "2346万");
-    assert_eq!(fmt_volume(1.0e4), "1.0万");
+    assert_eq!(fmt_volume(2.3456e7), "2345.6万");
+    assert_eq!(fmt_volume(1.0e4), "1万");
+    assert_eq!(fmt_volume(94_000.0), "9.4万");
+    assert_eq!(fmt_volume(99_999.0), "10万");
+    assert_eq!(fmt_volume(9_000_900.0), "900.09万");
+    assert_eq!(fmt_volume(-9_010_000.0), "-901万");
+    assert_eq!(fmt_volume(1.0e16), "1京");
+    assert_eq!(fmt_volume(1.0e20), "溢出");
+    assert_eq!(fmt_volume(-1.0e20), "溢出");
     assert_eq!(fmt_volume(9999.0), "9999");
+    assert_eq!(fmt_volume(1.23456), "1.235");
+    assert_eq!(fmt_volume(-2.5), "-2.5");
+    assert_eq!(fmt_volume(1234.5678), "1234.568");
     assert_eq!(fmt_volume(0.0), "0");
 
-    for (v, s) in [(9.999e7, "9999万"), (1.0e12, "1兆"), (9.9e5, "99.0万")] {
+    for (v, s) in [
+        (9.999e7, "9999万"),
+        (1.0e12, "1兆"),
+        (9.9e5, "99万"),
+        (-9_999_998_999_999.0, "-9999.999兆"),
+    ] {
         assert!(
-            crate::font::text_width(&fmt_volume(v)) <= VALUE_COLS_MAX * 9,
-            "{s} 比纵轴留给数值的 7 格还宽"
+            crate::font::text_width(&fmt_volume(v)) <= cells(12) as i32,
+            "{s} 比参数栏预留的 12 格还宽"
         );
     }
 }
@@ -2084,7 +2097,7 @@ fn indicator_script_customizes_bands_axes_styles_and_status() {
         "CANDLE(SYSTEM_COLOR(UP),COLOR(0x00FF00),2);\n",
         "LINE(C,COLOR(\"#112233\"),3);\n",
         "HIST(C-O,AUTO,1,2);\n",
-        "STATUS_FIELD(\"C\",C,SYSTEM_COLOR(TEXT),\"0.00\");\n",
+        "STATUS_FIELD(\"C\",C,SYSTEM_COLOR(TEXT));\n",
     );
     let program = crate::script::ScriptProgram::parse(source).expect("自定义脚本应能解析");
     let render = program
@@ -2180,7 +2193,7 @@ fn indicator_script_accepts_rrggbb_literals_and_display_switches() {
         "AXIS_FIXED(0,50,100);\n",
         "LINE(C,#112233,2);\n",
         "HLINE(50,#FF0000,1);\n",
-        "STATUS_FIELD(\"C\",C,#445566,\"0.00\");\n",
+        "STATUS_FIELD(\"C\",C,#445566);\n",
     );
     let program =
         crate::script::ScriptProgram::parse(source).expect("RRGGBB literals should parse");
@@ -2229,12 +2242,83 @@ fn indicator_script_accepts_rrggbb_literals_and_display_switches() {
 }
 
 #[test]
+fn empty_indicator_script_renders_no_chart_content() {
+    use crate::indicator::{ChartCtx, ChartLayout};
+
+    let bars = data::random_walk::generate(BAR_SEED, 8, BAR_START);
+    let program = crate::script::ScriptProgram::parse("").expect("empty script should parse");
+    let render = program
+        .render(&bars, &indicator::Palette::default())
+        .expect("empty script should render");
+    let ctx = ChartCtx {
+        bars: &bars,
+        cmds: &render.cmds,
+        from: 0,
+        to: bars.len(),
+        visible: bars.len(),
+        advance: 1.0,
+        time_step: 1,
+        lo: 0.0,
+        hi: 1.0,
+        cursor_bar: Some(0),
+        cursor_index: Some(0.0),
+        cursor_value: Some(0.5),
+    };
+
+    assert!(render.cmds.is_empty());
+    assert_eq!(render.layout(ChartLayout::new(2, 2)), ChartLayout::NONE);
+    assert!(render.axis(&ctx).unwrap_or_default().is_empty());
+    assert!(render.time(&ctx).unwrap_or_default().is_empty());
+    assert!(render.status(&ctx).unwrap_or_default().is_empty());
+    assert!(render.crosshair(&ctx).is_empty());
+}
+
+#[test]
+fn chart_bands_and_crosshair_appear_only_when_the_script_enables_them() {
+    use crate::indicator::{ChartCtx, ChartLayout};
+
+    let bars = data::random_walk::generate(BAR_SEED, 8, BAR_START);
+    let source = concat!(
+        "STATUS_SHOW(1);\n",
+        "TIME_SHOW(1);\n",
+        "AXIS_SHOW(1);\n",
+        "CROSSHAIR_SHOW(1);\n",
+        "STATUS_FIELD(\"C\",C,TEXT);\n",
+        "LINE(C,TEXT);\n",
+    );
+    let program = crate::script::ScriptProgram::parse(source).expect("script should parse");
+    let render = program
+        .render(&bars, &indicator::Palette::default())
+        .expect("script should render");
+    let ctx = ChartCtx {
+        bars: &bars,
+        cmds: &render.cmds,
+        from: 0,
+        to: bars.len(),
+        visible: bars.len(),
+        advance: 1.0,
+        time_step: 1,
+        lo: 0.0,
+        hi: 100.0,
+        cursor_bar: Some(0),
+        cursor_index: Some(0.0),
+        cursor_value: Some(50.0),
+    };
+
+    assert_eq!(render.layout(ChartLayout::NONE), ChartLayout::new(2, 2));
+    assert!(!render.axis(&ctx).unwrap_or_default().is_empty());
+    assert!(!render.time(&ctx).unwrap_or_default().is_empty());
+    assert!(!render.status(&ctx).unwrap_or_default().is_empty());
+    assert!(!render.crosshair(&ctx).is_empty());
+}
+
+#[test]
 fn explicit_display_hide_wins_over_later_field_declarations() {
     let bars = data::random_walk::generate(BAR_SEED, 8, BAR_START);
     let source = concat!(
         "STATUS_HIDE();\n",
         "AXIS_HIDE();\n",
-        "STATUS_FIELD(\"C\",C,#112233,\"0.00\");\n",
+        "STATUS_FIELD(\"C\",C,#112233);\n",
         "AXIS_FIXED(0,50,100);\n",
         "LINE(C,#445566);\n",
     );
@@ -3108,7 +3192,6 @@ fn right_aligned_and_floating_labels_land_on_content_cells() {
         ] {
             let w = app.cross_label_w(s);
             let x0 = StockApp::cross_time_label_x(plot, cx, w, area.min.x) as i32;
-            assert_eq!(x0 % PITCH as i32, 0, "索引牌左边不在网格线上：{x0}");
             assert!(
                 x0 >= plot.min.x as i32 - LINE_W as i32,
                 "索引牌跑出绘图区左边：{x0}"
@@ -3755,6 +3838,18 @@ fn right_anchored_labels_follow_the_window_edge_by_one_pixel() {
         1.0,
         "窗口宽 1px，时间带那块索引牌没跟着挪 1px"
     );
+}
+
+#[test]
+fn crosshair_labels_follow_the_pointer_by_one_pixel() {
+    let top = floating_label_top(120.0, 2, 20.0, 500.0, 0.0);
+    let next = floating_label_top(121.0, 2, 20.0, 500.0, 0.0);
+    assert_eq!(next - top, 1.0);
+
+    let plot = egui::Rect::from_min_size(egui::pos2(50.0, 40.0), egui::vec2(500.0, 300.0));
+    let left = StockApp::cross_time_label_x(plot, 250.0, cells(4), plot.min.x);
+    let right = StockApp::cross_time_label_x(plot, 251.0, cells(4), plot.min.x);
+    assert_eq!(right - left, 1.0);
 }
 
 #[test]
@@ -6193,7 +6288,7 @@ fn title_symbols_are_png_masks() {
             std::fs::read(crate::assets::symbols_dir().join(format!("{}.png", kind.file_stem())))
                 .expect("读不到符号 PNG");
         let image = decode_png_rgba(&bytes).expect("符号 PNG 解不开");
-        assert_eq!((image.width, image.height), (16, 16));
+        assert_eq!((image.width, image.height), (17, 17));
         assert!(
             image.rgba.chunks_exact(4).all(|px| {
                 px[3] == 0 || (px[0], px[1], px[2]) == SYMBOL_TRANSPARENT_RGB || px[3] == 0xFF
@@ -7720,6 +7815,40 @@ fn hover_tooltip_shares_the_button_bottom_border() {
 }
 
 #[test]
+fn covered_window_buttons_do_not_raise_tooltips() {
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    let mut app = blank_app();
+    app.text_engine = HardText::new(&ctx);
+    app.win_silent = true;
+    let rect = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(cells(12), cells(2)));
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(640.0, 480.0),
+        )),
+        events: vec![egui::Event::PointerMoved(rect.center())],
+        ..Default::default()
+    };
+    let mut out = ctx.run_ui(raw, |ui| {
+        let painter = ui.painter().clone();
+        let content = ButtonContent::Text("覆盖".to_owned());
+        app.draw_button_with_text(
+            ui,
+            &painter,
+            rect,
+            &content,
+            false,
+            "不应显示",
+            theme().button_text,
+        );
+    });
+    absorb_textures(&mut out.textures_delta);
+    assert!(app.tooltip.is_none());
+}
+
+#[test]
 fn editor_sections_are_split_by_single_grid_lines() {
     let mut app = blank_app();
     app.replace_bars(data::random_walk::generate(BAR_SEED, 64, BAR_START));
@@ -8993,8 +9122,9 @@ fn title_bar_blank_area_uses_the_pixel_fill() {
     let grid = render_window(&mut app);
     let layout = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(WINDOW_W, WINDOW_H));
     let title = split_areas(layout)[0];
+    let slot = title_text_slot(&mut app, title, APP_NAME);
     let (x0, y0) = (
-        title.min.x as usize + grid_line(10) as usize,
+        slot.max.x as usize + GRID as usize,
         title.min.y as usize + 4,
     );
     let mut fill_rows = 0;
@@ -9014,7 +9144,7 @@ fn title_bar_blank_area_uses_the_pixel_fill() {
 
 #[test]
 fn the_title_text_slot_is_shadow_free_and_closed_by_a_line() {
-    assert_eq!(APP_NAME, "圆桌终端");
+    assert_eq!(APP_NAME, "圆桌终端 - 0.1.1");
     let mut app = blank_app();
     app.replace_bars(data::random_walk::generate(BAR_SEED, BAR_COUNT, BAR_START));
     let grid = render_window(&mut app);

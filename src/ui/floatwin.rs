@@ -832,15 +832,16 @@ pub(crate) fn paint_title_bar(
     let mut hit = None;
     let pointer = ui.input(|i| i.pointer.hover_pos()).or(app.pointer.live);
     let pointer_clicked = ui.input(|i| i.pointer.primary_clicked());
+    let window_active = minimized || (ui.is_enabled() && !app.win_silent);
     for &(kind, slot) in keys.shown() {
         let rect = rects[slot];
-        let hot = pointer.is_some_and(|p| rect.contains(p));
+        let hot = window_active && pointer.is_some_and(|p| rect.contains(p));
         let restore = minimized && kind == SysButton::Minimize;
         paint_sys_button(
             app, painter, rect, hot, kind, maximized, restore, pinned, exclusive,
         );
 
-        if hot && pointer_clicked && ui.is_enabled() {
+        if hot && pointer_clicked {
             hit = Some(kind);
         }
     }

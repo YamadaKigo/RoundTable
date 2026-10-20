@@ -62,45 +62,51 @@ impl Pane {
     }
 
     pub(crate) fn chart_layout(&self) -> indicator::ChartLayout {
-        self.script_render.as_ref().map_or_else(
-            || self.indicator.layout(),
-            |render| render.layout(self.indicator.layout()),
-        )
+        self.script_render
+            .as_ref()
+            .map_or(indicator::ChartLayout::NONE, |render| {
+                render.layout(self.indicator.layout())
+            })
     }
 
     pub(crate) fn show_axis(&self) -> bool {
         self.script_render
             .as_ref()
             .and_then(|render| render.settings.show_axis)
-            .unwrap_or(true)
+            .unwrap_or(false)
     }
 
     pub(crate) fn chart_axis(&self, ctx: &indicator::ChartCtx) -> Vec<indicator::DrawCmd> {
         self.script_render
             .as_ref()
             .and_then(|render| render.axis(ctx))
-            .unwrap_or_else(|| self.indicator.axis(ctx))
+            .unwrap_or_default()
     }
 
     pub(crate) fn chart_time(&self, ctx: &indicator::ChartCtx) -> Vec<indicator::DrawCmd> {
         self.script_render
             .as_ref()
             .and_then(|render| render.time(ctx))
-            .unwrap_or_else(|| self.indicator.time(ctx))
+            .unwrap_or_default()
     }
 
     pub(crate) fn chart_status(&self, ctx: &indicator::ChartCtx) -> Vec<indicator::DrawCmd> {
         self.script_render
             .as_ref()
             .and_then(|render| render.status(ctx))
-            .unwrap_or_else(|| self.indicator.status(ctx))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn chart_crosshair(&self, ctx: &indicator::ChartCtx) -> Vec<indicator::DrawCmd> {
+        self.script_render
+            .as_ref()
+            .map_or_else(Vec::new, |render| render.crosshair(ctx))
     }
 
     pub(crate) fn chart_value_range(&self, lo: f64, hi: f64) -> (f64, f64) {
-        self.script_render.as_ref().map_or_else(
-            || self.indicator.value_range(lo, hi),
-            |render| render.value_range(lo, hi),
-        )
+        self.script_render
+            .as_ref()
+            .map_or((lo, hi), |render| render.value_range(lo, hi))
     }
 }
 

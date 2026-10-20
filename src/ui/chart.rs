@@ -337,6 +337,7 @@ pub(crate) fn pane_range(cmds: &[DrawCmd], from: usize, to: usize) -> (f64, f64)
             | DrawCmd::Text { .. }
             | DrawCmd::AxisText { .. }
             | DrawCmd::TimeText { .. }
+            | DrawCmd::CrossTimeText { .. }
             | DrawCmd::StatusText { .. }
             | DrawCmd::StatusField { .. } => {}
         }
@@ -502,6 +503,8 @@ impl StockApp {
 
     pub(crate) fn ui_chart(&mut self, ui: &mut egui::Ui, pane: usize, area: egui::Rect) {
         let painter = ui.painter().clone();
+        self.sync_pane_palette();
+        self.ensure_pane_computed(pane);
         let layout = self.panes[pane].chart_layout();
         let (title, status, main, time) = chart_rows(area, layout);
         let show_axis = self.panes[pane].show_axis();
@@ -551,8 +554,6 @@ impl StockApp {
         );
 
         self.panes[pane].height = main.height() as i32;
-        self.sync_pane_palette();
-        self.ensure_pane_computed(pane);
         self.clamp_view(pane, plot.width());
         let visible = self.panes[pane].view.visible;
         if visible == 0 {
@@ -609,12 +610,11 @@ impl StockApp {
                 cursor_index: crosshair.map(|c| c.fpos),
                 cursor_value: crosshair.filter(|c| c.pane == pane).map(|c| c.value),
             };
-            let ind = &self.panes[pane].indicator;
             (
                 self.panes[pane].chart_axis(&ctx),
                 self.panes[pane].chart_time(&ctx),
                 self.panes[pane].chart_status(&ctx),
-                ind.overlay(&ctx),
+                self.panes[pane].chart_crosshair(&ctx),
             )
         };
 
@@ -965,6 +965,18 @@ impl StockApp {
                         );
                     }
                 }
+                DrawCmd::CrossTimeText { i, s, bg } => {
+                    let w = self.cross_label_w(s);
+                    let x0 = Self::cross_time_label_x(geom.plot, map.line_at(*i), w, geom.origin.x);
+                    self.label_box(
+                        painter,
+                        s,
+                        egui::pos2(x0, geom.bottom - PITCH * CROSS_LABEL_ROWS as f32),
+                        w,
+                        color32(*bg),
+                        theme().cross_label_text,
+                    );
+                }
                 DrawCmd::StatusText { s, color } => {
                     let Some(band) = geom.status else {
                         continue;
@@ -1204,7 +1216,7 @@ impl StockApp {
     pub(crate) fn cross_label_w(&mut self, text: &str) -> f32 {
         snap_cells_up(self.text_width(text) + 2.0 * TEXT_PAD_X)
             .max(cells(2))
-            .min(cells(VALUE_COLS_MAX + 2))
+            .min(cells(AXIS_COLS - 2))
     }
 
     pub(crate) fn axis_tick_x(axis: egui::Rect) -> f32 {
@@ -1216,9 +1228,9 @@ impl StockApp {
         clamp_soft(right, axis.min.x, right)
     }
 
-    pub(crate) fn cross_time_label_x(plot: egui::Rect, cx: f32, w: f32, origin: f32) -> f32 {
+    pub(crate) fn cross_time_label_x(plot: egui::Rect, cx: f32, w: f32, _origin: f32) -> f32 {
         clamp_soft(
-            grid_snap((cx - w / 2.0).round(), origin),
+            (cx - w / 2.0).round(),
             plot.min.x - LINE_W,
             plot.max.x - w - GRID,
         )

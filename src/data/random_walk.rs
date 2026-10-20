@@ -53,6 +53,7 @@ impl Date {
         format!("{:02}-{:02}-{:02}", self.y.rem_euclid(100), self.m, self.d)
     }
 
+    #[allow(dead_code)]
     pub fn full(self) -> String {
         format!("{:04}-{:02}-{:02}", self.y, self.m, self.d)
     }
@@ -121,6 +122,7 @@ pub enum BarState {
 }
 
 impl BarState {
+    #[allow(dead_code)]
     pub fn label(self) -> &'static str {
         match self {
             Self::Normal => "",
@@ -147,6 +149,7 @@ pub fn limit_prices(prev_close: f64) -> (f64, f64) {
     )
 }
 
+#[allow(dead_code)]
 pub fn bar_state(bars: &[Bar], index: usize) -> BarState {
     let Some(bar) = bars.get(index) else {
         return BarState::Normal;

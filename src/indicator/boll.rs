@@ -1,6 +1,6 @@
 use super::{
     ChartCtx, ChartLayout, DrawCmd, Indicator, Palette, axis_ticks, chart_cross, chart_cross_bg,
-    chart_text, chart_tick, crosshair, sma, status_field,
+    chart_text, chart_tick, crosshair, format_value, sma, status_field,
 };
 use crate::data::random_walk::Bar;
 
@@ -71,7 +71,7 @@ impl Default for Boll {
 
 fn fmt_value(v: Option<f64>) -> String {
     match v {
-        Some(v) => format!("{v:.2}"),
+        Some(v) => format_value(v),
         None => "--".to_owned(),
     }
 }
@@ -94,9 +94,7 @@ impl Indicator for Boll {
     }
 
     fn axis(&self, ctx: &ChartCtx) -> Vec<DrawCmd> {
-        axis_ticks(ctx, VALUE_TICKS, chart_text(), chart_tick(), |v| {
-            format!("{v:.2}")
-        })
+        axis_ticks(ctx, VALUE_TICKS, chart_text(), chart_tick(), format_value)
     }
 
     fn compute(&self, bars: &[Bar]) -> Vec<DrawCmd> {
@@ -134,16 +132,20 @@ impl Indicator for Boll {
                 s: self.name().to_owned(),
                 color: chart_text(),
             },
-            status_field("UP", fmt_value(at(&upper)), "000.00", self.pal.boll_up),
-            status_field("MID", fmt_value(at(&mid)), "000.00", self.pal.boll_mid),
-            status_field("DN", fmt_value(at(&lower)), "000.00", self.pal.boll_down),
+            status_field("UP", fmt_value(at(&upper)), self.pal.boll_up),
+            status_field("MID", fmt_value(at(&mid)), self.pal.boll_mid),
+            status_field("DN", fmt_value(at(&lower)), self.pal.boll_down),
         ]
     }
 
     fn overlay(&self, ctx: &ChartCtx) -> Vec<DrawCmd> {
-        crosshair(ctx, chart_cross(), chart_text(), chart_cross_bg(), |v| {
-            format!("{v:.2}")
-        })
+        crosshair(
+            ctx,
+            chart_cross(),
+            chart_text(),
+            chart_cross_bg(),
+            format_value,
+        )
     }
 
     fn set_palette(&mut self, pal: Palette) {

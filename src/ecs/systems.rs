@@ -25,7 +25,7 @@ pub(crate) fn ensure_pane_computed(world: &mut ChartWorld, pane: usize) {
         }
     } else {
         world.panes[pane].script_render = None;
-        world.panes[pane].indicator.compute(&world.bars)
+        Vec::new()
     };
     world.panes[pane].cmds = cmds;
     world.panes[pane].dirty = false;

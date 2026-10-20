@@ -1,6 +1,6 @@
 use super::{
     ChartCtx, DrawCmd, Indicator, Palette, axis_ticks, chart_cross, chart_cross_bg, chart_text,
-    chart_tick, crosshair, volume_bars,
+    chart_tick, crosshair, format_value, volume_bars,
 };
 use crate::data::random_walk::Bar;
 
@@ -11,22 +11,7 @@ pub const YI: f64 = 1.0e8;
 pub const WAN: f64 = 1.0e4;
 
 pub fn fmt_volume(v: f64) -> String {
-    let sign = if v < 0.0 { "-" } else { "" };
-    let v = v.abs();
-    if v >= ZHAO {
-        format!("{sign}{:.0}兆", v / ZHAO)
-    } else if v >= YI {
-        format!("{sign}{:.0}亿", v / YI)
-    } else if v >= WAN {
-        let n = v / WAN;
-        if n < 1000.0 {
-            format!("{sign}{n:.1}万")
-        } else {
-            format!("{sign}{n:.0}万")
-        }
-    } else {
-        format!("{sign}{v:.0}")
-    }
+    format_value(v)
 }
 
 #[derive(Default)]
@@ -44,7 +29,7 @@ impl Indicator for Volume {
     }
 
     fn axis(&self, ctx: &ChartCtx) -> Vec<DrawCmd> {
-        axis_ticks(ctx, VOL_TICKS, chart_text(), chart_tick(), fmt_volume)
+        axis_ticks(ctx, VOL_TICKS, chart_text(), chart_tick(), format_value)
     }
 
     fn overlay(&self, ctx: &ChartCtx) -> Vec<DrawCmd> {
@@ -53,7 +38,7 @@ impl Indicator for Volume {
             chart_cross(),
             chart_text(),
             chart_cross_bg(),
-            fmt_volume,
+            format_value,
         )
     }
 

@@ -97,10 +97,6 @@ pub(crate) fn grid_floor(v: f32, origin: f32) -> f32 {
     origin + ((v - origin) / PITCH).floor() * PITCH
 }
 
-pub(crate) fn grid_snap(v: f32, origin: f32) -> f32 {
-    origin + ((v - origin) / PITCH).round() * PITCH
-}
-
 pub(crate) fn text_left_x(rect_left: f32, origin: f32) -> f32 {
     grid_floor(rect_left, origin) + TEXT_INSET_X
 }
@@ -109,10 +105,8 @@ pub(crate) fn text_right_x(line_x: f32, origin: f32) -> f32 {
     grid_floor(line_x, origin) - GRID
 }
 
-pub(crate) const AXIS_COLS: i32 = 9;
+pub(crate) const AXIS_COLS: i32 = 14;
 pub(crate) const AXIS_W: f32 = cells(AXIS_COLS);
-
-pub(crate) const VALUE_COLS_MAX: i32 = 7;
 
 pub(crate) const TIME_LABEL_GAP_MIN: f32 = 48.0;
 
@@ -368,10 +362,10 @@ pub(crate) fn floating_label_top(
     rows: i32,
     top_line: f32,
     bot_line: f32,
-    origin: f32,
+    _origin: f32,
 ) -> f32 {
     let span = PITCH * rows as f32;
-    let snap = grid_snap(y_center - cells(rows) / 2.0, origin);
+    let snap = (y_center - cells(rows) / 2.0).round();
     clamp_soft(snap, top_line, bot_line - span)
 }
 

@@ -3,7 +3,7 @@ name = "RoundTable"
 version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
-description = "圆桌 - Windows 像素风行情图表工作台"
+description = "圆桌"
 readme = "README.md"
 license = "MIT"
 

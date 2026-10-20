@@ -142,9 +142,10 @@ impl StockApp {
         text_color: egui::Color32,
     ) -> bool {
         let resp = interact_rect(ui, rect, egui::Sense::click());
-        let state = if pressed || resp.is_pointer_button_down_on() {
+        let active = ui.is_enabled() && !self.win_silent;
+        let state = if active && (pressed || resp.is_pointer_button_down_on()) {
             ButtonState::Pressed
-        } else if resp.hovered() {
+        } else if active && resp.hovered() {
             ButtonState::Hover
         } else {
             ButtonState::Idle
@@ -153,7 +154,7 @@ impl StockApp {
         painter.rect_filled(rect, egui::CornerRadius::ZERO, state.face());
         border_hard(painter, rect, theme().button_border);
 
-        if resp.hovered() && !tip.is_empty() {
+        if active && resp.hovered() && !tip.is_empty() {
             self.tooltip = Some((rect, tip.to_owned()));
         }
 
@@ -202,7 +203,7 @@ impl StockApp {
                 );
             }
         }
-        resp.clicked()
+        active && resp.clicked()
     }
 
     pub(crate) fn paint_tooltip(&mut self, painter: &egui::Painter, layout: egui::Rect) {

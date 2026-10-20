@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::data::random_walk::Bar;
 
 pub mod bars;
@@ -32,6 +34,38 @@ pub type Rgb = (u8, u8, u8);
 
 pub const fn rgb_u32(c: Rgb) -> u32 {
     ((c.0 as u32) << 16) | ((c.1 as u32) << 8) | c.2 as u32
+}
+
+pub fn format_value(value: f64) -> String {
+    if !value.is_finite() {
+        return "溢出".to_owned();
+    }
+    let sign = if value < 0.0 { "-" } else { "" };
+    let magnitude = value.abs();
+    let rounded = (magnitude * 1_000.0).round() / 1_000.0;
+    if rounded < 10_000.0 {
+        return format!("{sign}{}", decimal_text(rounded));
+    }
+
+    const UNITS: [(&str, f64); 4] = [("万", 1.0e4), ("亿", 1.0e8), ("兆", 1.0e12), ("京", 1.0e16)];
+    for (unit, scale) in UNITS {
+        let coefficient = ((magnitude / scale) * 1_000.0).round() / 1_000.0;
+        if coefficient < 10_000.0 {
+            return format!("{sign}{}{unit}", decimal_text(coefficient));
+        }
+    }
+    "溢出".to_owned()
+}
+
+fn decimal_text(value: f64) -> String {
+    let mut text = format!("{value:.3}");
+    while text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -267,6 +301,12 @@ pub enum DrawCmd {
         i: usize,
         s: String,
         fg: u32,
+        bg: u32,
+    },
+
+    CrossTimeText {
+        i: f64,
+        s: String,
         bg: u32,
     },
 
@@ -568,21 +608,26 @@ pub fn crosshair(
         fg,
         bg,
     });
-    out.push(DrawCmd::TimeText {
-        i: index,
-        s: index.to_string(),
-        fg,
-        bg,
-    });
+    if let Some(bar) = ctx.bar(index) {
+        out.push(DrawCmd::CrossTimeText {
+            i: ctx.cursor_index.unwrap_or(index as f64),
+            s: bar.date.full(),
+            bg,
+        });
+    }
     out
 }
 
-pub fn status_field(label: &str, value: String, _tmpl: &str, color: u32) -> DrawCmd {
+pub fn status_field(label: &str, value: String, color: u32) -> DrawCmd {
     DrawCmd::StatusField {
         label: label.to_owned(),
         value,
         color,
     }
+}
+
+pub fn status_field_legacy(label: &str, value: String, _template: &str, color: u32) -> DrawCmd {
+    status_field(label, value, color)
 }
 
 pub trait Indicator {

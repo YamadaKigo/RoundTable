@@ -55,6 +55,7 @@ pub(crate) struct ScriptSettings {
     pub(crate) show_status: Option<bool>,
     pub(crate) show_time: Option<bool>,
     pub(crate) show_axis: Option<bool>,
+    pub(crate) show_crosshair: Option<bool>,
 }
 
 #[derive(Clone)]
@@ -68,7 +69,6 @@ struct StatusStmt {
     label: Expr,
     value: Expr,
     color: Option<Expr>,
-    tmpl: Option<Expr>,
 }
 
 #[derive(Clone)]
@@ -76,7 +76,6 @@ pub(crate) struct ScriptStatus {
     label: String,
     values: Vec<f64>,
     color: u32,
-    tmpl: String,
 }
 
 #[derive(Clone)]
@@ -158,7 +157,11 @@ impl ScriptProgram {
                     continue;
                 }
                 "AXIS" | "AXIS_SHOW" | "SHOW_AXIS" => {
-                    settings.show_axis = Some(switch_arg(&name, &args)?);
+                    let show = switch_arg(&name, &args)?;
+                    settings.show_axis = Some(show);
+                    if show {
+                        axis.get_or_insert(AxisSpec::Auto { zero: false });
+                    }
                     continue;
                 }
                 "AXIS_HIDE" | "HIDE_AXIS" => {
@@ -191,10 +194,18 @@ impl ScriptProgram {
                     settings.show_axis.get_or_insert(true);
                     continue;
                 }
+                "CROSSHAIR" | "CROSSHAIR_SHOW" | "CROSS_SHOW" => {
+                    settings.show_crosshair = Some(switch_arg(&name, &args)?);
+                    continue;
+                }
+                "CROSSHAIR_HIDE" | "CROSS_HIDE" => {
+                    settings.show_crosshair = Some(false);
+                    continue;
+                }
                 "STATUS_FIELD" | "STATUS_VALUE" => {
-                    if args.len() < 2 || args.len() > 4 {
+                    if args.len() < 2 || args.len() > 3 {
                         return Err(
-                            "STATUS_FIELD 需要 2 到 4 个参数：标签、数值、颜色、格式；不支持位置参数"
+                            "STATUS_FIELD 需要 2 到 3 个参数：标签、数值、颜色；不支持位置参数"
                                 .to_owned(),
                         );
                     }
@@ -202,18 +213,13 @@ impl ScriptProgram {
                         label: args[0].clone(),
                         value: args[1].clone(),
                         color: args.get(2).cloned(),
-                        tmpl: args.get(3).cloned(),
                     });
-                    settings.show_status.get_or_insert(true);
                     continue;
                 }
                 _ => {}
             }
             let kind = draw_kind(&name).ok_or_else(|| format!("未知命令 {name}"))?;
             statements.push(Statement::Draw(DrawStmt { kind, args }));
-        }
-        if statements.is_empty() {
-            return Err("指标代码不能为空".to_owned());
         }
         Ok(Self {
             statements,
@@ -253,12 +259,6 @@ impl ScriptProgram {
                     .transpose()?
                     .filter(|color| *color != u32::MAX)
                     .unwrap_or_else(indicator::chart_text),
-                tmpl: item
-                    .tmpl
-                    .as_ref()
-                    .map(static_text)
-                    .transpose()?
-                    .unwrap_or_else(|| "0.00".to_owned()),
             });
         }
         Ok(ScriptRender {
@@ -288,26 +288,31 @@ impl ScriptRender {
     }
 
     pub(crate) fn layout(&self, base: indicator::ChartLayout) -> indicator::ChartLayout {
-        let status_rows = match self.settings.show_status {
-            Some(false) => 0,
-            Some(true) => base.status_rows.max(2),
-            None if !self.status.is_empty() => base.status_rows.max(2),
-            None => base.status_rows,
+        let status_rows = if self.settings.show_status == Some(true) {
+            base.status_rows.max(2)
+        } else {
+            0
         };
-        let time_rows = match self.settings.show_time {
-            Some(false) => 0,
-            Some(true) => base.time_rows.max(2),
-            None => base.time_rows,
+        let time_rows = if self.settings.show_time == Some(true) {
+            base.time_rows.max(2)
+        } else {
+            0
         };
         indicator::ChartLayout::new(status_rows, time_rows)
     }
 
     pub(crate) fn axis(&self, ctx: &indicator::ChartCtx) -> Option<Vec<DrawCmd>> {
-        if self.settings.show_axis == Some(false) {
+        if self.settings.show_axis != Some(true) {
             return Some(Vec::new());
         }
         match &self.axis {
-            None => None,
+            None => Some(indicator::axis_ticks(
+                ctx,
+                3,
+                indicator::chart_text(),
+                indicator::chart_tick(),
+                indicator::format_value,
+            )),
             Some(AxisSpec::Fixed { values, zero }) => {
                 let mut out = Vec::new();
                 let mut values = values.clone();
@@ -356,18 +361,17 @@ impl ScriptRender {
 
     pub(crate) fn time(&self, ctx: &indicator::ChartCtx) -> Option<Vec<DrawCmd>> {
         match self.settings.show_time {
-            Some(false) => Some(Vec::new()),
             Some(true) => Some(indicator::time_labels(ctx, indicator::chart_text())),
-            None => None,
+            _ => Some(Vec::new()),
         }
     }
 
     pub(crate) fn status(&self, ctx: &indicator::ChartCtx) -> Option<Vec<DrawCmd>> {
-        if self.settings.show_status == Some(false) {
+        if self.settings.show_status != Some(true) {
             return Some(Vec::new());
         }
         if self.status.is_empty() {
-            return None;
+            return Some(Vec::new());
         }
         let index = ctx.focus_bar()?;
         Some(
@@ -376,42 +380,37 @@ impl ScriptRender {
                 .map(|item| {
                     indicator::status_field(
                         &item.label,
-                        format_status_value(item.values.get(index).copied(), &item.tmpl),
-                        &item.tmpl,
+                        format_status_value(item.values.get(index).copied()),
                         item.color,
                     )
                 })
                 .collect(),
         )
     }
+
+    pub(crate) fn crosshair(&self, ctx: &indicator::ChartCtx) -> Vec<DrawCmd> {
+        if self.settings.show_crosshair != Some(true) {
+            return Vec::new();
+        }
+        indicator::crosshair(
+            ctx,
+            indicator::chart_cross(),
+            indicator::chart_text(),
+            indicator::chart_cross_bg(),
+            indicator::format_value,
+        )
+    }
 }
 
 fn format_axis_value(value: f64) -> String {
-    if value.abs() >= 1_000_000.0 {
-        format!("{:.2}M", value / 1_000_000.0)
-    } else if value.abs() >= 1000.0 {
-        format!("{value:.0}")
-    } else if value.abs() >= 10.0 {
-        format!("{value:.1}")
-    } else {
-        format!("{value:.2}")
-    }
+    indicator::format_value(value)
 }
 
-fn format_status_value(value: Option<f64>, tmpl: &str) -> String {
+fn format_status_value(value: Option<f64>) -> String {
     let Some(value) = value.filter(|value| value.is_finite()) else {
         return "--".to_owned();
     };
-    let decimals = tmpl
-        .split_once('.')
-        .map(|(_, tail)| tail.chars().take_while(char::is_ascii_digit).count())
-        .unwrap_or(0)
-        .min(6);
-    let mut out = format!("{value:.decimals$}");
-    if tmpl.contains('%') {
-        out.push('%');
-    }
-    out
+    indicator::format_value(value)
 }
 
 fn tokenize(source: &str) -> Result<Vec<Token>, String> {

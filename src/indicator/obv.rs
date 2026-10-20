@@ -1,7 +1,6 @@
-use super::volume::fmt_volume;
 use super::{
     ChartCtx, ChartLayout, DrawCmd, Indicator, Palette, axis_ticks, chart_cross, chart_cross_bg,
-    chart_text, chart_tick, chart_zero, crosshair, status_field,
+    chart_text, chart_tick, chart_zero, crosshair, format_value, status_field_legacy,
 };
 use crate::data::random_walk::Bar;
 
@@ -56,7 +55,7 @@ impl Indicator for Obv {
     }
 
     fn axis(&self, ctx: &ChartCtx) -> Vec<DrawCmd> {
-        axis_ticks(ctx, VALUE_TICKS, chart_text(), chart_tick(), fmt_volume)
+        axis_ticks(ctx, VALUE_TICKS, chart_text(), chart_tick(), format_value)
     }
 
     fn compute(&self, bars: &[Bar]) -> Vec<DrawCmd> {
@@ -102,15 +101,15 @@ impl Indicator for Obv {
                 s: self.name().to_owned(),
                 color: chart_text(),
             },
-            status_field(
+            status_field_legacy(
                 "OBV",
-                value.map_or_else(|| "--".to_owned(), fmt_volume),
+                value.map_or_else(|| "--".to_owned(), format_value),
                 "0000.0万",
                 self.pal.obv,
             ),
-            status_field(
+            status_field_legacy(
                 "OBVMA",
-                average.map_or_else(|| "--".to_owned(), fmt_volume),
+                average.map_or_else(|| "--".to_owned(), format_value),
                 "0000.0",
                 self.pal.ma[0],
             ),
@@ -123,7 +122,7 @@ impl Indicator for Obv {
             chart_cross(),
             chart_text(),
             chart_cross_bg(),
-            fmt_volume,
+            format_value,
         )
     }
 
@@ -136,6 +135,7 @@ impl Indicator for Obv {
 mod tests {
     use super::*;
     use crate::data::random_walk::DATE_START;
+    use crate::indicator::volume::fmt_volume;
 
     fn bars_from(prices: &[(f64, f64)]) -> Vec<Bar> {
         prices

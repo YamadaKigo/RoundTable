@@ -1,6 +1,6 @@
 use super::{
     ChartCtx, ChartLayout, DrawCmd, Indicator, Palette, axis_ticks, chart_cross, chart_cross_bg,
-    chart_text, chart_tick, chart_zero, crosshair, sma, status_field,
+    chart_text, chart_tick, chart_zero, crosshair, format_value, sma, status_field,
 };
 use crate::data::random_walk::Bar;
 
@@ -46,7 +46,7 @@ impl Default for Bias {
 
 fn fmt_value(v: Option<f64>) -> String {
     match v {
-        Some(v) => format!("{v:+.2}"),
+        Some(v) => format!("{}%", format_value(v)),
         None => "--".to_owned(),
     }
 }
@@ -67,7 +67,7 @@ impl Indicator for Bias {
 
     fn axis(&self, ctx: &ChartCtx) -> Vec<DrawCmd> {
         axis_ticks(ctx, VALUE_TICKS, chart_text(), chart_tick(), |v| {
-            format!("{v:.1}%")
+            format!("{}%", format_value(v))
         })
     }
 
@@ -109,7 +109,6 @@ impl Indicator for Bias {
             out.push(status_field(
                 &format!("BIAS{period}"),
                 fmt_value(value),
-                "+000.00%",
                 self.pal.bias[k.min(2)],
             ));
         }
@@ -118,7 +117,7 @@ impl Indicator for Bias {
 
     fn overlay(&self, ctx: &ChartCtx) -> Vec<DrawCmd> {
         crosshair(ctx, chart_cross(), chart_text(), chart_cross_bg(), |v| {
-            format!("{v:+.2}%")
+            format!("{}%", format_value(v))
         })
     }
 

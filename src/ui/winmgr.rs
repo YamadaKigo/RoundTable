@@ -1235,6 +1235,7 @@ impl WinMgr {
             }
             let pane = self.wins[i].pane;
             let body = ManagedWin::body(self.rect_of(i));
+            app.ensure_pane_computed(pane);
             let layout = app.panes[pane].chart_layout();
             let (_, _, main, _) = chart_rows(body, layout);
             self.plots[pane] = frame_rects_with_axis(main, app.panes[pane].show_axis()).0;
@@ -1278,6 +1279,7 @@ impl WinMgr {
                 self.end_win(ui, i, busy);
             });
         }
+        app.win_silent = false;
         let taskbar_click = ui.input(|input| {
             input
                 .pointer
@@ -1292,7 +1294,6 @@ impl WinMgr {
             self.run_taskbar_click(app, p, id);
         }
         self.draw_taskbar_controls(app, ui);
-        app.win_silent = false;
     }
 
     fn draw_taskbar_controls(&mut self, app: &mut StockApp, ui: &mut egui::Ui) {
@@ -1352,6 +1353,8 @@ impl WinMgr {
             WinKind::Panel => app.ui_panel(ui, body),
             WinKind::Chart => {
                 let pane = self.wins[i].pane;
+                app.sync_pane_palette();
+                app.ensure_pane_computed(pane);
                 let layout = app.panes[pane].chart_layout();
                 let (_, _, main, _) = chart_rows(body, layout);
                 self.plots[pane] = frame_rects_with_axis(main, app.panes[pane].show_axis()).0;

@@ -22,7 +22,7 @@ use raw_window_handle::HasWindowHandle;
 use std::ops::{Deref, DerefMut};
 use std::time::{Duration, Instant};
 
-pub(crate) const APP_NAME: &str = "圆桌终端";
+pub(crate) const APP_NAME: &str = "圆桌终端 - 0.1.1";
 
 pub(crate) const WHEEL_HOLD_S: f64 = 0.3;
 

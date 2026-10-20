@@ -1,7 +1,7 @@
-use super::volume::fmt_volume;
 use super::{
     ChartCtx, ChartLayout, DrawCmd, Indicator, Overlay, Palette, axis_ticks, candles, chart_cross,
-    chart_cross_bg, chart_text, chart_tick, crosshair, overlay_lines, status_field, time_labels,
+    chart_cross_bg, chart_text, chart_tick, crosshair, format_value, overlay_lines, status_field,
+    time_labels,
 };
 use crate::data::random_walk::{Bar, BarState, bar_state};
 
@@ -27,9 +27,7 @@ pub(crate) fn kline_layout() -> ChartLayout {
 }
 
 pub(crate) fn kline_axis(ctx: &ChartCtx) -> Vec<DrawCmd> {
-    axis_ticks(ctx, PRICE_TICKS, chart_text(), chart_tick(), |v| {
-        format!("{v:.2}")
-    })
+    axis_ticks(ctx, PRICE_TICKS, chart_text(), chart_tick(), format_value)
 }
 
 pub(crate) fn kline_time(ctx: &ChartCtx) -> Vec<DrawCmd> {
@@ -64,22 +62,17 @@ pub(crate) fn kline_status(ctx: &ChartCtx, pal: &Palette) -> Vec<DrawCmd> {
     let t = chart_text();
     let values = [
         (bar.date.full(), t),
-        (format!("{:.2}", bar.o), t),
-        (format!("{:.2}", bar.h), t),
-        (format!("{:.2}", bar.l), t),
-        (format!("{:.2}", bar.c), t),
-        (format!("{change:+.2}"), trend),
-        (format!("{pct:+.2}%"), trend),
-        (fmt_volume(bar.vol), t),
+        (format_value(bar.o), t),
+        (format_value(bar.h), t),
+        (format_value(bar.l), t),
+        (format_value(bar.c), t),
+        (format_value(change), trend),
+        (format!("{}%", format_value(pct)), trend),
+        (format_value(bar.vol), t),
     ];
     let mut out = Vec::new();
     for (i, (value, color)) in values.into_iter().enumerate() {
-        out.push(status_field(
-            INFO_LABELS[i],
-            value,
-            INFO_TEMPLATES[i],
-            color,
-        ));
+        out.push(status_field(INFO_LABELS[i], value, color));
     }
     let state = bar_state(ctx.bars, index);
     if state != BarState::Normal {
@@ -96,9 +89,13 @@ pub(crate) fn kline_status(ctx: &ChartCtx, pal: &Palette) -> Vec<DrawCmd> {
 }
 
 pub(crate) fn kline_crosshair(ctx: &ChartCtx) -> Vec<DrawCmd> {
-    crosshair(ctx, chart_cross(), chart_text(), chart_cross_bg(), |v| {
-        format!("{v:.2}")
-    })
+    crosshair(
+        ctx,
+        chart_cross(),
+        chart_text(),
+        chart_cross_bg(),
+        format_value,
+    )
 }
 
 pub struct Candle {
