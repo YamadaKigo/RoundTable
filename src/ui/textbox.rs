@@ -211,14 +211,20 @@ impl TextInput {
                     egui::pos2(x, mid_y),
                     egui::Align2::LEFT_CENTER,
                     &self.preedit,
-                    theme().text,
+                    theme().input_caret,
                 );
-                hline_hard(&text_painter, x, x + pw, inner.max.y - LINE_W, theme().text);
+                hline_hard(
+                    &text_painter,
+                    x,
+                    x + pw,
+                    inner.max.y - LINE_W,
+                    theme().input_caret,
+                );
                 x += pw;
             }
             let bar = text_caret_rect(x, inner.min.y, inner.height());
             if app.caret_visible(ui.ctx()) {
-                text_painter.rect_filled(bar, egui::CornerRadius::ZERO, theme().text);
+                text_painter.rect_filled(bar, egui::CornerRadius::ZERO, theme().input_caret);
             }
             caret = Some(bar);
         }

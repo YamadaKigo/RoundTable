@@ -216,8 +216,8 @@ impl DebugConsole {
                 &char_allowed,
                 TextInputStyle {
                     bg: theme().work_bg,
-                    text: theme().text,
-                    edge: Some(theme().ctrl_border),
+                    text: theme().input_text,
+                    edge: Some(theme().input_border),
                 },
             );
         }
@@ -309,7 +309,7 @@ impl DebugConsole {
                 egui::pos2(text_x, y),
                 egui::Align2::LEFT_CENTER,
                 line,
-                theme().text,
+                theme().input_text,
             );
         }
     }

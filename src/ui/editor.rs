@@ -351,7 +351,7 @@ impl TextEditor {
     fn paint_separators(&self, painter: &egui::Painter, panel: egui::Rect) {
         for rows in [SRC_TITLE_ROWS + SRC_MENU_ROWS, SRC_HEAD_ROWS] {
             let y = panel.min.y + grid_line(rows);
-            hline_hard(painter, panel.min.x, panel.max.x, y, theme().ctrl_border);
+            hline_hard(painter, panel.min.x, panel.max.x, y, theme().editor_border);
         }
     }
 
@@ -504,18 +504,26 @@ impl TextEditor {
 
         painter.rect_filled(
             egui::Rect::from_min_max(
+                egui::pos2(panel.min.x + LINE_W, body_top),
+                egui::pos2(panel.max.x - LINE_W, body_bottom),
+            ),
+            egui::CornerRadius::ZERO,
+            theme().editor_bg,
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_max(
                 egui::pos2(panel.min.x + LINE_W, body_top + LINE_W),
                 egui::pos2(gutter_line, body_bottom),
             ),
             egui::CornerRadius::ZERO,
-            theme().panel_bg,
+            theme().editor_gutter_bg,
         );
         vline_hard(
             &painter,
             gutter_line,
             body_top,
             body_bottom,
-            theme().ctrl_border,
+            theme().editor_border,
         );
 
         let hovered = !app.win_silent
@@ -724,7 +732,7 @@ impl TextEditor {
                 egui::pos2(text_right_x(gutter_line, panel.min.x), y),
                 egui::Align2::RIGHT_CENTER,
                 &format!("{}", idx + 1),
-                theme().cross,
+                theme().editor_line_number,
             );
             paint_code_line(app, &text_painter, code_x, y, self.buf.line(idx), code_w);
         }
@@ -745,21 +753,21 @@ impl TextEditor {
                         egui::pos2(x, mid),
                         egui::Align2::LEFT_CENTER,
                         &self.preedit,
-                        theme().text,
+                        theme().editor_text,
                     );
                     hline_hard(
                         &text_painter,
                         x,
                         x + pw,
                         top + SRC_LINE_H - LINE_W,
-                        theme().text,
+                        theme().editor_text,
                     );
                     x += pw;
                 }
 
                 let caret = text_caret_rect(x, top, SRC_LINE_H);
 
-                text_painter.rect_filled(caret, egui::CornerRadius::ZERO, theme().text);
+                text_painter.rect_filled(caret, egui::CornerRadius::ZERO, theme().editor_text);
                 caret_rect = Some(caret);
             }
         }
@@ -991,7 +999,7 @@ pub(crate) fn code_runs(line: &str) -> Vec<(String, SynKind)> {
 
 pub(crate) fn syn_color(kind: SynKind) -> egui::Color32 {
     match kind {
-        SynKind::Plain => theme().text,
+        SynKind::Plain => theme().editor_text,
         SynKind::Keyword => theme().syn_keyword,
         SynKind::Comment => theme().syn_comment,
     }
@@ -1164,7 +1172,7 @@ pub(crate) fn vertical_scrollbar(
         handle.min.x,
         handle.max.x,
         handle.min.y,
-        theme().ctrl_border,
+        theme().scroll_border,
     );
     if handle.max.y < body_bottom {
         hline_hard(
@@ -1172,7 +1180,7 @@ pub(crate) fn vertical_scrollbar(
             handle.min.x,
             handle.max.x,
             handle.max.y - LINE_W,
-            theme().ctrl_border,
+            theme().scroll_border,
         );
     }
     vline_hard(
@@ -1180,6 +1188,6 @@ pub(crate) fn vertical_scrollbar(
         bar_line,
         body_top,
         body_bottom,
-        theme().ctrl_border,
+        theme().scroll_border,
     );
 }

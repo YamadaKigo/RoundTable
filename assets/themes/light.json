@@ -1,45 +1,111 @@
 {
   "format": "roundtable-theme",
-  "version": 1,
+  "version": 2,
   "id": "light",
   "name": "浅色",
   "colors": {
+    "application": {
+      "title_bar": {
+        "background": "#BBBBBB",
+        "pattern": "#999999",
+        "text": "#000000"
+      },
+      "menu_bar": {
+        "background": "#DDDDDD",
+        "text": "#000000",
+        "hover": "#AAAAAA",
+        "border": "#999999",
+        "separator": "#999999"
+      },
+      "workspace": {
+        "background": "#EEEEEE"
+      },
+      "taskbar": {
+        "background": "#CCCCCC",
+        "text": "#000000",
+        "border": "#999999"
+      },
+      "status_bar": {
+        "background": "#CCCCCC",
+        "text": "#000000",
+        "border": "#999999"
+      }
+    },
     "window": {
-      "title_bg": "#BBBBBB",
-      "title_fill": "#999999",
-      "menu_bg": "#DDDDDD",
-      "work_bg": "#FFFFFF",
-      "desktop_bg": "#EEEEEE",
-      "status_bg": "#CCCCCC",
-      "panel_bg": "#DDDDDD",
+      "content_background": "#FFFFFF",
+      "panel_background": "#DDDDDD",
+      "border": "#999999",
       "splitter": "#AAAAAA",
-      "scroll_track": "#AAAAAA",
-      "scroll_thumb": "#CCCCCC",
-      "btn_face": "#CCCCCC",
-      "btn_hover": "#DDDDDD",
-      "btn_press": "#AAAAAA",
-      "sel_bg": "#DDDDDD",
       "symbol": "#000000",
-      "ctrl_border": "#999999",
-      "line": "#999999",
+      "text": "#000000"
+    },
+    "controls": {
+      "button": {
+        "face": "#CCCCCC",
+        "hover": "#DDDDDD",
+        "pressed": "#AAAAAA",
+        "text": "#000000",
+        "border": "#999999"
+      },
+      "generic_border": "#999999",
+      "selection_background": "#DDDDDD",
+      "text_input": {
+        "background": "#FFFFFF",
+        "text": "#000000",
+        "invalid_text": "#FF0000",
+        "caret": "#000000",
+        "border": "#999999"
+      },
+      "scrollbar": {
+        "track": "#AAAAAA",
+        "thumb": "#CCCCCC",
+        "border": "#999999"
+      },
+      "tooltip": {
+        "background": "#DDDDDD",
+        "text": "#000000",
+        "border": "#999999"
+      },
+      "color_picker": {
+        "background": "#FFFFFF",
+        "border": "#999999",
+        "handle": "#FFFFFF"
+      }
+    },
+    "editor": {
+      "background": "#FFFFFF",
+      "gutter_background": "#DDDDDD",
       "text": "#000000",
-      "text_white": "#FFFFFF",
-      "syn_comment": "#009900",
-      "syn_keyword": "#0000FF",
-      "tooltip_bg": "#DDDDDD"
+      "comment": "#009900",
+      "keyword": "#0000FF",
+      "line_number": "#666666",
+      "border": "#999999"
     },
     "chart": {
-      "chart_bg": "#FFFFFF",
-      "chart_line": "#999999",
-      "axis_bg": "#DDDDDD",
+      "background": "#FFFFFF",
+      "border": "#999999",
+      "axis_background": "#DDDDDD",
       "tick": "#DDDDDD",
-      "cross": "#666666",
-      "cross_label": "#EEEEEE",
-      "ind_zero": "#999999",
-      "candle_up": "#FF0000",
-      "candle_down": "#009900",
-      "text_up": "#FF0000",
-      "text_down": "#009900"
+      "crosshair": "#666666",
+      "crosshair_label": {
+        "background": "#EEEEEE",
+        "text": "#000000",
+        "border": "#999999"
+      },
+      "status_field": {
+        "background": "#CCCCCC",
+        "label": "#000000",
+        "divider": "#999999"
+      },
+      "zero_line": "#999999",
+      "candle": {
+        "up": "#FF0000",
+        "down": "#009900"
+      },
+      "price_text": {
+        "up": "#FF0000",
+        "down": "#009900"
+      }
     },
     "indicators": {
       "dif": "#3333CC",

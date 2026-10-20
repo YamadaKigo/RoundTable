@@ -58,7 +58,7 @@ impl StockApp {
                 egui::pos2(text_left_x(row.min.x, panel.min.x), row.center().y),
                 egui::Align2::LEFT_CENTER,
                 &names[j],
-                theme().text,
+                theme().menu_text,
             );
         });
 

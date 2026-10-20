@@ -68,7 +68,7 @@ pub(crate) fn paint_title_text_edge(painter: &egui::Painter, slot: egui::Rect) {
         slot.max.x - LINE_W,
         slot.min.y + LINE_W,
         slot.max.y - LINE_W,
-        theme().ctrl_border,
+        theme().window_border,
     );
 }
 
@@ -121,7 +121,7 @@ pub(crate) fn paint_sys_button(
         theme().btn_face
     };
     painter.rect_filled(rect, egui::CornerRadius::ZERO, face);
-    border_hard(painter, rect, theme().ctrl_border);
+    border_hard(painter, rect, theme().button_border);
 
     let content =
         ButtonContent::Symbol(kind.symbol(maximized, restore_minimized, pinned, exclusive));
@@ -155,7 +155,7 @@ impl StockApp {
             name_slot.center(),
             egui::Align2::CENTER_CENTER,
             APP_NAME,
-            theme().text,
+            theme().title_text,
         );
 
         let buttons = sys_button_rects_n(bar, 2);

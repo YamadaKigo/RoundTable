@@ -774,7 +774,7 @@ fn panel_right_edges_line_up() {
     assert_eq!(
         grid[btn_row][px + w - 1],
         Some(C_CTRL_BORDER),
-        "取消按钮右边框不对"
+        "撤销按钮右边框不对"
     );
 }
 
@@ -1208,6 +1208,83 @@ fn status_fields_auto_width_and_reject_position_arguments() {
         error.contains("位置参数"),
         "位置参数错误提示不清楚：{error}"
     );
+}
+
+#[test]
+fn every_chart_status_field_starts_on_a_vertical_grid_line() {
+    use crate::indicator::{ChartCtx, DrawCmd};
+
+    let mut app = blank_app();
+    app.replace_bars(data::random_walk::generate(BAR_SEED, 128, BAR_START));
+    let grid = render_window(&mut app);
+    let chart = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|window| window.kind == WinKind::Chart)
+        .expect("图表窗不存在");
+    let pane = app.win_mgr.wins[chart].pane;
+    let body = ManagedWin::body(app.win_mgr.wins[chart].rect());
+    let (_, status, _, _) = chart_rows(body, app.panes[pane].chart_layout());
+    let status = status.expect("图表状态栏不存在");
+
+    let (scale, offset, visible) = {
+        let view = &app.panes[pane].view;
+        (view.scale, view.offset, view.visible)
+    };
+    let from = offset;
+    let to = (from + visible).min(app.bars.len());
+    let advance = bar_advance(scale);
+    let time_step = app.time_step(advance);
+    let (lo, hi) = app.pane_view_range(pane, from, to);
+    let ctx = ChartCtx {
+        bars: &app.bars,
+        cmds: &app.panes[pane].cmds,
+        from,
+        to,
+        visible,
+        advance,
+        time_step,
+        lo,
+        hi,
+        cursor_bar: None,
+        cursor_index: None,
+        cursor_value: None,
+    };
+    let fields: Vec<(String, String)> = app.panes[pane]
+        .chart_status(&ctx)
+        .into_iter()
+        .filter_map(|cmd| match cmd {
+            DrawCmd::StatusField { label, value, .. } => Some((label, value)),
+            _ => None,
+        })
+        .collect();
+    assert!(fields.len() >= 3, "默认状态栏字段太少，测不到字段分界");
+
+    let mut boundaries = Vec::new();
+    let mut x = status.min.x;
+    for (label, value) in fields {
+        let label_w = app.text_width(&label);
+        let value_w = app.text_width(&value);
+        let (w, _) = status_field_metrics(label_w, value_w);
+        if x >= status.max.x - LINE_W {
+            break;
+        }
+        boundaries.push(x);
+        x += w - LINE_W;
+    }
+    boundaries.push(x);
+
+    for boundary in boundaries {
+        let column = boundary as usize;
+        for row in status.min.y as usize + 1..status.max.y as usize - 1 {
+            assert_eq!(
+                grid[row][column],
+                Some(C_LINE),
+                "字段左边线在 ({column}, {row}) 断开"
+            );
+        }
+    }
 }
 
 #[test]
@@ -4629,8 +4706,253 @@ fn fresh_chart_title_bar_gets_the_move_cursor() {
 }
 
 #[test]
+fn child_window_has_outer_and_inner_one_pixel_borders() {
+    let mut app = blank_app();
+    app.replace_bars(data::random_walk::generate(BAR_SEED, 64, BAR_START));
+    let grid = render_window(&mut app);
+    let chart = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|window| window.kind == WinKind::Chart)
+        .expect("图表窗不存在");
+    let rect = app.win_mgr.wins[chart].rect();
+    let inner = rect.shrink(WIN_FRAME);
+    let y = (rect.min.y + 36.0) as usize;
+    let cx = rect.center().x as usize;
+
+    assert_eq!(
+        grid[rect.min.y as usize][rect.min.x as usize],
+        Some(C_CTRL_BORDER),
+        "外圈左边框不见了"
+    );
+    assert_eq!(
+        grid[y][rect.min.x as usize],
+        Some(C_CTRL_BORDER),
+        "外圈左边框不是 1px"
+    );
+    assert_eq!(
+        grid[y][inner.min.x as usize],
+        Some(C_CTRL_BORDER),
+        "内圈左边框没有落在网格线上"
+    );
+    assert_eq!(
+        grid[y][inner.max.x as usize - 1],
+        Some(C_CTRL_BORDER),
+        "内圈右边框没有落在网格线上"
+    );
+    assert_eq!(
+        grid[inner.min.y as usize][cx],
+        Some(C_CTRL_BORDER),
+        "内圈上边框没有落在网格线上"
+    );
+    assert_eq!(
+        grid[inner.max.y as usize - 1][cx],
+        Some(C_CTRL_BORDER),
+        "内圈下边框没有落在网格线上"
+    );
+}
+
+#[test]
+fn an_inactive_window_can_start_resizing_from_its_frame_band() {
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    let mut app = blank_app();
+    app.text_engine = HardText::new(&ctx);
+    app.replace_bars(data::random_walk::generate(BAR_SEED, 64, BAR_START));
+    let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(70)));
+    let frame = |app: &mut StockApp, events: Vec<egui::Event>| win_frame(app, &ctx, work, events);
+
+    frame(&mut app, vec![]);
+    if let Some(panel) = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|window| window.kind == WinKind::Panel)
+    {
+        app.win_mgr.wins[panel].w.open = false;
+    }
+    let first = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|window| window.kind == WinKind::Chart)
+        .expect("首块图表窗不存在");
+    app.add_chart_window();
+    let second = app
+        .win_mgr
+        .wins
+        .iter()
+        .rposition(|window| window.kind == WinKind::Chart)
+        .expect("第二块图表窗不存在");
+    let size = egui::vec2(cells(40), cells(24));
+    app.win_mgr.wins[first].w.pos = work.min + egui::vec2(80.0, 120.0);
+    app.win_mgr.wins[first].w.size = size;
+    app.win_mgr.wins[second].w.pos = work.min + egui::vec2(600.0, 120.0);
+    app.win_mgr.wins[second].w.size = size;
+    frame(&mut app, vec![]);
+    assert_eq!(
+        app.win_mgr.focused_index(),
+        Some(second),
+        "第二块图表窗应是当前焦点"
+    );
+
+    let first_id = app.win_mgr.wins[first].w.id;
+    let before = app.win_mgr.wins[first].rect();
+    let grab = egui::pos2(before.max.x - WIN_FRAME / 2.0, before.center().y);
+    let target = grab + egui::vec2(40.0, 0.0);
+    frame(
+        &mut app,
+        vec![
+            egui::Event::PointerMoved(grab),
+            egui::Event::PointerButton {
+                pos: grab,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    frame(&mut app, vec![egui::Event::PointerMoved(target)]);
+    let first = app
+        .win_mgr
+        .wins
+        .iter()
+        .position(|window| window.w.id == first_id)
+        .expect("缩放后首块图表窗不存在");
+    assert_eq!(
+        app.win_mgr.wins[first].rect().width(),
+        before.width() + 40.0,
+        "非焦点窗口的边框带没有启动缩放"
+    );
+    assert_eq!(
+        app.win_mgr.live_index().map(|i| app.win_mgr.wins[i].w.id),
+        Some(first_id)
+    );
+    frame(
+        &mut app,
+        vec![egui::Event::PointerButton {
+            pos: target,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+}
+
+#[test]
+fn enabling_exclusive_keeps_the_window_at_its_current_position() {
+    let mut mgr = WinMgr::new();
+    let first = mgr.add(
+        WinKind::Chart,
+        "A",
+        0,
+        egui::vec2(cells(30), cells(20)),
+        egui::vec2(cells(30), cells(20)),
+    );
+    let second = mgr.add(
+        WinKind::Chart,
+        "B",
+        1,
+        egui::vec2(cells(30), cells(20)),
+        egui::vec2(cells(30), cells(20)),
+    );
+    for i in [first, second] {
+        mgr.wins[i].w.open = true;
+    }
+    mgr.wins[first].w.pos = egui::pos2(100.0, 120.0);
+    mgr.wins[second].w.pos = egui::pos2(180.0, 160.0);
+    let before = mgr.wins[first].w.pos;
+
+    mgr.toggle_exclusive(first);
+
+    assert!(mgr.wins[first].exclusive);
+    assert_eq!(mgr.wins[first].w.pos, before, "切换独占后窗口被重新摆放了");
+}
+
+#[test]
+fn color_panel_revert_restores_the_values_captured_when_opened() {
+    let mut panel = ColorPanel::new();
+    panel.initial_up = (17, 34, 51);
+    panel.initial_down = (68, 85, 102);
+    panel.target = ColorTarget::Up;
+    panel.pending_up = (1, 2, 3);
+    panel.pending_down = (4, 5, 6);
+    panel.load((200, 100, 50));
+    panel.drag = ColorDrag::Slider(0);
+
+    panel.revert_initial();
+
+    assert_eq!(panel.pending_up, (17, 34, 51));
+    assert_eq!(panel.pending_down, (68, 85, 102));
+    assert_eq!(panel.rgb, (17, 34, 51));
+    assert_eq!(panel.hex.text(), "112233");
+    assert_eq!(panel.drag, ColorDrag::None);
+    assert_eq!(CP_REVERT_TEXT, "撤销");
+}
+
+#[test]
+fn clicking_color_panel_revert_closes_it_and_restores_the_initial_color() {
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    let mut app = color_panel_app();
+    let frame = |app: &mut StockApp, events: Vec<egui::Event>| {
+        let _ = render_pinned_events_in(&ctx, app, events);
+    };
+    frame(&mut app, vec![]);
+
+    let panel = app
+        .win_mgr
+        .color_rect()
+        .expect("颜色面板不存在")
+        .shrink(WIN_FRAME);
+    let band = cp_band(panel, CP_ROW_BTN, CP_BTN_ROWS);
+    let revert = egui::Rect::from_min_size(
+        egui::pos2(band.min.x + CP_HALF_W - LINE_W, band.min.y),
+        egui::vec2(CP_HALF_W, band.height()),
+    )
+    .center();
+    let color = color_index(&app);
+    assert!(
+        app.win_mgr.rect_of(color).contains(revert),
+        "撤销按钮落点不在颜色面板内: {revert:?} / {:?}",
+        app.win_mgr.rect_of(color)
+    );
+    frame(&mut app, vec![egui::Event::PointerMoved(revert)]);
+    frame(
+        &mut app,
+        vec![egui::Event::PointerButton {
+            pos: revert,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    frame(
+        &mut app,
+        vec![
+            egui::Event::PointerMoved(revert),
+            egui::Event::PointerButton {
+                pos: revert,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    frame(&mut app, vec![]);
+
+    assert!(app.win_mgr.color_index().is_none(), "撤销后面板没有关闭");
+    assert_eq!(app.color_panel.rgb, UP_RGB_DEFAULT);
+    assert_eq!(app.up_color, UP_RGB_DEFAULT);
+    assert!(app.status_msg.contains("撤销"), "撤销结果没有写入状态栏");
+}
+
+#[test]
 fn window_manager_cascades_minimizes_and_caps() {
-    let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(60)));
+    let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(110)));
     let mut app = blank_app();
     app.work_rect = work;
     app.win_mgr.work = work;
@@ -4681,7 +5003,7 @@ fn window_manager_cascades_minimizes_and_caps() {
         "两块图表窗共用了同一个 Pane"
     );
 
-    for _ in 0..4 {
+    while app.win_mgr.chart_count() < MAX_CHART_WINS {
         app.add_chart_window();
     }
     assert_eq!(app.win_mgr.chart_count(), MAX_CHART_WINS);
@@ -5910,22 +6232,39 @@ fn theme_json_files_parse_and_accept_user_edits() {
 
     let mut edit: serde_json::Value =
         serde_json::from_str(include_str!("../assets/themes/light.json")).expect("主题 JSON 结构");
-    edit["colors"]["window"]["title_bg"] = serde_json::json!("#AABBCC");
-    edit["colors"]["window"]["ctrl_border"] = serde_json::json!("#123456");
-    edit["colors"]["window"]["tooltip_bg"] = serde_json::json!("#654321");
+    edit["colors"]["application"]["title_bar"]["background"] = serde_json::json!("#AABBCC");
+    edit["colors"]["window"]["border"] = serde_json::json!("#123456");
+    edit["colors"]["controls"]["tooltip"]["background"] = serde_json::json!("#654321");
+    edit["colors"]["controls"]["button"]["text"] = serde_json::json!("#010203");
+    edit["colors"]["controls"]["text_input"]["background"] = serde_json::json!("#040506");
+    edit["colors"]["editor"]["keyword"] = serde_json::json!("#070809");
+    edit["colors"]["chart"]["status_field"]["divider"] = serde_json::json!("#0A0B0C");
     let edited =
         Theme::from_json(&edit.to_string(), ThemeId::Classic).expect("修改后的主题应能解析");
     assert_eq!(edited.title_bg, egui::Color32::from_rgb(0xAA, 0xBB, 0xCC));
     assert_eq!(
-        edited.ctrl_border,
+        edited.window_border,
         egui::Color32::from_rgb(0x12, 0x34, 0x56)
     );
     assert_eq!(edited.tooltip_bg, egui::Color32::from_rgb(0x65, 0x43, 0x21));
+    assert_eq!(
+        edited.button_text,
+        egui::Color32::from_rgb(0x01, 0x02, 0x03)
+    );
+    assert_eq!(edited.input_bg, egui::Color32::from_rgb(0x04, 0x05, 0x06));
+    assert_eq!(
+        edited.syn_keyword,
+        egui::Color32::from_rgb(0x07, 0x08, 0x09)
+    );
+    assert_eq!(
+        edited.chart_status_divider,
+        egui::Color32::from_rgb(0x0A, 0x0B, 0x0C)
+    );
 
     edit["colors"]["chart"]
         .as_object_mut()
         .expect("chart 必须是对象")
-        .remove("chart_bg");
+        .remove("background");
     assert!(Theme::from_json(&edit.to_string(), ThemeId::Classic).is_err());
 }
 
@@ -7008,7 +7347,7 @@ fn editor_highlights_hash_comments_and_script_keywords() {
     let joined: String = runs.iter().map(|(s, _)| s.as_str()).collect();
     assert_eq!(joined, line, "着色片段拼起来必须和原行一字不差");
 
-    assert_eq!(syn_color(SynKind::Plain), theme().text);
+    assert_eq!(syn_color(SynKind::Plain), theme().editor_text);
     assert_eq!(syn_color(SynKind::Keyword), theme().syn_keyword);
     assert_eq!(syn_color(SynKind::Comment), theme().syn_comment);
     assert_eq!(
@@ -8517,6 +8856,14 @@ fn the_dark_skin_inverts_the_window_and_keeps_chart_colors_light() {
     assert_eq!(d.line, egui::Color32::from_rgb(0xFF, 0x00, 0x00));
     assert_eq!(d.symbol, egui::Color32::from_rgb(0xFF, 0xFF, 0xFF));
     assert_eq!(d.text_white, l.text_white);
+    assert_eq!(d.title_text, d.text);
+    assert_eq!(d.menu_text, d.text);
+    assert_eq!(d.button_text, d.text);
+    assert_eq!(d.editor_text, d.text);
+    assert_eq!(d.chart_status_label, d.text);
+    assert_eq!(d.input_bg, d.work_bg);
+    assert_eq!(d.editor_bg, d.work_bg);
+    assert_eq!(d.color_picker_bg, d.work_bg);
 }
 
 #[test]
@@ -8600,6 +8947,7 @@ fn title_bar_blank_area_uses_the_pixel_fill() {
 
 #[test]
 fn the_title_text_slot_is_shadow_free_and_closed_by_a_line() {
+    assert_eq!(APP_NAME, "圆桌终端");
     let mut app = blank_app();
     app.replace_bars(data::random_walk::generate(BAR_SEED, BAR_COUNT, BAR_START));
     let grid = render_window(&mut app);
@@ -8622,13 +8970,7 @@ fn the_title_text_slot_is_shadow_free_and_closed_by_a_line() {
         "文字栏右边那条线没落在网格线上（第 0 条网格线 = 标题栏左边）"
     );
 
-    let menu_widths = [tab_width(&mut app, TOP_TABS[0].title)];
-    let menu_first = menu_item_rects(split_areas(layout)[1], &menu_widths, MenuAlign::Left)[0];
-    assert_eq!(
-        lx,
-        menu_first.max.x as usize - LINE_W as usize,
-        "标题栏那条线和菜单栏第一项那条线不在同一列"
-    );
+    assert_eq!(lx % PITCH as usize, 0, "标题文字栏右边没落在网格线上");
     for y in (sy + LINE_W as usize)..(sy + title.height() as usize - LINE_W as usize) {
         assert_eq!(
             grid[y][lx],

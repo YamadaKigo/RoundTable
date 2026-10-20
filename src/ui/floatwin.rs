@@ -776,12 +776,17 @@ pub(crate) fn paint_title_bar(
     }
     paint_title_fill(painter, title, text_slot, keys_left);
 
+    let text_color = if minimized {
+        theme().taskbar_text
+    } else {
+        theme().title_text
+    };
     app.text(
         painter,
         egui::pos2(text_left_x(title.min.x, title.min.x), title.center().y),
         egui::Align2::LEFT_CENTER,
         text,
-        theme().text,
+        text_color,
     );
 
     let mut hit = None;
@@ -812,9 +817,10 @@ pub(crate) fn paint_shell_border(painter: &egui::Painter, rect: egui::Rect) {
         inner.min.x,
         inner.max.x,
         inner.min.y + grid_line(WIN_TITLE_ROWS),
-        theme().ctrl_border,
+        theme().window_border,
     );
-    border_hard(painter, rect, theme().ctrl_border);
+    border_hard(painter, rect, theme().window_border);
+    border_hard(painter, inner, theme().window_border);
 }
 
 #[cfg(test)]

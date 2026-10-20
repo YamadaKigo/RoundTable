@@ -77,6 +77,10 @@ pub(crate) const HEX_LEN_MAX: usize = 6;
 
 pub(crate) const HEX_PREFIX: &str = "#";
 
+pub(crate) const CP_APPLY_TEXT: &str = "应用";
+
+pub(crate) const CP_REVERT_TEXT: &str = "撤销";
+
 pub(crate) fn hex_input_char(c: char) -> bool {
     c != '#' && !c.is_control()
 }
@@ -280,12 +284,17 @@ pub(crate) struct ColorPanel {
     pub(crate) pending_up: (u8, u8, u8),
     pub(crate) pending_down: (u8, u8, u8),
 
+    pub(crate) initial_up: (u8, u8, u8),
+    pub(crate) initial_down: (u8, u8, u8),
+
     pub(crate) hex: TextInput,
     pub(crate) hex_valid: bool,
 
     pub(crate) drag: ColorDrag,
 
     pub(crate) drag_off: egui::Vec2,
+
+    pub(crate) close_requested: bool,
 }
 
 impl ColorPanel {
@@ -298,10 +307,13 @@ impl ColorPanel {
             rgb: (0, 0, 0),
             pending_up: UP_RGB_DEFAULT,
             pending_down: DOWN_RGB_DEFAULT,
+            initial_up: UP_RGB_DEFAULT,
+            initial_down: DOWN_RGB_DEFAULT,
             hex: TextInput::new(HEX_LEN_MAX),
             hex_valid: true,
             drag: ColorDrag::None,
             drag_off: egui::Vec2::ZERO,
+            close_requested: false,
         }
     }
 
@@ -342,8 +354,16 @@ impl ColorPanel {
         }
     }
 
-    pub(crate) fn close_cancelled(&mut self) {
+    pub(crate) fn close_session(&mut self) {
         self.drag = ColorDrag::None;
+    }
+
+    pub(crate) fn revert_initial(&mut self) {
+        self.pending_up = self.initial_up;
+        self.pending_down = self.initial_down;
+        let rgb = self.pending_for(self.target);
+        self.load(rgb);
+        self.close_session();
     }
 }
 
@@ -352,8 +372,11 @@ impl StockApp {
         let (up, down) = (self.up_color, self.down_color);
         self.color_panel.pending_up = up;
         self.color_panel.pending_down = down;
+        self.color_panel.initial_up = up;
+        self.color_panel.initial_down = down;
         self.color_panel.target = target;
         self.color_panel.drag = ColorDrag::None;
+        self.color_panel.close_requested = false;
         let rgb = self.color_panel.pending_for(target);
         self.color_panel.load(rgb);
         if self.win_mgr.show_color(self.work_rect).is_none() {
@@ -372,6 +395,14 @@ impl StockApp {
         let mut cp = self.color_panel.clone();
 
         let painter = ui.painter().clone();
+        painter.rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(panel.min.x, panel.min.y + grid_line(CP_TITLE_ROWS)),
+                panel.max,
+            ),
+            egui::CornerRadius::ZERO,
+            theme().color_picker_bg,
+        );
 
         let pointer = self
             .pointer
@@ -403,7 +434,7 @@ impl StockApp {
                 sv.min.x - LINE_W + grid_line(col),
                 sv_band.min.y,
                 sv_band.max.y,
-                theme().ctrl_border,
+                theme().color_picker_border,
             );
         }
         for row in 0..=SV_ROWS {
@@ -412,7 +443,7 @@ impl StockApp {
                 sv_band.min.x,
                 sv_band.max.x,
                 sv.min.y - LINE_W + grid_line(row),
-                theme().ctrl_border,
+                theme().color_picker_border,
             );
         }
         let sv_resp = ui.allocate_rect(sv, egui::Sense::click_and_drag());
@@ -496,7 +527,7 @@ impl StockApp {
             ),
             egui::Align2::LEFT_CENTER,
             HEX_PREFIX,
-            theme().text,
+            theme().input_text,
         );
         let hex_typed = cp.hex.ui(
             self,
@@ -505,14 +536,14 @@ impl StockApp {
             egui::Id::new("rt_color_hex"),
             &hex_input_char,
             TextInputStyle {
-                bg: theme().work_bg,
+                bg: theme().input_bg,
 
                 text: if cp.hex_valid {
-                    theme().text
+                    theme().input_text
                 } else {
-                    theme().candle_up
+                    theme().input_invalid
                 },
-                edge: None,
+                edge: Some(theme().input_border),
             },
         );
 
@@ -534,7 +565,7 @@ impl StockApp {
             egui::vec2(CP_HALF_W, btn_band.height()),
         );
         let mut close_after = false;
-        let apply_text = ButtonContent::Text("应用".to_owned());
+        let apply_text = ButtonContent::Text(CP_APPLY_TEXT.to_owned());
         if self.draw_button(ui, &painter, apply_rect, &apply_text, false, "") {
             cp.save_pending();
             let rgb = cp.pending_for(cp.target);
@@ -543,7 +574,7 @@ impl StockApp {
                 ColorTarget::Down => self.down_color = rgb,
             }
             self.chart_follows_theme = false;
-            cp.close_cancelled();
+            cp.close_session();
             self.status_msg = format!(
                 "已应用：{}色 {}（图表配色改为自定义）",
                 cp.target.name(),
@@ -551,10 +582,10 @@ impl StockApp {
             );
             close_after = true;
         }
-        let cancel_text = ButtonContent::Text("取消".to_owned());
+        let cancel_text = ButtonContent::Text(CP_REVERT_TEXT.to_owned());
         if self.draw_button(ui, &painter, cancel_rect, &cancel_text, false, "") {
-            cp.close_cancelled();
-            self.status_msg = "颜色面板：已取消，颜色没变".to_owned();
+            cp.revert_initial();
+            self.status_msg = "颜色面板：已撤销，颜色没变".to_owned();
             close_after = true;
         }
 
@@ -571,7 +602,7 @@ impl StockApp {
                 panel.min.x,
                 panel.max.x,
                 panel.min.y + grid_line(row),
-                theme().ctrl_border,
+                theme().color_picker_border,
             );
         }
 
@@ -580,7 +611,7 @@ impl StockApp {
         painter.rect_filled(horizontal, egui::CornerRadius::ZERO, mark);
         painter.rect_filled(vertical, egui::CornerRadius::ZERO, mark);
 
-        let hex_edge = theme().ctrl_border;
+        let hex_edge = theme().color_picker_border;
         vline_hard(
             &painter,
             hex_box.min.x,
@@ -612,7 +643,7 @@ impl StockApp {
         }
         self.color_panel = cp;
         if close_after {
-            self.win_mgr.hide_color();
+            self.color_panel.close_requested = true;
         }
     }
 
@@ -644,7 +675,7 @@ impl StockApp {
             egui::pos2(text_left_x(row.min.x, row.min.x), row.center().y),
             egui::Align2::LEFT_CENTER,
             label,
-            theme().text,
+            theme().input_text,
         );
 
         let value_rect = egui::Rect::from_min_size(
@@ -659,7 +690,7 @@ impl StockApp {
             value_rect.center(),
             egui::Align2::CENTER_CENTER,
             value_text,
-            theme().text,
+            theme().input_text,
         );
 
         let inner = track.shrink(LINE_W);
@@ -734,22 +765,26 @@ impl StockApp {
             egui::vec2(CP_HANDLE_W, row.height()),
         );
 
-        painter.rect_filled(handle, egui::CornerRadius::ZERO, theme().text_white);
-        border_hard(painter, handle, theme().ctrl_border);
+        painter.rect_filled(
+            handle,
+            egui::CornerRadius::ZERO,
+            theme().color_picker_handle,
+        );
+        border_hard(painter, handle, theme().color_picker_border);
 
         vline_hard(
             painter,
             track.min.x,
             track.min.y,
             track.max.y,
-            theme().ctrl_border,
+            theme().color_picker_border,
         );
         vline_hard(
             painter,
             track.max.x - LINE_W,
             track.min.y,
             track.max.y,
-            theme().ctrl_border,
+            theme().color_picker_border,
         );
 
         drag_x

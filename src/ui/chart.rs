@@ -541,7 +541,14 @@ impl StockApp {
 
         let bar_segs = self.chart_status_segments(pane);
         let bar = chart_bar(area);
-        self.paint_status_bar(&painter, bar, &bar_segs);
+        self.paint_status_bar_colors(
+            &painter,
+            bar,
+            &bar_segs,
+            theme().chart_status_bg,
+            theme().chart_status_label,
+            theme().chart_status_divider,
+        );
 
         self.panes[pane].height = main.height() as i32;
         self.sync_pane_palette();
@@ -921,7 +928,7 @@ impl StockApp {
                             egui::pos2(x0, y0),
                             w,
                             color32(*bg),
-                            color32(*fg),
+                            theme().cross_label_text,
                         );
                     }
                 }
@@ -954,7 +961,7 @@ impl StockApp {
                             egui::pos2(x0, geom.bottom - PITCH * CROSS_LABEL_ROWS as f32),
                             w,
                             color32(*bg),
-                            color32(*fg),
+                            theme().cross_label_text,
                         );
                     }
                 }
@@ -992,12 +999,21 @@ impl StockApp {
                     let value_w = self.text_width(value);
                     let (w, divider) = status_field_metrics(label_w, value_w);
                     let clipped = painter.with_clip_rect(band);
+                    if sx < band.max.x {
+                        vline_hard(
+                            &clipped,
+                            sx,
+                            band.min.y + LINE_W,
+                            band.max.y - LINE_W,
+                            theme().chart_status_divider,
+                        );
+                    }
                     self.text(
                         &clipped,
                         egui::pos2(text_left_x(sx, geom.origin.x), band.center().y),
                         egui::Align2::LEFT_CENTER,
                         label,
-                        theme().text,
+                        theme().chart_status_label,
                     );
                     if sx + divider < band.max.x {
                         vline_hard(
@@ -1005,7 +1021,7 @@ impl StockApp {
                             sx + divider,
                             band.min.y + LINE_W,
                             band.max.y - LINE_W,
-                            theme().chart_line,
+                            theme().chart_status_divider,
                         );
                     }
                     self.text(
@@ -1030,7 +1046,7 @@ impl StockApp {
                     sx,
                     band.min.y + LINE_W,
                     band.max.y - LINE_W,
-                    theme().chart_line,
+                    theme().chart_status_divider,
                 );
                 let right = band.max.x - LINE_W;
                 if right > sx {
@@ -1039,7 +1055,7 @@ impl StockApp {
                         right,
                         band.min.y + LINE_W,
                         band.max.y - LINE_W,
-                        theme().chart_line,
+                        theme().chart_status_divider,
                     );
                 }
             }
@@ -1055,7 +1071,7 @@ impl StockApp {
             x,
             band.min.y + LINE_W,
             band.max.y - LINE_W,
-            theme().chart_line,
+            theme().chart_status_divider,
         );
     }
 
@@ -1069,7 +1085,7 @@ impl StockApp {
         fg: egui::Color32,
     ) {
         let rect = egui::Rect::from_min_size(pos, egui::vec2(w, CROSS_LABEL_H));
-        tag_box(painter, rect, bg, theme().chart_line);
+        tag_box(painter, rect, bg, theme().cross_label_border);
         self.text(
             painter,
             rect.center(),

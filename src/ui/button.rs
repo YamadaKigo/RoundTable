@@ -117,6 +117,28 @@ impl StockApp {
         pressed: bool,
         tip: &str,
     ) -> bool {
+        self.draw_button_with_text(
+            ui,
+            painter,
+            rect,
+            content,
+            pressed,
+            tip,
+            theme().button_text,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_button_with_text(
+        &mut self,
+        ui: &mut egui::Ui,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        content: &ButtonContent,
+        pressed: bool,
+        tip: &str,
+        text_color: egui::Color32,
+    ) -> bool {
         let resp = interact_rect(ui, rect, egui::Sense::click());
         let state = if pressed || resp.is_pointer_button_down_on() {
             ButtonState::Pressed
@@ -127,7 +149,7 @@ impl StockApp {
         };
 
         painter.rect_filled(rect, egui::CornerRadius::ZERO, state.face());
-        border_hard(painter, rect, theme().ctrl_border);
+        border_hard(painter, rect, theme().button_border);
 
         if resp.hovered() && !tip.is_empty() {
             self.tooltip = Some((rect, tip.to_owned()));
@@ -141,7 +163,7 @@ impl StockApp {
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
                     &text,
-                    theme().text,
+                    text_color,
                 );
             }
             ButtonContent::Symbol(kind) => {
@@ -174,7 +196,7 @@ impl StockApp {
                     egui::pos2(icon.max.x + ICON_GAP, rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     &text,
-                    theme().text,
+                    text_color,
                 );
             }
         }
@@ -199,13 +221,13 @@ impl StockApp {
             (anchor.min.y + LINE_W - h).max(layout.min.y)
         };
         let rect = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, h));
-        tag_box(painter, rect, theme().tooltip_bg, theme().ctrl_border);
+        tag_box(painter, rect, theme().tooltip_bg, theme().tooltip_border);
         self.text(
             painter,
             rect.center(),
             egui::Align2::CENTER_CENTER,
             &text,
-            theme().text,
+            theme().tooltip_text,
         );
     }
 }

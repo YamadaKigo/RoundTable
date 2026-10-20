@@ -22,7 +22,7 @@ use raw_window_handle::HasWindowHandle;
 use std::ops::{Deref, DerefMut};
 use std::time::{Duration, Instant};
 
-pub(crate) const APP_NAME: &str = "圆桌";
+pub(crate) const APP_NAME: &str = "圆桌终端";
 
 pub(crate) const WHEEL_HOLD_S: f64 = 0.3;
 
@@ -533,8 +533,27 @@ impl StockApp {
         band: egui::Rect,
         segs: &[String],
     ) {
-        painter.rect_filled(band, egui::CornerRadius::ZERO, theme().status_bg);
-        hline_hard(painter, band.min.x, band.max.x, band.min.y, theme().line);
+        self.paint_status_bar_colors(
+            painter,
+            band,
+            segs,
+            theme().status_bg,
+            theme().status_text,
+            theme().status_border,
+        );
+    }
+
+    pub(crate) fn paint_status_bar_colors(
+        &mut self,
+        painter: &egui::Painter,
+        band: egui::Rect,
+        segs: &[String],
+        background: egui::Color32,
+        text: egui::Color32,
+        border: egui::Color32,
+    ) {
+        painter.rect_filled(band, egui::CornerRadius::ZERO, background);
+        hline_hard(painter, band.min.x, band.max.x, band.min.y, border);
         let mut x = band.min.x;
         let mut first = true;
         for seg in segs {
@@ -543,32 +562,20 @@ impl StockApp {
                 break;
             }
             if !first {
-                vline_hard(
-                    painter,
-                    x,
-                    band.min.y + LINE_W,
-                    band.max.y - LINE_W,
-                    theme().line,
-                );
+                vline_hard(painter, x, band.min.y + LINE_W, band.max.y - LINE_W, border);
             }
             self.text(
                 painter,
                 egui::pos2(text_left_x(x, band.min.x), band.center().y),
                 egui::Align2::LEFT_CENTER,
                 seg,
-                theme().text,
+                text,
             );
             x += w - LINE_W;
             first = false;
         }
         if !first {
-            vline_hard(
-                painter,
-                x,
-                band.min.y + LINE_W,
-                band.max.y - LINE_W,
-                theme().line,
-            );
+            vline_hard(painter, x, band.min.y + LINE_W, band.max.y - LINE_W, border);
             let right = band.max.x - LINE_W;
             if right > x {
                 vline_hard(
@@ -576,7 +583,7 @@ impl StockApp {
                     right,
                     band.min.y + LINE_W,
                     band.max.y - LINE_W,
-                    theme().line,
+                    border,
                 );
             }
         }
@@ -614,7 +621,7 @@ impl StockApp {
         painter.rect_filled(menu, egui::CornerRadius::ZERO, theme().menu_bg);
 
         painter.rect_filled(work, egui::CornerRadius::ZERO, theme().desktop_bg);
-        painter.rect_filled(taskbar, egui::CornerRadius::ZERO, theme().status_bg);
+        painter.rect_filled(taskbar, egui::CornerRadius::ZERO, theme().taskbar_bg);
         painter.rect_filled(status, egui::CornerRadius::ZERO, theme().status_bg);
 
         let segs = self.status_segments();
@@ -633,7 +640,13 @@ impl StockApp {
             areas[3].min.y,
             areas[4].min.y,
         ] {
-            hline_hard(painter, layout.min.x, layout.max.x, y, theme().line);
+            hline_hard(
+                painter,
+                layout.min.x,
+                layout.max.x,
+                y,
+                theme().menu_separator,
+            );
         }
     }
 
@@ -981,7 +994,7 @@ impl StockApp {
             self.menu = state;
         }
 
-        border_hard(&ui.painter().clone(), layout, theme().ctrl_border);
+        border_hard(&ui.painter().clone(), layout, theme().window_border);
 
         self.ui_pane_menu(ui);
         self.run_win_cmd();

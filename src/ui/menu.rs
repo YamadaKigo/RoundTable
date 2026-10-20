@@ -280,12 +280,12 @@ impl MenuPanel {
     }
 
     pub(crate) fn paint_row_hover(&self, painter: &egui::Painter, row: egui::Rect) {
-        painter.rect_filled(row, egui::CornerRadius::ZERO, theme().btn_press);
-        border_hard(painter, row, theme().ctrl_border);
+        painter.rect_filled(row, egui::CornerRadius::ZERO, theme().menu_hover);
+        border_hard(painter, row, theme().menu_border);
     }
 
     pub(crate) fn paint_border(&self, painter: &egui::Painter) {
-        border_hard(painter, self.rect, theme().ctrl_border);
+        border_hard(painter, self.rect, theme().menu_border);
     }
 
     pub(crate) fn ui_rows(
@@ -311,7 +311,7 @@ impl MenuPanel {
                     row.min.x + LINE_W,
                     row.max.x - LINE_W,
                     row.max.y - LINE_W,
-                    theme().line,
+                    theme().menu_separator,
                 );
             }
             if resp.clicked() {
@@ -419,7 +419,7 @@ impl<'a, 'b> MenuBar<'a, 'b> {
                 ),
                 egui::Align2::LEFT_CENTER,
                 text,
-                theme().text,
+                theme().menu_text,
             );
         }
         let mut hovered = vec![false; display_titles.len()];
@@ -449,7 +449,7 @@ impl<'a, 'b> MenuBar<'a, 'b> {
                 rects[i].center(),
                 egui::Align2::CENTER_CENTER,
                 title,
-                theme().text,
+                theme().menu_text,
             );
         }
 
@@ -459,7 +459,7 @@ impl<'a, 'b> MenuBar<'a, 'b> {
                 rects[0].min.x,
                 self.bar.min.y + LINE_W,
                 self.bar.max.y - LINE_W,
-                theme().line,
+                theme().menu_separator,
             );
         }
         for rect in &rects {
@@ -468,7 +468,7 @@ impl<'a, 'b> MenuBar<'a, 'b> {
                 rect.max.x - LINE_W,
                 self.bar.min.y + LINE_W,
                 self.bar.max.y - LINE_W,
-                theme().line,
+                theme().menu_separator,
             );
         }
 
@@ -477,7 +477,7 @@ impl<'a, 'b> MenuBar<'a, 'b> {
             self.bar.min.x,
             self.bar.max.x,
             self.bar.max.y - LINE_W,
-            theme().ctrl_border,
+            theme().menu_border,
         );
 
         MenuBarOut {
@@ -488,8 +488,8 @@ impl<'a, 'b> MenuBar<'a, 'b> {
     }
 
     fn paint_hover(painter: &egui::Painter, rect: egui::Rect) {
-        painter.rect_filled(rect, egui::CornerRadius::ZERO, theme().btn_press);
-        border_hard(painter, rect, theme().ctrl_border);
+        painter.rect_filled(rect, egui::CornerRadius::ZERO, theme().menu_hover);
+        border_hard(painter, rect, theme().menu_border);
     }
 }
 
@@ -645,7 +645,7 @@ fn ui_menu_popup_inner(
                 egui::pos2(text_left_x(row.min.x, panel.rect.min.x), row.center().y),
                 egui::Align2::LEFT_CENTER,
                 node.label,
-                theme().text,
+                theme().menu_text,
             );
             if node.has_children() {
                 paint_submenu_arrow(painter, row);
@@ -678,7 +678,7 @@ fn paint_submenu_arrow(painter: &egui::Painter, row: egui::Rect) {
         painter.rect_filled(
             egui::Rect::from_min_size(egui::pos2(x, y + i as f32), egui::vec2(w, LINE_W)),
             egui::CornerRadius::ZERO,
-            theme().text,
+            theme().menu_text,
         );
     }
 }

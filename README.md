@@ -2,7 +2,7 @@
   <img src="assets/logo/RoundTable_64.ico" width="64" height="64" alt="RoundTable logo">
 </p>
 
-<h1 align="center">RoundTable 圆桌</h1>
+<h1 align="center">RoundTable 圆桌终端</h1>
 
 <p align="center">一个坚持 1 逻辑点 = 1 物理像素、界面全部由 Painter 手绘的 Windows 行情图表工作台。</p>
 
@@ -12,7 +12,7 @@ RoundTable 使用 Rust、eframe、egui 与 wgpu 构建。窗口、菜单、按�
 
 ## 当前特性
 
-- 无边框全屏主窗口，客户区铺满窗口。
+- 无边框全屏主窗口，客户区铺满窗口，标题栏显示“圆桌终端”。
 - 强制 1 逻辑点等于 1 物理像素。
 - 9px 界面节距：`GRID = 8px`、`LINE_W = 1px`、`PITCH = 9px`。
 - 默认打开深色主题，可切换到浅色主题。
@@ -86,11 +86,11 @@ Copy-Item -Recurse -Force assets target\release\assets
 ### 子窗口
 
 - 拖动标题栏移动窗口。
-- 每个窗口最外侧是一圈 1px 边框线，线内是一圈 8px 网格边框带。鼠标在外框带上可连续缩放，上、下、左、右和四角都有效；鼠标正落在最外侧 1px 边框线上时不缩放。
+- 每个窗口最外侧是一圈 1px 边框线，线内是一圈 8px 网格边框带，外框内侧还有一圈落在 9px 网格线上的 1px 线。鼠标在可缩放的边框带上可连续改变尺寸，上、下、左、右和四角都有效；鼠标正落在最外侧 1px 边框线上时不缩放。
 - 普通子窗口未置顶时标题栏按钮依次为独占、置顶、最小化、最大化/还原、关闭；置顶后隐藏独占按钮，解除置顶后恢复。
 - 颜色面板默认置顶，标题栏只提供置顶、最小化/还原和关闭。
 - 颜色面板不显示 H 色相滑动条，只保留 RGB 三个滑动条；RGB 滑块按 1px 连续移动，不按 9px 网格跳格。
-- 只有处于独占状态的窗口参与独占碰撞；未独占窗口之间可以自由重叠。独占窗口与非独占窗口拖动、缩放时会停在同一条 1px 边框线上，并可沿边滑动。
+- 只有处于独占状态的窗口参与独占碰撞；未独占窗口之间可以自由重叠。已有窗口切换为独占时保持当前位置，窗口与非独占窗口拖动、缩放时会停在同一条 1px 边框线上，并可沿边滑动。
 - 窗口与一个或多个独占窗口重叠时，完整离开全部重叠区后才恢复独占碰撞约束。
 - 窗口最大化直接铺满工作区，不受独占窗口影响；最大化期间禁止改变尺寸，点击其标题栏只还原窗口，不启动拖动。
 - 最大化还原和任务栏还原都回到操作前的位置与尺寸。
@@ -98,7 +98,7 @@ Copy-Item -Recurse -Force assets target\release\assets
 - 下一次向下偏移会触底时不再创建窗口，状态栏和屏幕文本提示会说明原因；空位释放后自动恢复添加。
 - 关闭窗口后再次打开时重新按居中、左上角偏移或控制面板右下角规则出生。
 - 双击普通窗口标题栏最大化，点击最大化窗口标题栏还原，点击任务栏窗口标题还原。
-- 同一时刻只有一个焦点激活窗口，只有最近操作过的焦点激活窗口可以开始改变尺寸。
+- 同一时刻只有一个焦点激活窗口；所有未最大化、可缩放的窗口都能从可见边框带开始改变尺寸，操作后成为焦点。重叠区域只命中当前最上层窗口，不穿透后窗。
 - 窗口接触独占窗口时停在同一条 1px 边框线上，不产生 2px 边框堆叠。
 - 主窗口空白处拖动不会框选多个窗口，也不会移动窗口。
 - 下拉菜单绘制在当前窗口最上层，并限制在该窗口矩形内。
@@ -117,7 +117,7 @@ Copy-Item -Recurse -Force assets target\release\assets
 | 重置视图 | 把当前图表缩放和平移恢复初始值 |
 | 切换主题 | 在深色与浅色主题之间切换 |
 | 图表配色跟随系统 | 让涨跌色重新跟随当前主题 |
-| 新增图表 | 新增图表窗，最多 8 块 |
+| 新增图表 | 新增图表窗，最多 32 块 |
 | 打开调试控制台 | 打开运行状态、日志和命令输入窗口 |
 | 打印当前状态 | 把图表、窗口、主题和视图状态写入状态栏 |
 
@@ -130,6 +130,7 @@ Copy-Item -Recurse -Force assets target\release\assets
 - 颜色面板只保留 RGB 三个滑动条，不显示 H 色相滑动条。
 - 鼠标位于 RGB 滑块条内时，滚轮可按横向方向移动滑块。
 - 应用后立即刷新对应图表的涨色或跌色。
+- 底部的“撤销”会恢复打开面板时捕获的涨跌颜色并关闭面板，未应用的修改不会写入图表。
 
 ## 主题
 
@@ -154,11 +155,14 @@ assets/themes/light.json
 ```json
 {
   "format": "roundtable-theme",
-  "version": 1,
+  "version": 2,
   "id": "dark",
   "name": "深色",
   "colors": {
+    "application": {},
     "window": {},
+    "controls": {},
+    "editor": {},
     "chart": {},
     "indicators": {},
     "pointer": {}
@@ -169,58 +173,106 @@ assets/themes/light.json
 字段规则：
 
 - `format` 固定为 `roundtable-theme`。
-- `version` 当前固定为 `1`。
+- `version` 当前固定为 `2`。版本 1 的旧扁平格式不再接受，需要按本节的新分组迁移。
 - `id` 必须与文件名一致：`light.json` 使用 `light`，`dark.json` 使用 `dark`。
 - `name` 是给主题文件阅读者看的说明字段，不能为空。
 - 所有颜色必须是 `#RRGGBB`。
 - 所有字段都是必填项；未知字段会报错，避免拼写错误被静默忽略。
+- 同一类控件使用同一个字段，因此菜单、按钮、输入框、滚动条、调色板、编辑器和图表状态栏可以分别配色。
+
+### `application`
+
+| 路径 | 用途 |
+| --- | --- |
+| `title_bar.background` | 主窗口与子窗口标题栏底色 |
+| `title_bar.pattern` | 标题栏空白区的 1px 底纹颜色 |
+| `title_bar.text` | 主窗口与普通子窗口标题文字 |
+| `menu_bar.background` | 顶部菜单栏和下拉菜单底色 |
+| `menu_bar.text` | 菜单文字 |
+| `menu_bar.hover` | 菜单悬停与展开项底色 |
+| `menu_bar.border` | 菜单外框和悬停项边框 |
+| `menu_bar.separator` | 菜单项分隔线 |
+| `workspace.background` | 窗口区桌面底色 |
+| `taskbar.background` | 任务栏底色 |
+| `taskbar.text` | 任务栏入口和最小化项目文字 |
+| `taskbar.border` | 任务栏留白与最小化项目边框 |
+| `status_bar.background` | 主状态栏和控制台状态行底色 |
+| `status_bar.text` | 主状态栏和控制台状态行文字 |
+| `status_bar.border` | 主状态栏和控制台状态行边框 |
 
 ### `window`
 
-| 字段 | 用途 |
+| 路径 | 用途 |
 | --- | --- |
-| `title_bg` | 主窗口与子窗口标题栏底色 |
-| `title_fill` | 标题栏空白区的 1px 底纹颜色，深色主题默认 `#666666`，浅色主题默认 `#999999` |
-| `tooltip_bg` | 悬停提示便签底色，深色主题默认 `#555555`，浅色主题默认 `#DDDDDD` |
-| `menu_bg` | 菜单栏底色 |
-| `work_bg` | 子窗口内容区底色 |
-| `desktop_bg` | 主窗口工作区桌面底色 |
-| `status_bg` | 状态栏与读数区底色 |
-| `panel_bg` | 控制面板、编辑器控件底色 |
-| `splitter` | 分割条底色 |
-| `scroll_track` | 滚动条轨道 |
-| `scroll_thumb` | 滚动条滑块 |
-| `btn_face` | 按钮常态底色 |
-| `btn_hover` | 按钮悬停底色 |
-| `btn_press` | 按钮按下与选中底色 |
-| `sel_bg` | 文本选区底色 |
+| `content_background` | 子窗口内容区底色 |
+| `panel_background` | 控制面板和编辑器工具栏底色 |
+| `border` | 子窗口外圈、内圈和标题分隔线 |
+| `splitter` | 图表分割条底色 |
 | `symbol` | 标题栏自定义符号颜色 |
-| `ctrl_border` | 控件与窗口边框 |
-| `line` | 区域分隔线 |
-| `text` | 主文字色 |
-| `text_white` | 反白文字色 |
-| `syn_comment` | `#` 指标代码注释文字色，固定建议为 `#009900` |
-| `syn_keyword` | 指标脚本关键字颜色；深色主题 `#00FFFF`，亮色主题 `#0000FF` |
+| `text` | 普通窗口文字和图表脚本默认文字 |
+
+### `controls`
+
+| 路径 | 用途 |
+| --- | --- |
+| `button.face` | 按钮常态底色 |
+| `button.hover` | 按钮悬停底色 |
+| `button.pressed` | 按钮按下与选中底色 |
+| `button.text` | 按钮文字 |
+| `button.border` | 按钮边框 |
+| `generic_border` | 面板、分隔区域和通用控件边框 |
+| `selection_background` | 文本选区底色 |
+| `text_input.background` | 单行输入框底色 |
+| `text_input.text` | 输入框合法文字 |
+| `text_input.invalid_text` | 输入框非法文字 |
+| `text_input.caret` | 输入框光标和输入法预编辑文字 |
+| `text_input.border` | 输入框边框 |
+| `scrollbar.track` | 滚动条轨道 |
+| `scrollbar.thumb` | 滚动条滑块 |
+| `scrollbar.border` | 滚动条边框 |
+| `tooltip.background` | 悬停提示底色 |
+| `tooltip.text` | 悬停提示文字 |
+| `tooltip.border` | 悬停提示边框 |
+| `color_picker.background` | 调色板内容区底色 |
+| `color_picker.border` | 调色板网格与手柄边框 |
+| `color_picker.handle` | RGB 滑块手柄底色 |
+
+### `editor`
+
+| 路径 | 用途 |
+| --- | --- |
+| `background` | 指标代码正文区底色 |
+| `gutter_background` | 行号栏底色 |
+| `text` | 普通代码文字 |
+| `comment` | `#` 指标代码注释文字，固定建议为 `#009900` |
+| `keyword` | 脚本关键字颜色；深色主题 `#00FFFF`，亮色主题 `#0000FF` |
+| `line_number` | 行号文字 |
+| `border` | 编辑器分区、行号栏和正文边框 |
 
 ### `chart`
 
-| 字段 | 用途 |
+| 路径 | 用途 |
 | --- | --- |
-| `chart_bg` | 图表绘图区底色 |
-| `chart_line` | 图表框线与坐标线 |
-| `axis_bg` | 坐标轴区域底色 |
+| `background` | 图表绘图区底色 |
+| `border` | 图表框线、坐标线和纵轴边框 |
+| `axis_background` | 坐标轴区域底色 |
 | `tick` | 刻度色 |
-| `cross` | 十字光标线 |
-| `cross_label` | 十字光标标签底色 |
-| `ind_zero` | 指标零轴 |
-| `candle_up` | 上涨 K 线 |
-| `candle_down` | 下跌 K 线 |
-| `text_up` | 上涨数字 |
-| `text_down` | 下跌数字 |
+| `crosshair` | 十字光标线 |
+| `crosshair_label.background` | 十字光标标签底色 |
+| `crosshair_label.text` | 十字光标标签文字 |
+| `crosshair_label.border` | 十字光标标签边框 |
+| `status_field.background` | 图表状态栏底色 |
+| `status_field.label` | 状态栏字段名称与默认说明文字 |
+| `status_field.divider` | 状态栏字段左边线和名称后竖线 |
+| `zero_line` | 指标零轴 |
+| `candle.up` | 上涨 K 线 |
+| `candle.down` | 下跌 K 线 |
+| `price_text.up` | 上涨数字 |
+| `price_text.down` | 下跌数字 |
 
 ### `indicators`
 
-| 字段 | 用途 |
+| 路径 | 用途 |
 | --- | --- |
 | `dif` | MACD DIF |
 | `dea` | MACD DEA |
@@ -241,14 +293,14 @@ assets/themes/light.json
 
 ### `pointer`
 
-| 字段 | 用途 |
+| 路径 | 用途 |
 | --- | --- |
 | `pointer_trail` | 软件指针轨迹 |
 | `pointer_trail_hot` | 快速移动时的指针轨迹 |
 
 修改主题后重启程序，或点击“切换主题”往返一次，让程序重新读取 JSON。
 
-标题栏空白区使用独立底纹类型，内置 `Horizontal`、`Vertical`、`Dot` 三种 1px 模板。当前默认使用 `Horizontal`，即隔 1px 画一条横线；颜色由主题中的 `title_fill` 控制。
+标题栏空白区使用独立底纹类型，内置 `Horizontal`、`Vertical`、`Dot` 三种 1px 模板。当前默认使用 `Horizontal`，即隔 1px 画一条横线；颜色由主题中的 `application.title_bar.pattern` 控制。
 
 ## 指标代码
 
@@ -492,7 +544,7 @@ userdata/
 - 每块子窗口拥有自己的坐标原点，窗口内元素按该原点排版。
 - 靠右和靠下的元素按固定像素跟随窗口边，不重新吸附网格。
 - 所有窗口、控件和区域边框只允许 1px。相邻或接触的边框必须重叠为同一条 1px 线，禁止任何 2px 边框堆叠。
-- 子窗口外框占 9px：最外侧 1px 边框线，线内 8px 网格边框带。外框计入窗口布局和碰撞矩形，边框带可缩放，边框线本身不可缩放。
+- 子窗口外框占 9px：最外侧 1px 边框线，线内 8px 网格边框带。外框计入窗口布局和碰撞矩形，边框带可缩放，边框线本身不可缩放；外框内圈另有一条落在网格线上的 1px 线。
 - 相邻控件共用 1px 线；区域分割线在内容之后补画，避免被内容覆盖。
 - 自由尺寸产生的余量进入弹性段，使用 `free_band` 与 `free_tail` 一类入口处理。
 - 只使用 1px 横线和竖线，不使用圆角、阴影、渐变、透明混色和抗锯齿。
@@ -500,12 +552,13 @@ userdata/
 - 只有处于独占状态的窗口参与独占碰撞；非置顶独占窗口与非置顶普通窗口双向互斥，未独占窗口之间可以自由重叠。碰撞按轴分离，接触边缘后保持滑行并共用 1px 边框。
 - 置顶窗口不受独占互斥影响；已重叠的非置顶窗口先完整离开全部独占区，再恢复碰撞约束；最大化直接铺满工作区，不受独占窗口阻挡。
 - 主窗口空白处不提供框选，子窗口标题栏动作只作用于当前窗口。
-- 标题栏空白区使用 1px 底纹模板，当前默认隔 1px 画一条横线，颜色来自主题 `title_fill`。
+- 标题栏空白区使用 1px 底纹模板，当前默认隔 1px 画一条横线，颜色来自主题 `application.title_bar.pattern`。
 - 悬停提示统一记录到 `StockApp::tooltip`，在整帧最后绘制。
 - 全局文字只能通过 `StockApp::text` 绘制，横向落点只使用 `text_left_x` 与 `text_right_x`。
 - 用户界面文本只使用中文与 ASCII。
 - 文本编辑区域内的鼠标指针始终为文本指针，只有滚轮和右键操作可以临时改变指针状态。
-- 代码编辑器的 `#` 注释使用 `#009900`，关键字颜色来自主题 `syn_keyword`；拖选文本时指针和选择终点限制在代码文本框内。
+- 代码编辑器的 `#` 注释使用主题 `editor.comment`，关键字颜色来自主题 `editor.keyword`；拖选文本时指针和选择终点限制在代码文本框内。
+- 状态字段的左边线、名称后竖线、标签和背景分别来自主题 `chart.status_field`，字段分界都落在 9px 网格线上。
 
 ## 开发与验证
 
@@ -531,12 +584,12 @@ cargo test
 - 任务栏最小化项目仅关闭按钮、标题文字还原和共享 1px 边框。
 - 新窗口居中、左上角回退、标题栏高度偏移、触底提示与空位恢复。
 - 窗口 9px 外框、8px 缩放边框带、边框线不缩放和四角缩放。
-- 状态栏字段动态宽度、网格对齐、名称后 1px 竖线与位置参数拒绝。
+- 状态栏字段动态宽度、网格对齐、字段左边线、名称后 1px 竖线与位置参数拒绝。
 - 独占状态开关、非独占窗口重叠、独占边界滑行与共享边框。
 - 指标公式解析、函数求值、实时脚本替换与错误回退。
 - 用户指标副本路径隔离与源码字符集限制。
 
-部分渲染测试会在内存中做三角形栅格化，因此全量测试耗时高于普通逻辑测试。本次完整验证结果：`cargo fmt --check` 通过，`cargo clippy --all-targets -- -D warnings` 通过，`cargo test -- --test-threads=8` 通过，240 个测试通过、6 个忽略。
+部分渲染测试会在内存中做三角形栅格化，因此全量测试耗时高于普通逻辑测试。本次完整验证结果：`cargo fmt --check` 通过，`cargo clippy --all-targets -- -D warnings` 通过，`cargo test -- --test-threads=8` 通过，246 个测试通过、6 个忽略。
 
 ## 文档维护与交付
 

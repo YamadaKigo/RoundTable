@@ -11,9 +11,7 @@ use crate::ui::panel::*;
 use crate::ui::titlebar::*;
 use eframe::egui;
 
-pub(crate) const MAX_CHART_WINS: usize = 8;
-
-pub(crate) const CASCADE_STEP: f32 = grid_line(WIN_TITLE_ROWS);
+pub(crate) const MAX_CHART_WINS: usize = 32;
 
 pub(crate) const NEW_WIN_W: f32 = cells(60);
 pub(crate) const NEW_WIN_H: f32 = cells(40);
@@ -352,9 +350,19 @@ impl WinMgr {
 
     pub(crate) fn hide_color(&mut self) {
         if let Some(i) = self.wins.iter().position(|w| w.kind == WinKind::Color) {
+            let closed_id = self.wins[i].w.id;
             self.wins[i].w.open = false;
             self.wins[i].minimized = false;
             self.wins[i].w.end_sessions();
+            self.taskbar_pages.clear();
+            if self.focused_id == Some(closed_id) {
+                self.focused_id = self
+                    .draw_order()
+                    .into_iter()
+                    .rev()
+                    .map(|i| self.wins[i].w.id)
+                    .next();
+            }
         }
     }
 
@@ -531,18 +539,6 @@ impl WinMgr {
         }
     }
 
-    fn overlap_blocks_exclusive(&self, id: u64, exclusive: bool, rect: egui::Rect) -> bool {
-        self.wins.iter().any(|window| {
-            window.w.id != id
-                && window.w.open
-                && !window.minimized
-                && !window.w.maximized
-                && !window.pinned
-                && (exclusive || window.exclusive)
-                && interior_overlap(rect, window.w.rect())
-        })
-    }
-
     #[cfg(test)]
     fn exclusive_blocks(&self, id: u64, rect: egui::Rect) -> bool {
         self.wins.iter().any(|window| {
@@ -556,48 +552,11 @@ impl WinMgr {
         })
     }
 
-    fn free_position_as(
-        &self,
-        i: usize,
-        size: egui::Vec2,
-        work: egui::Rect,
-        exclusive: bool,
-    ) -> egui::Pos2 {
-        if !work.is_positive() {
-            return work.min;
-        }
-        for k in 0..=self.wins.len() + 32 {
-            let step = CASCADE_STEP * k as f32;
-            let want = egui::pos2(work.min.x + step, work.min.y + step);
-            let pos = egui::pos2(
-                clamp_soft(want.x, work.min.x, work.max.x - size.x),
-                clamp_soft(want.y, work.min.y, work.max.y - size.y),
-            );
-            let rect = egui::Rect::from_min_size(pos, size);
-            let id = self.wins[i].w.id;
-            if !self.overlap_blocks_exclusive(id, exclusive, rect) && !self.occupied_except(pos, i)
-            {
-                return pos;
-            }
-        }
-        work.min
-    }
-
-    fn set_exclusive(&mut self, i: usize, exclusive: bool, work: egui::Rect) {
+    fn set_exclusive(&mut self, i: usize, exclusive: bool) {
         if exclusive && self.wins[i].pinned {
             self.wins[i].exclusive = false;
             self.wins[i].w.end_sessions();
             return;
-        }
-        if exclusive {
-            let id = self.wins[i].w.id;
-            let rect = self.wins[i].w.rect();
-            if self.overlap_blocks_exclusive(id, true, rect) {
-                let size = self.wins[i].w.size;
-                let pos = self.free_position_as(i, size, work, true);
-                self.wins[i].w.pos = pos;
-                self.wins[i].restore.0 = pos;
-            }
         }
         self.wins[i].exclusive = exclusive;
         self.wins[i].w.end_sessions();
@@ -926,8 +885,7 @@ impl WinMgr {
     #[allow(dead_code)]
     pub(crate) fn toggle_exclusive(&mut self, i: usize) {
         let exclusive = !self.wins[i].exclusive;
-        let work = self.work;
-        self.set_exclusive(i, exclusive, work);
+        self.set_exclusive(i, exclusive);
     }
 
     #[cfg(test)]
@@ -1069,13 +1027,6 @@ impl WinMgr {
         egui::vec2(PANE_MIN_W, PANE_H_MIN)
     }
 
-    fn occupied_except(&self, p: egui::Pos2, skip: usize) -> bool {
-        self.wins
-            .iter()
-            .enumerate()
-            .any(|(i, w)| i != skip && w.w.open && !w.minimized && (w.w.pos - p).length_sq() < 0.5)
-    }
-
     pub(crate) fn drag_active(&self) -> bool {
         self.taskbar_drag.is_some() || self.wins.iter().any(|w| w.w.dragging() || w.w.resizing())
     }
@@ -1125,8 +1076,8 @@ impl WinMgr {
             app.pane_menu = None;
         }
         if self.wins[i].kind == WinKind::Color {
-            app.color_panel.close_cancelled();
-            app.status_msg = "颜色面板：已取消，颜色没变".to_owned();
+            app.color_panel.revert_initial();
+            app.status_msg = "颜色面板：已撤销，颜色没变".to_owned();
         }
         if self.focused_id == Some(closed_id) {
             self.focused_id = self
@@ -1343,17 +1294,25 @@ impl WinMgr {
         let painter = ui.painter().clone();
         let menu = self.taskbar_menu_rect(app);
         let menu_text = ButtonContent::Text(TASKBAR_MENU_TEXT.to_owned());
-        app.draw_button(ui, &painter, menu, &menu_text, false, "");
+        app.draw_button_with_text(
+            ui,
+            &painter,
+            menu,
+            &menu_text,
+            false,
+            "",
+            theme().taskbar_text,
+        );
 
         let gap = self.taskbar_gap;
-        painter.rect_filled(gap, egui::CornerRadius::ZERO, theme().status_bg);
-        border_hard(&painter, gap, theme().ctrl_border);
+        painter.rect_filled(gap, egui::CornerRadius::ZERO, theme().taskbar_bg);
+        border_hard(&painter, gap, theme().taskbar_border);
         vline_hard(
             &painter,
             gap.center().x,
             gap.min.y,
             gap.max.y,
-            theme().ctrl_border,
+            theme().taskbar_border,
         );
 
         let [up, down] = self.taskbar_pager_rects();
@@ -1422,6 +1381,9 @@ impl WinMgr {
                     body.max,
                 );
                 app.ui_color_panel_content(ui, panel);
+                if std::mem::take(&mut app.color_panel.close_requested) {
+                    self.hide_color();
+                }
             }
         }
     }
@@ -1468,7 +1430,7 @@ impl WinMgr {
         );
         if out.exclusive {
             let exclusive = !self.wins[i].exclusive;
-            self.set_exclusive(i, exclusive, work);
+            self.set_exclusive(i, exclusive);
         } else if out.pin {
             let pinned = !self.wins[i].pinned;
             self.set_pin(i, pinned);
