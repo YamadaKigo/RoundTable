@@ -6,6 +6,14 @@ use crate::ui::menu::*;
 use eframe::egui;
 
 impl StockApp {
+    pub(crate) fn pane_menu_count(&self) -> usize {
+        if self.pane_menu_tab == 0 {
+            1
+        } else {
+            indicator::builtin_names().len()
+        }
+    }
+
     pub(crate) fn pane_menu_rect(&self, count: usize, window_bottom: f32) -> Option<egui::Rect> {
         if count == 0 {
             return None;
@@ -42,26 +50,35 @@ impl StockApp {
         };
 
         let names = indicator::builtin_names();
-        let Some(panel) = self.pane_menu_rect(names.len(), ui.max_rect().max.y) else {
+        let count = self.pane_menu_count();
+        let Some(panel) = self.pane_menu_rect(count, ui.max_rect().max.y) else {
             return;
         };
         let painter = ui.painter().clone();
         let menu = MenuPanel {
             rect: panel,
-            rows: names.len(),
+            rows: count,
         };
+        let round_table = self.pane_menu_tab == 0;
         let clicked = menu.ui_rows(self, ui, &painter, |app, painter, j, row| {
+            let label = if round_table {
+                "组建圆桌"
+            } else {
+                names[j]
+            };
             app.text(
                 painter,
                 egui::pos2(text_left_x(row.min.x, panel.min.x), row.center().y),
                 egui::Align2::LEFT_CENTER,
-                names[j],
-                theme().menu_text,
+                label,
+                theme().menu_popup_text,
             );
         });
 
         if let Some(index) = clicked {
-            self.set_pane_indicator(pane, index);
+            if !round_table {
+                self.set_pane_indicator(pane, index);
+            }
             self.pane_menu = None;
             return;
         }

@@ -353,6 +353,8 @@ pub(crate) struct StockApp {
 
     pub(crate) pane_menu: Option<usize>,
 
+    pub(crate) pane_menu_tab: usize,
+
     pub(crate) pane_menu_anchor: egui::Rect,
 
     pub(crate) pane_menu_bar: egui::Rect,
@@ -434,6 +436,7 @@ impl StockApp {
             win_silent: false,
             context_menu: ContextMenuState::default(),
             pane_menu: None,
+            pane_menu_tab: 0,
             pane_menu_anchor: egui::Rect::NOTHING,
             pane_menu_bar: egui::Rect::NOTHING,
             source: SourceView::new(),
@@ -696,7 +699,7 @@ impl StockApp {
 
     pub(crate) fn popup_at(&self, p: egui::Pos2, window_bottom: f32) -> bool {
         if self.pane_menu.is_some() {
-            let count = indicator::builtin_names().len();
+            let count = self.pane_menu_count();
             if self
                 .pane_menu_rect(count, window_bottom)
                 .is_some_and(|r| r.expand(grid_line(1)).contains(p))

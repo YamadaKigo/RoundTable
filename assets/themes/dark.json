@@ -1,6 +1,6 @@
 {
   "format": "roundtable-theme",
-  "version": 3,
+  "version": 4,
   "id": "dark",
   "name": "深色",
   "colors": {
@@ -8,14 +8,28 @@
       "title_bar": {
         "background": "#555555",
         "pattern": "#666666",
-        "text": "#FFFFFF"
+        "text": "#FFFFFF",
+        "button": {
+          "background": "#444444",
+          "hover": "#666666",
+          "symbol": "#FFFFFF",
+          "border": "#990000"
+        }
       },
       "menu_bar": {
         "background": "#444444",
         "text": "#FFFFFF",
         "hover": "#666666",
         "border": "#990000",
-        "separator": "#990000"
+        "separator": "#990000",
+        "popup": {
+          "background": "#444444",
+          "text": "#FFFFFF",
+          "hover": "#666666",
+          "border": "#990000",
+          "frame_border": "#990000",
+          "separator": "#990000"
+        }
       },
       "workspace": {
         "background": "#333333"
@@ -34,7 +48,8 @@
     "window": {
       "background": "#333333",
       "panel": {
-        "background": "#333333"
+        "background": "#333333",
+        "border": "#990000"
       },
       "border": "#990000",
       "splitter": "#444444",
@@ -85,8 +100,8 @@
         "line_number": "#666666"
       },
       "syntax": {
-        "comment": "#009900",
-        "custom_name": "#00FFFF"
+        "comment": "#00CC00",
+        "custom_name": "#FFFF00"
       }
     },
     "chart": {
@@ -117,6 +132,13 @@
       "price_text": {
         "up": "#FF0000",
         "down": "#00FFFF"
+      },
+      "pane_menu": {
+        "background": "#444444",
+        "text": "#FFFFFF",
+        "hover": "#666666",
+        "border": "#990000",
+        "separator": "#990000"
       }
     },
     "indicators": {

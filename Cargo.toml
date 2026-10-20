@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.85"
 description = "圆桌"
 readme = "README.md"
-license = "AGPL-3.0-only"
+license = "GPL-3.0-only"
 
 [dependencies]
 eframe = { version = "0.36.2", default-features = false, features = ["wgpu"] }

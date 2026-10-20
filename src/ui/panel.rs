@@ -239,14 +239,14 @@ impl StockApp {
             bar.min.x,
             bar.max.x,
             bar.min.y,
-            theme().ctrl_border,
+            theme().panel_border,
         );
         hline_hard(
             &painter,
             bar.min.x,
             bar.max.x,
             bar.max.y - LINE_W,
-            theme().ctrl_border,
+            theme().panel_border,
         );
     }
 

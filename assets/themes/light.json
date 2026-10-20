@@ -1,6 +1,6 @@
 {
   "format": "roundtable-theme",
-  "version": 3,
+  "version": 4,
   "id": "light",
   "name": "浅色",
   "colors": {
@@ -8,14 +8,28 @@
       "title_bar": {
         "background": "#BBBBBB",
         "pattern": "#999999",
-        "text": "#000000"
+        "text": "#000000",
+        "button": {
+          "background": "#CCCCCC",
+          "hover": "#DDDDDD",
+          "symbol": "#000000",
+          "border": "#999999"
+        }
       },
       "menu_bar": {
         "background": "#CCCCCC",
         "text": "#000000",
         "hover": "#AAAAAA",
         "border": "#999999",
-        "separator": "#999999"
+        "separator": "#999999",
+        "popup": {
+          "background": "#DDDDDD",
+          "text": "#000000",
+          "hover": "#AAAAAA",
+          "border": "#999999",
+          "frame_border": "#999999",
+          "separator": "#999999"
+        }
       },
       "workspace": {
         "background": "#EEEEEE"
@@ -34,7 +48,8 @@
     "window": {
       "background": "#FFFFFF",
       "panel": {
-        "background": "#DDDDDD"
+        "background": "#DDDDDD",
+        "border": "#999999"
       },
       "border": "#999999",
       "splitter": "#AAAAAA",
@@ -117,6 +132,13 @@
       "price_text": {
         "up": "#FF0000",
         "down": "#009900"
+      },
+      "pane_menu": {
+        "background": "#DDDDDD",
+        "text": "#000000",
+        "hover": "#AAAAAA",
+        "border": "#999999",
+        "separator": "#999999"
       }
     },
     "indicators": {

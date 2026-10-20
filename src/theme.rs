@@ -98,6 +98,14 @@ pub(crate) struct Theme {
 
     pub(crate) title_fill: egui::Color32,
 
+    pub(crate) title_button_bg: egui::Color32,
+
+    pub(crate) title_button_hover: egui::Color32,
+
+    pub(crate) title_button_symbol: egui::Color32,
+
+    pub(crate) title_button_border: egui::Color32,
+
     pub(crate) menu_bg: egui::Color32,
 
     pub(crate) menu_text: egui::Color32,
@@ -107,6 +115,18 @@ pub(crate) struct Theme {
     pub(crate) menu_border: egui::Color32,
 
     pub(crate) menu_separator: egui::Color32,
+
+    pub(crate) menu_popup_bg: egui::Color32,
+
+    pub(crate) menu_popup_text: egui::Color32,
+
+    pub(crate) menu_popup_hover: egui::Color32,
+
+    pub(crate) menu_popup_border: egui::Color32,
+
+    pub(crate) menu_popup_frame_border: egui::Color32,
+
+    pub(crate) menu_popup_separator: egui::Color32,
 
     pub(crate) work_bg: egui::Color32,
 
@@ -125,6 +145,8 @@ pub(crate) struct Theme {
     pub(crate) taskbar_border: egui::Color32,
 
     pub(crate) panel_bg: egui::Color32,
+
+    pub(crate) panel_border: egui::Color32,
 
     pub(crate) splitter: egui::Color32,
 
@@ -216,6 +238,16 @@ pub(crate) struct Theme {
 
     pub(crate) chart_status_divider: egui::Color32,
 
+    pub(crate) chart_pane_bg: egui::Color32,
+
+    pub(crate) chart_pane_text: egui::Color32,
+
+    pub(crate) chart_pane_hover: egui::Color32,
+
+    pub(crate) chart_pane_border: egui::Color32,
+
+    pub(crate) chart_pane_separator: egui::Color32,
+
     pub(crate) ind_zero: egui::Color32,
 
     pub(crate) candle_up: egui::Color32,
@@ -259,11 +291,21 @@ impl Theme {
         title_bg: C_TITLE_BG,
         title_text: C_TEXT,
         title_fill: C_TITLE_FILL,
+        title_button_bg: C_BTN_FACE,
+        title_button_hover: C_BTN_HOVER,
+        title_button_symbol: C_TEXT,
+        title_button_border: C_CTRL_BORDER,
         menu_bg: C_MENU_BG,
         menu_text: C_TEXT,
         menu_hover: C_BTN_PRESS,
         menu_border: C_CTRL_BORDER,
         menu_separator: C_LINE,
+        menu_popup_bg: C_MENU_BG,
+        menu_popup_text: C_TEXT,
+        menu_popup_hover: C_BTN_PRESS,
+        menu_popup_border: C_CTRL_BORDER,
+        menu_popup_frame_border: C_CTRL_BORDER,
+        menu_popup_separator: C_LINE,
         work_bg: C_WORK_BG,
         desktop_bg: C_DESKTOP_BG,
         status_bg: C_STATUS_BG,
@@ -273,6 +315,7 @@ impl Theme {
         taskbar_text: C_TEXT,
         taskbar_border: C_CTRL_BORDER,
         panel_bg: C_PANEL_BG,
+        panel_border: C_CTRL_BORDER,
         splitter: C_SPLITTER,
         scroll_track: C_SCROLL_TRACK,
         scroll_thumb: C_SCROLL_THUMB,
@@ -318,6 +361,11 @@ impl Theme {
         chart_status_bg: C_STATUS_BG,
         chart_status_label: C_TEXT,
         chart_status_divider: C_LINE,
+        chart_pane_bg: C_MENU_BG,
+        chart_pane_text: C_TEXT,
+        chart_pane_hover: C_BTN_PRESS,
+        chart_pane_border: C_CTRL_BORDER,
+        chart_pane_separator: C_LINE,
         ind_zero: C_IND_ZERO,
         candle_up: C_UP,
         candle_down: C_DOWN,
@@ -384,15 +432,26 @@ impl Theme {
         t.symbol = C_TEXT_WHITE;
         t.text_white = C_TEXT_WHITE;
         t.title_text = t.text;
+        t.title_button_bg = t.btn_face;
+        t.title_button_hover = t.btn_hover;
+        t.title_button_symbol = t.symbol;
+        t.title_button_border = t.ctrl_border;
         t.menu_text = t.text;
         t.menu_hover = t.btn_press;
         t.menu_border = t.ctrl_border;
         t.menu_separator = t.line;
+        t.menu_popup_bg = t.menu_bg;
+        t.menu_popup_text = t.menu_text;
+        t.menu_popup_hover = t.menu_hover;
+        t.menu_popup_border = t.menu_border;
+        t.menu_popup_frame_border = t.menu_border;
+        t.menu_popup_separator = t.menu_separator;
         t.status_text = t.text;
         t.status_border = t.ctrl_border;
         t.taskbar_bg = t.status_bg;
         t.taskbar_text = t.text;
         t.taskbar_border = t.ctrl_border;
+        t.panel_border = t.ctrl_border;
         t.scroll_border = t.ctrl_border;
         t.button_text = t.text;
         t.button_border = t.ctrl_border;
@@ -417,6 +476,11 @@ impl Theme {
         t.chart_status_bg = t.status_bg;
         t.chart_status_label = t.text;
         t.chart_status_divider = t.line;
+        t.chart_pane_bg = t.menu_bg;
+        t.chart_pane_text = t.menu_text;
+        t.chart_pane_hover = t.menu_hover;
+        t.chart_pane_border = t.menu_border;
+        t.chart_pane_separator = t.menu_separator;
         t
     }
 
@@ -461,8 +525,8 @@ impl Theme {
                 file.format
             ));
         }
-        if file.version != 3 {
-            return Err(format!("version 必须是 3，当前是 {}", file.version));
+        if file.version != 4 {
+            return Err(format!("version 必须是 4，当前是 {}", file.version));
         }
         if file.id != expected.file_name() {
             return Err(format!(
@@ -481,11 +545,21 @@ impl Theme {
             title_bg: colors.application.title_bar.background.0,
             title_text: colors.application.title_bar.text.0,
             title_fill: colors.application.title_bar.pattern.0,
+            title_button_bg: colors.application.title_bar.button.background.0,
+            title_button_hover: colors.application.title_bar.button.hover.0,
+            title_button_symbol: colors.application.title_bar.button.symbol.0,
+            title_button_border: colors.application.title_bar.button.border.0,
             menu_bg: colors.application.menu_bar.background.0,
             menu_text: colors.application.menu_bar.text.0,
             menu_hover: colors.application.menu_bar.hover.0,
             menu_border: colors.application.menu_bar.border.0,
             menu_separator: colors.application.menu_bar.separator.0,
+            menu_popup_bg: colors.application.menu_bar.popup.background.0,
+            menu_popup_text: colors.application.menu_bar.popup.text.0,
+            menu_popup_hover: colors.application.menu_bar.popup.hover.0,
+            menu_popup_border: colors.application.menu_bar.popup.border.0,
+            menu_popup_frame_border: colors.application.menu_bar.popup.frame_border.0,
+            menu_popup_separator: colors.application.menu_bar.popup.separator.0,
             work_bg: colors.window.background.0,
             desktop_bg: colors.application.workspace.background.0,
             status_bg: colors.application.status_bar.background.0,
@@ -495,6 +569,7 @@ impl Theme {
             taskbar_text: colors.application.taskbar.text.0,
             taskbar_border: colors.application.taskbar.border.0,
             panel_bg: colors.window.panel.background.0,
+            panel_border: colors.window.panel.border.0,
             splitter: colors.window.splitter.0,
             scroll_track: colors.controls.scrollbar.track.0,
             scroll_thumb: colors.controls.scrollbar.thumb.0,
@@ -540,6 +615,11 @@ impl Theme {
             chart_status_bg: colors.chart.status.background.0,
             chart_status_label: colors.chart.status.label.0,
             chart_status_divider: colors.chart.status.divider.0,
+            chart_pane_bg: colors.chart.pane_menu.background.0,
+            chart_pane_text: colors.chart.pane_menu.text.0,
+            chart_pane_hover: colors.chart.pane_menu.hover.0,
+            chart_pane_border: colors.chart.pane_menu.border.0,
+            chart_pane_separator: colors.chart.pane_menu.separator.0,
             ind_zero: colors.chart.zero_line.0,
             candle_up: colors.chart.candle.up.0,
             candle_down: colors.chart.candle.down.0,
@@ -584,16 +664,26 @@ impl Theme {
         })
     }
 
-    pub(crate) const fn colors(&self) -> [egui::Color32; 97] {
+    pub(crate) const fn colors(&self) -> [egui::Color32; 113] {
         [
             self.title_bg,
             self.title_text,
             self.title_fill,
+            self.title_button_bg,
+            self.title_button_hover,
+            self.title_button_symbol,
+            self.title_button_border,
             self.menu_bg,
             self.menu_text,
             self.menu_hover,
             self.menu_border,
             self.menu_separator,
+            self.menu_popup_bg,
+            self.menu_popup_text,
+            self.menu_popup_hover,
+            self.menu_popup_border,
+            self.menu_popup_frame_border,
+            self.menu_popup_separator,
             self.work_bg,
             self.desktop_bg,
             self.status_bg,
@@ -603,6 +693,7 @@ impl Theme {
             self.taskbar_text,
             self.taskbar_border,
             self.panel_bg,
+            self.panel_border,
             self.splitter,
             self.scroll_track,
             self.scroll_thumb,
@@ -648,6 +739,11 @@ impl Theme {
             self.chart_status_bg,
             self.chart_status_label,
             self.chart_status_divider,
+            self.chart_pane_bg,
+            self.chart_pane_text,
+            self.chart_pane_hover,
+            self.chart_pane_border,
+            self.chart_pane_separator,
             self.ind_zero,
             self.candle_up,
             self.candle_down,
@@ -734,6 +830,16 @@ struct TitleBarColors {
     background: HexColor,
     pattern: HexColor,
     text: HexColor,
+    button: TitleButtonColors,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TitleButtonColors {
+    background: HexColor,
+    hover: HexColor,
+    symbol: HexColor,
+    border: HexColor,
 }
 
 #[derive(Deserialize)]
@@ -743,6 +849,18 @@ struct MenuBarColors {
     text: HexColor,
     hover: HexColor,
     border: HexColor,
+    separator: HexColor,
+    popup: MenuPopupColors,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MenuPopupColors {
+    background: HexColor,
+    text: HexColor,
+    hover: HexColor,
+    border: HexColor,
+    frame_border: HexColor,
     separator: HexColor,
 }
 
@@ -775,6 +893,7 @@ struct WindowColors {
 #[serde(deny_unknown_fields)]
 struct PanelColors {
     background: HexColor,
+    border: HexColor,
 }
 
 #[derive(Deserialize)]
@@ -874,6 +993,17 @@ struct ChartColors {
     zero_line: HexColor,
     candle: CandleColors,
     price_text: PriceTextColors,
+    pane_menu: ChartPaneMenuColors,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChartPaneMenuColors {
+    background: HexColor,
+    text: HexColor,
+    hover: HexColor,
+    border: HexColor,
+    separator: HexColor,
 }
 
 #[derive(Deserialize)]

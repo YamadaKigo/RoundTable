@@ -1127,7 +1127,7 @@ impl StockApp {
         );
     }
 
-    pub(crate) const PANE_TABS: [&'static str; 2] = ["切换", "代码"];
+    pub(crate) const PANE_TABS: [&'static str; 3] = ["圆桌", "切换", "代码"];
 
     #[allow(dead_code)]
     pub(crate) fn pane_button_rects(title: egui::Rect, widths: &[f32]) -> Vec<egui::Rect> {
@@ -1141,7 +1141,7 @@ impl StockApp {
         title: egui::Rect,
     ) -> Vec<egui::Rect> {
         let open = if self.pane_menu == Some(pane) {
-            Some(0)
+            Some(self.pane_menu_tab)
         } else {
             None
         };
@@ -1156,14 +1156,15 @@ impl StockApp {
         );
 
         match out.clicked {
-            Some(0) => {
-                self.pane_menu = if self.pane_menu == Some(pane) {
+            Some(tab @ (0 | 1)) => {
+                self.pane_menu = if self.pane_menu == Some(pane) && self.pane_menu_tab == tab {
                     None
                 } else {
                     Some(pane)
                 };
+                self.pane_menu_tab = tab;
             }
-            Some(1) => {
+            Some(2) => {
                 self.request_win(WinCmd::OpenSource(pane));
                 self.pane_menu = None;
             }
@@ -1171,7 +1172,7 @@ impl StockApp {
         }
 
         if self.pane_menu == Some(pane) {
-            self.pane_menu_anchor = out.rects[0];
+            self.pane_menu_anchor = out.rects[self.pane_menu_tab];
             self.pane_menu_bar = title;
         }
         out.rects

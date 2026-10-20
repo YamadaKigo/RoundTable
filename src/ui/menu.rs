@@ -285,17 +285,21 @@ impl MenuPanel {
     }
 
     pub(crate) fn paint_bg(&self, painter: &egui::Painter) {
-        painter.rect_filled(self.frame_rect(), egui::CornerRadius::ZERO, theme().menu_bg);
+        painter.rect_filled(
+            self.frame_rect(),
+            egui::CornerRadius::ZERO,
+            theme().menu_popup_bg,
+        );
     }
 
     pub(crate) fn paint_row_hover(&self, painter: &egui::Painter, row: egui::Rect) {
-        painter.rect_filled(row, egui::CornerRadius::ZERO, theme().menu_hover);
-        border_hard(painter, row, theme().menu_border);
+        painter.rect_filled(row, egui::CornerRadius::ZERO, theme().menu_popup_hover);
+        border_hard(painter, row, theme().menu_popup_border);
     }
 
     pub(crate) fn paint_border(&self, painter: &egui::Painter) {
-        border_hard(painter, self.frame_rect(), theme().menu_border);
-        border_hard(painter, self.rect, theme().menu_border);
+        border_hard(painter, self.frame_rect(), theme().menu_popup_frame_border);
+        border_hard(painter, self.rect, theme().menu_popup_border);
     }
 
     pub(crate) fn frame_rect(&self) -> egui::Rect {
@@ -325,7 +329,7 @@ impl MenuPanel {
                     row.min.x + LINE_W,
                     row.max.x - LINE_W,
                     row.max.y - LINE_W,
-                    theme().menu_separator,
+                    theme().menu_popup_separator,
                 );
             }
             if resp.clicked() {
@@ -340,14 +344,47 @@ impl MenuPanel {
 #[derive(Clone, Copy)]
 pub(crate) struct MenuBarStyle {
     pub(crate) hover_switch: bool,
+    pane: bool,
 }
 
 impl MenuBarStyle {
-    pub(crate) const CLASSIC: Self = Self { hover_switch: true };
+    pub(crate) const CLASSIC: Self = Self {
+        hover_switch: true,
+        pane: false,
+    };
 
     pub(crate) const PANE_BAR: Self = Self {
         hover_switch: false,
+        pane: true,
     };
+
+    fn colors(
+        self,
+    ) -> (
+        egui::Color32,
+        egui::Color32,
+        egui::Color32,
+        egui::Color32,
+        egui::Color32,
+    ) {
+        if self.pane {
+            (
+                theme().chart_pane_bg,
+                theme().chart_pane_text,
+                theme().chart_pane_hover,
+                theme().chart_pane_border,
+                theme().chart_pane_separator,
+            )
+        } else {
+            (
+                theme().menu_bg,
+                theme().menu_text,
+                theme().menu_hover,
+                theme().menu_border,
+                theme().menu_separator,
+            )
+        }
+    }
 }
 
 pub(crate) struct MenuBarOut {
@@ -387,6 +424,7 @@ impl<'a> MenuBar<'a> {
         mut open: Option<usize>,
     ) -> MenuBarOut {
         let painter = ui.painter().clone();
+        let (bg, text, hover, border, separator) = self.style.colors();
         let widths: Vec<f32> = self
             .titles
             .iter()
@@ -401,7 +439,7 @@ impl<'a> MenuBar<'a> {
             app.pointer.force_hint(CursorKind::Normal, ui);
         }
 
-        painter.rect_filled(self.bar, egui::CornerRadius::ZERO, theme().menu_bg);
+        painter.rect_filled(self.bar, egui::CornerRadius::ZERO, bg);
 
         let mut hovered = vec![false; self.titles.len()];
         let mut clicked = None;
@@ -419,14 +457,14 @@ impl<'a> MenuBar<'a> {
         for (i, title) in self.titles.iter().enumerate() {
             let item_open = open == Some(i);
             if hovered[i] || item_open {
-                Self::paint_hover(&painter, rects[i]);
+                Self::paint_hover(&painter, rects[i], hover, border);
             }
             app.text(
                 &painter,
                 rects[i].center(),
                 egui::Align2::CENTER_CENTER,
                 title,
-                theme().menu_text,
+                text,
             );
         }
 
@@ -436,7 +474,7 @@ impl<'a> MenuBar<'a> {
                 rect.max.x - LINE_W,
                 self.bar.min.y + LINE_W,
                 self.bar.max.y - LINE_W,
-                theme().menu_separator,
+                separator,
             );
         }
 
@@ -445,7 +483,7 @@ impl<'a> MenuBar<'a> {
             self.bar.min.x,
             self.bar.max.x,
             self.bar.max.y - LINE_W,
-            theme().menu_border,
+            border,
         );
 
         MenuBarOut {
@@ -455,9 +493,14 @@ impl<'a> MenuBar<'a> {
         }
     }
 
-    fn paint_hover(painter: &egui::Painter, rect: egui::Rect) {
-        painter.rect_filled(rect, egui::CornerRadius::ZERO, theme().menu_hover);
-        border_hard(painter, rect, theme().menu_border);
+    fn paint_hover(
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        hover: egui::Color32,
+        border: egui::Color32,
+    ) {
+        painter.rect_filled(rect, egui::CornerRadius::ZERO, hover);
+        border_hard(painter, rect, border);
     }
 }
 
@@ -598,7 +641,7 @@ fn ui_menu_popup_inner(
                 egui::pos2(text_left_x(row.min.x, panel.rect.min.x), row.center().y),
                 egui::Align2::LEFT_CENTER,
                 node.label,
-                theme().menu_text,
+                theme().menu_popup_text,
             );
             if node.has_children() {
                 paint_submenu_arrow(painter, row);

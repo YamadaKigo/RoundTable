@@ -122,6 +122,7 @@ fn blank_app() -> StockApp {
         context_menu: crate::ui::contextmenu::ContextMenuState::default(),
         win_cmd: None,
         pane_menu: None,
+        pane_menu_tab: 0,
         pane_menu_anchor: egui::Rect::NOTHING,
         pane_menu_bar: egui::Rect::NOTHING,
         source: SourceView::new(),
@@ -1837,24 +1838,24 @@ fn chart_rows_layout_with_status() -> crate::indicator::ChartLayout {
 
 fn pane_btn_widths() -> Vec<f32> {
     let w = |s: &str| snap_cells_up(crate::font::text_width(s) as f32 + 2.0 * TEXT_PAD_X);
-    vec![w("切换"), w("代码")]
+    vec![w("圆桌"), w("切换"), w("代码")]
 }
 
 #[test]
-fn pane_titlebar_holds_two_buttons_on_the_grid() {
+fn pane_titlebar_holds_three_buttons_on_the_grid() {
     let work = left_work();
     let [kline, _bar, _vol, _bar2, _ind] =
         StockApp::left_rows(work, KLINE_H_DEFAULT, VOL_H_DEFAULT);
     let (title, _info, _main, _time) = chart_rows(kline, crate::indicator::ChartLayout::new(2, 2));
     let buttons = StockApp::pane_button_rects(title, &pane_btn_widths());
 
-    assert_eq!(pane_btn_widths(), vec![cells(6), cells(6)]);
+    assert_eq!(pane_btn_widths(), vec![cells(6), cells(6), cells(6)]);
     assert_eq!(buttons[0].width(), cells(6));
     assert_eq!(buttons[0].height(), PANE_BTN_H);
     assert_eq!(
         buttons[1].min.x,
         buttons[0].max.x - LINE_W,
-        "两个按钮没共用中间那条线"
+        "图表菜单项没共用中间那条线"
     );
     assert_eq!(buttons[0].min.x, kline.min.x, "按钮没有从 Pane 左侧开始");
     assert!(buttons[1].max.x < kline.max.x);
@@ -1866,7 +1867,7 @@ fn pane_titlebar_holds_two_buttons_on_the_grid() {
         assert_eq!(b.max.y, title.max.y, "按钮下边框没压在标题栏下沿");
     }
     println!(
-        "标题栏 {}px，两个按钮各 {}x{}",
+        "标题栏 {}px，三个按钮各 {}x{}",
         title.height(),
         buttons[0].width(),
         PANE_BTN_H
@@ -1923,16 +1924,17 @@ fn pane_menu_lists_builtins_and_swaps_the_indicator() {
     let (title, _info, _main, _time) = chart_rows(kline, crate::indicator::ChartLayout::new(2, 2));
     let buttons = StockApp::pane_button_rects(title, &pane_btn_widths());
     app.pane_menu = Some(PANE_CANDLE);
-    app.pane_menu_anchor = buttons[0];
+    app.pane_menu_tab = 1;
+    app.pane_menu_anchor = buttons[1];
     let panel = app.pane_menu_rect(names.len(), WINDOW_H).unwrap();
     let frame = panel.expand(grid_line(1));
     assert_eq!(
-        frame.min.x, buttons[0].min.x,
+        frame.min.x, buttons[1].min.x,
         "菜单装饰框没和「切换」按钮对齐"
     );
     assert_eq!(
         frame.min.y,
-        buttons[0].max.y - LINE_W,
+        buttons[1].max.y - LINE_W,
         "菜单装饰框上沿没压在标题栏下沿那条线上"
     );
     assert_eq!(
@@ -1974,10 +1976,10 @@ fn pane_menu_flips_up_when_it_would_overflow_the_window() {
     let names = indicator::builtin_names();
     let h = cells(PANE_MENU_ROW_ROWS * names.len() as i32);
     let w = |s: &str| snap_cells_up(crate::font::text_width(s) as f32 + 2.0 * TEXT_PAD_X);
-    let widths = [w("切换"), w("代码")];
+    let widths = [w("圆桌"), w("切换"), w("代码")];
 
     let (title, _, _, _) = chart_rows(kline, crate::indicator::ChartLayout::new(2, 2));
-    app.pane_menu_anchor = StockApp::pane_button_rects(title, &widths)[0];
+    app.pane_menu_anchor = StockApp::pane_button_rects(title, &widths)[1];
     let panel = app.pane_menu_rect(names.len(), WINDOW_H).unwrap();
     let frame = panel.expand(grid_line(1));
     assert_eq!(
@@ -1994,7 +1996,7 @@ fn pane_menu_flips_up_when_it_would_overflow_the_window() {
     assert_eq!(panel.height(), h);
 
     let (title, _, _, _) = chart_rows(ind, crate::indicator::ChartLayout::new(2, 2));
-    app.pane_menu_anchor = StockApp::pane_button_rects(title, &widths)[0];
+    app.pane_menu_anchor = StockApp::pane_button_rects(title, &widths)[1];
     let anchor = app.pane_menu_anchor;
     let panel = app.pane_menu_rect(names.len(), anchor.max.y).unwrap();
     let frame = panel.expand(grid_line(1));
@@ -5876,11 +5878,11 @@ fn pane_menus_stay_open_after_the_click() {
     let pane = app.win_mgr.wins[i].pane;
     let body = ManagedWin::body(app.win_mgr.rect_of(i));
     let (title, _, _, _) = chart_rows(body, app.panes[pane].indicator.layout());
-    let tabs = ["切换", "代码"];
+    let tabs = StockApp::PANE_TABS;
     let widths: Vec<f32> = tabs.iter().map(|t| tab_width(&mut app, t)).collect();
     let buttons = StockApp::pane_button_rects(title, &widths);
 
-    let p = buttons[0].center();
+    let p = buttons[1].center();
     win_frame(&mut app, &ctx, work, press(p));
     win_frame(&mut app, &ctx, work, release(p));
     assert_eq!(app.pane_menu, Some(pane), "点「切换」没开出指标面板");
@@ -5899,6 +5901,63 @@ fn pane_menus_stay_open_after_the_click() {
         vec![egui::Event::PointerMoved(panel.center())],
     );
     assert_eq!(app.pane_menu, Some(pane), "指针移进面板就把面板收了");
+}
+
+#[test]
+fn chart_title_menus_start_with_roundtable() {
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    let mut app = blank_app();
+    app.text_engine = HardText::new(&ctx);
+    app.replace_bars(data::random_walk::generate(BAR_SEED, BAR_COUNT, BAR_START));
+    render_events_in(&ctx, &mut app, vec![]);
+    let work = split_areas(egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        egui::vec2(WINDOW_W, WINDOW_H),
+    ))[2];
+    let i = app.win_mgr.live_index().expect("no chart window");
+    let pane = app.win_mgr.wins[i].pane;
+    let body = ManagedWin::body(app.win_mgr.rect_of(i));
+    let (title, _, _, _) = chart_rows(body, app.panes[pane].indicator.layout());
+    let widths: Vec<f32> = StockApp::PANE_TABS
+        .iter()
+        .map(|t| tab_width(&mut app, t))
+        .collect();
+    let first = StockApp::pane_button_rects(title, &widths)[0].center();
+    let click = |pos| {
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    };
+    let release = |pos| {
+        vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]
+    };
+    assert_eq!(StockApp::PANE_TABS, ["圆桌", "切换", "代码"]);
+    render_events_in(&ctx, &mut app, click(first));
+    render_events_in(&ctx, &mut app, release(first));
+    assert_eq!(app.pane_menu, Some(pane));
+    assert_eq!(app.pane_menu_tab, 0);
+    assert_eq!(app.pane_menu_count(), 1);
+    let rect = app.pane_menu_rect(1, work.max.y).expect("roundtable menu");
+    let item = egui::pos2(
+        rect.center().x,
+        rect.min.y + PANE_MENU_ROW_ROWS as f32 * PITCH / 2.0,
+    );
+    render_events_in(&ctx, &mut app, click(item));
+    render_events_in(&ctx, &mut app, release(item));
+    assert_eq!(app.pane_menu, None);
 }
 
 #[test]
@@ -6347,6 +6406,9 @@ fn theme_json_files_parse_and_accept_user_edits() {
     edit["colors"]["controls"]["text_input"]["background"] = serde_json::json!("#040506");
     edit["colors"]["editor"]["syntax"]["custom_name"] = serde_json::json!("#070809");
     edit["colors"]["chart"]["status"]["divider"] = serde_json::json!("#0A0B0C");
+    edit["colors"]["application"]["menu_bar"]["popup"]["frame_border"] =
+        serde_json::json!("#0D0E0F");
+    edit["colors"]["application"]["title_bar"]["button"]["border"] = serde_json::json!("#101112");
     let edited =
         Theme::from_json(&edit.to_string(), ThemeId::Classic).expect("修改后的主题应能解析");
     assert_eq!(edited.title_bg, egui::Color32::from_rgb(0xAA, 0xBB, 0xCC));
@@ -6367,6 +6429,14 @@ fn theme_json_files_parse_and_accept_user_edits() {
     assert_eq!(
         edited.chart_status_divider,
         egui::Color32::from_rgb(0x0A, 0x0B, 0x0C)
+    );
+    assert_eq!(
+        edited.menu_popup_frame_border,
+        egui::Color32::from_rgb(0x0D, 0x0E, 0x0F)
+    );
+    assert_eq!(
+        edited.title_button_border,
+        egui::Color32::from_rgb(0x10, 0x11, 0x12)
     );
 
     edit["colors"]["chart"]
@@ -9597,9 +9667,10 @@ fn pane_menus_stay_open_until_a_click_or_key() {
         .iter()
         .map(|t| tab_width(&mut app, t))
         .collect();
-    let switch = StockApp::pane_button_rects(title, &widths)[0];
+    let switch = StockApp::pane_button_rects(title, &widths)[1];
 
     app.pane_menu = Some(pane);
+    app.pane_menu_tab = 1;
     render_events_in(
         &ctx,
         &mut app,
@@ -11183,7 +11254,7 @@ fn pane_menu_survives_a_second_chart_window() {
         .iter()
         .map(|t| tab_width(&mut app, t))
         .collect();
-    let p = StockApp::pane_button_rects(title, &widths)[0].center();
+    let p = StockApp::pane_button_rects(title, &widths)[1].center();
     frame(
         &mut app,
         vec![
@@ -11245,7 +11316,7 @@ fn pane_menu_survives_a_second_chart_window() {
         .expect("第二块图表窗不见了");
     let body = ManagedWin::body(app.win_mgr.rect_of(other));
     let (title, _, _, _) = chart_rows(body, app.panes[other_pane].indicator.layout());
-    let p2 = StockApp::pane_button_rects(title, &widths)[0].center();
+    let p2 = StockApp::pane_button_rects(title, &widths)[1].center();
     frame(&mut app, vec![egui::Event::PointerMoved(p2)]);
     frame(
         &mut app,

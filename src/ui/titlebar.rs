@@ -111,12 +111,12 @@ pub(crate) fn paint_sys_button(
     exclusive: bool,
 ) {
     let face = if hot {
-        theme().btn_hover
+        theme().title_button_hover
     } else {
-        theme().btn_face
+        theme().title_button_bg
     };
     painter.rect_filled(rect, egui::CornerRadius::ZERO, face);
-    border_hard(painter, rect, theme().button_border);
+    border_hard(painter, rect, theme().title_button_border);
 
     let content =
         ButtonContent::Symbol(kind.symbol(maximized, restore_minimized, pinned, exclusive));
@@ -127,7 +127,7 @@ pub(crate) fn paint_sys_button(
     let symbol_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(SYMBOL_W, SYMBOL_H));
     app.symbols
         .get(symbol)
-        .paint(painter, symbol_rect, theme().symbol);
+        .paint(painter, symbol_rect, theme().title_button_symbol);
 
     if hot {
         app.tooltip = Some((
