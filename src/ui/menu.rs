@@ -150,7 +150,6 @@ pub(crate) fn menu_panel_width(app: &mut StockApp, level: &[MenuNode]) -> f32 {
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum MenuAlign {
     Left,
-    Right,
 }
 
 pub(crate) fn menu_item_rects(
@@ -169,14 +168,6 @@ pub(crate) fn menu_item_rects(
                 rects.push(item(x, w));
                 x += w - LINE_W;
             }
-        }
-        MenuAlign::Right => {
-            let mut x = bar.max.x;
-            for &w in widths.iter().rev() {
-                rects.push(item(x - w, w));
-                x -= w - LINE_W;
-            }
-            rects.reverse();
         }
     }
     rects
@@ -203,9 +194,8 @@ fn menu_hit_rect(rect: egui::Rect) -> egui::Rect {
 }
 
 impl MenuPanel {
-    pub(crate) fn right(anchor: egui::Rect, w: f32, rows: usize, window_bottom: f32) -> Self {
+    pub(crate) fn left(anchor: egui::Rect, w: f32, rows: usize, window_bottom: f32) -> Self {
         let h = cells(MENU_ROW_ROWS * rows as i32);
-        let x = anchor.max.x - w;
         let below = anchor.max.y - LINE_W;
         let y = if below + h > window_bottom {
             anchor.min.y + LINE_W - h
@@ -213,7 +203,7 @@ impl MenuPanel {
             below
         };
         Self {
-            rect: egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, h)),
+            rect: egui::Rect::from_min_size(egui::pos2(anchor.min.x, y), egui::vec2(w, h)),
             rows,
         }
     }
@@ -326,19 +316,13 @@ impl MenuPanel {
 #[derive(Clone, Copy)]
 pub(crate) struct MenuBarStyle {
     pub(crate) hover_switch: bool,
-
-    pub(crate) lead_divider: bool,
 }
 
 impl MenuBarStyle {
-    pub(crate) const CLASSIC: Self = Self {
-        hover_switch: true,
-        lead_divider: false,
-    };
+    pub(crate) const CLASSIC: Self = Self { hover_switch: true };
 
     pub(crate) const PANE_BAR: Self = Self {
         hover_switch: false,
-        lead_divider: true,
     };
 }
 
@@ -350,36 +334,26 @@ pub(crate) struct MenuBarOut {
     pub(crate) open: Option<usize>,
 }
 
-pub(crate) struct MenuBar<'a, 'b> {
+pub(crate) struct MenuBar<'a> {
     bar: egui::Rect,
-    lead: Option<String>,
     titles: &'a [&'static str],
     align: MenuAlign,
-    label: Option<&'b str>,
     style: MenuBarStyle,
 }
 
-impl<'a, 'b> MenuBar<'a, 'b> {
+impl<'a> MenuBar<'a> {
     pub(crate) fn new(
         bar: egui::Rect,
         titles: &'a [&'static str],
         align: MenuAlign,
-        label: Option<&'b str>,
         style: MenuBarStyle,
     ) -> Self {
         Self {
             bar,
-            lead: None,
             titles,
             align,
-            label,
             style,
         }
-    }
-
-    pub(crate) fn with_lead(mut self, lead: &str) -> Self {
-        self.lead = Some(lead.to_owned());
-        self
     }
 
     pub(crate) fn ui(
@@ -389,13 +363,8 @@ impl<'a, 'b> MenuBar<'a, 'b> {
         mut open: Option<usize>,
     ) -> MenuBarOut {
         let painter = ui.painter().clone();
-        let offset = usize::from(self.lead.is_some());
-        let mut display_titles: Vec<&str> = Vec::with_capacity(self.titles.len() + offset);
-        if let Some(lead) = &self.lead {
-            display_titles.push(lead.as_str());
-        }
-        display_titles.extend(self.titles.iter().copied());
-        let widths: Vec<f32> = display_titles
+        let widths: Vec<f32> = self
+            .titles
             .iter()
             .map(|title| tab_width(app, title))
             .collect();
@@ -410,37 +379,21 @@ impl<'a, 'b> MenuBar<'a, 'b> {
 
         painter.rect_filled(self.bar, egui::CornerRadius::ZERO, theme().menu_bg);
 
-        if let Some(text) = self.label {
-            app.text(
-                &painter,
-                egui::pos2(
-                    text_left_x(self.bar.min.x, self.bar.min.x),
-                    self.bar.center().y,
-                ),
-                egui::Align2::LEFT_CENTER,
-                text,
-                theme().menu_text,
-            );
-        }
-        let mut hovered = vec![false; display_titles.len()];
+        let mut hovered = vec![false; self.titles.len()];
         let mut clicked = None;
         for (i, rect) in rects.iter().enumerate() {
             let resp = interact_rect(ui, menu_hit_rect(*rect), egui::Sense::click());
             hovered[i] = resp.hovered();
-            if offset == 1 && i == 0 {
-                continue;
-            }
-            let item = i - offset;
             if resp.clicked() {
-                clicked = Some(item);
-                open = if open == Some(item) { None } else { Some(item) };
-            } else if self.style.hover_switch && hovered[i] && open.is_some_and(|cur| cur != item) {
-                open = Some(item);
+                clicked = Some(i);
+                open = if open == Some(i) { None } else { Some(i) };
+            } else if self.style.hover_switch && hovered[i] && open.is_some_and(|cur| cur != i) {
+                open = Some(i);
             }
         }
 
-        for (i, title) in display_titles.iter().enumerate() {
-            let item_open = !(offset == 1 && i == 0) && open == Some(i.saturating_sub(offset));
+        for (i, title) in self.titles.iter().enumerate() {
+            let item_open = open == Some(i);
             if hovered[i] || item_open {
                 Self::paint_hover(&painter, rects[i]);
             }
@@ -453,15 +406,6 @@ impl<'a, 'b> MenuBar<'a, 'b> {
             );
         }
 
-        if self.style.lead_divider {
-            vline_hard(
-                &painter,
-                rects[0].min.x,
-                self.bar.min.y + LINE_W,
-                self.bar.max.y - LINE_W,
-                theme().menu_separator,
-            );
-        }
         for rect in &rects {
             vline_hard(
                 &painter,
@@ -481,7 +425,7 @@ impl<'a, 'b> MenuBar<'a, 'b> {
         );
 
         MenuBarOut {
-            rects: rects[offset..].to_vec(),
+            rects,
             clicked,
             open,
         }
@@ -501,27 +445,9 @@ pub(crate) fn menu_bar_ui(
     titles: &[&'static str],
     align: MenuAlign,
     open: Option<usize>,
-    label: Option<&str>,
     style: MenuBarStyle,
 ) -> MenuBarOut {
-    MenuBar::new(bar, titles, align, label, style).ui(app, ui, open)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn menu_bar_ui_with_lead(
-    app: &mut StockApp,
-    ui: &mut egui::Ui,
-    bar: egui::Rect,
-    lead: &str,
-    titles: &[&'static str],
-    align: MenuAlign,
-    open: Option<usize>,
-    label: Option<&str>,
-    style: MenuBarStyle,
-) -> MenuBarOut {
-    MenuBar::new(bar, titles, align, label, style)
-        .with_lead(lead)
-        .ui(app, ui, open)
+    MenuBar::new(bar, titles, align, style).ui(app, ui, open)
 }
 
 pub(crate) fn ui_menu_bar(
@@ -539,7 +465,6 @@ pub(crate) fn ui_menu_bar(
         &titles,
         MenuAlign::Left,
         state.open,
-        None,
         MenuBarStyle::CLASSIC,
     );
     let switched = out.open != state.open;

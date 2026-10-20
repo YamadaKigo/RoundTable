@@ -31,8 +31,8 @@ impl Default for PointerFeel {
     fn default() -> Self {
         Self {
             base_speed: 1.0,
-            acceleration: 0.3,
-            accel_start: 250.0,
+            acceleration: 0.0,
+            accel_start: 300.0,
             accel_full: 3000.0,
         }
     }
@@ -264,6 +264,13 @@ mod tests {
 
     fn bounds() -> egui::Rect {
         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1920.0, 1080.0))
+    }
+
+    #[test]
+    fn default_pointer_feel_keeps_system_style_one_to_one_motion() {
+        let feel = PointerFeel::default();
+        assert_eq!(feel.base_speed, 1.0);
+        assert_eq!(feel.acceleration, 0.0);
     }
 
     #[test]

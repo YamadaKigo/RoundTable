@@ -8,6 +8,7 @@ use crate::ui::icon::CursorKind;
 use crate::ui::menu::*;
 use crate::ui::textbuf::*;
 use eframe::egui;
+use std::collections::BTreeSet;
 
 pub(crate) const EDITOR_TABS: [MenuTab; 3] = [
     MenuTab {
@@ -734,7 +735,23 @@ impl TextEditor {
                 &format!("{}", idx + 1),
                 theme().editor_line_number,
             );
-            paint_code_line(app, &text_painter, code_x, y, self.buf.line(idx), code_w);
+        }
+        let user_names = code_user_names(&self.buf.lines);
+        for k in 0..visible {
+            let idx = self.scroll + k;
+            if idx >= self.buf.line_count() {
+                break;
+            }
+            let y = body_top + k as f32 * SRC_ROW_PITCH + LINE_W + SRC_LINE_H / 2.0;
+            paint_code_line(
+                app,
+                &text_painter,
+                code_x,
+                y,
+                self.buf.line(idx),
+                code_w,
+                &user_names,
+            );
         }
 
         let mut caret_rect: Option<egui::Rect> = None;
@@ -824,97 +841,10 @@ impl TextEditor {
 pub(crate) enum SynKind {
     Plain,
 
-    Keyword,
+    UserName,
 
     Comment,
 }
-
-pub(crate) const SYN_KEYWORDS: &[&str] = &[
-    "ABS",
-    "AND",
-    "AUTO",
-    "AXIS",
-    "AXIS_AUTO",
-    "AXIS_DYNAMIC",
-    "AXIS_FIXED",
-    "AXIS_HIDE",
-    "AXIS_SHOW",
-    "AXIS_ZERO",
-    "BIAS1",
-    "BIAS2",
-    "BIAS3",
-    "BOLL_DOWN",
-    "BOLL_MID",
-    "BOLL_UP",
-    "CANDLE",
-    "CCI",
-    "CLOSE",
-    "COLOR",
-    "CROSS",
-    "D",
-    "DEA",
-    "DIF",
-    "DOWN",
-    "EMA",
-    "EMA1",
-    "EMA2",
-    "EMA3",
-    "EMA4",
-    "EMA5",
-    "EMA6",
-    "FALSE",
-    "HHV",
-    "HIDE_AXIS",
-    "HIDE_STATUS",
-    "HIDE_TIME",
-    "HIST",
-    "HLINE",
-    "IF",
-    "J",
-    "K",
-    "KDJ",
-    "LINE",
-    "LLV",
-    "MA",
-    "MA1",
-    "MA2",
-    "MA3",
-    "MA4",
-    "MA5",
-    "MA6",
-    "MAX",
-    "MIN",
-    "NOT",
-    "OBV",
-    "OHLC",
-    "OR",
-    "PAGODA",
-    "REF",
-    "RGB",
-    "RSI",
-    "RSI1",
-    "RSI2",
-    "RSI3",
-    "SHOW_AXIS",
-    "SHOW_STATUS",
-    "SHOW_TIME",
-    "STATUS",
-    "STATUS_FIELD",
-    "STATUS_HIDE",
-    "STATUS_SHOW",
-    "STATUS_VALUE",
-    "STD",
-    "SUM",
-    "SYSTEM_COLOR",
-    "TEXT",
-    "TIME",
-    "TIME_HIDE",
-    "TIME_SHOW",
-    "TRUE",
-    "UP",
-    "VOL",
-    "ZERO",
-];
 
 fn push_run(runs: &mut Vec<(String, SynKind)>, text: String, kind: SynKind) {
     if text.is_empty() {
@@ -929,7 +859,77 @@ fn push_run(runs: &mut Vec<(String, SynKind)>, text: String, kind: SynKind) {
     runs.push((text, kind));
 }
 
+pub(crate) fn code_user_names(lines: &[String]) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for line in lines {
+        let chars: Vec<char> = line.chars().collect();
+        let n = chars.len();
+        let mut i = 0;
+        let mut in_string = false;
+        let mut escaped = false;
+        while i < n {
+            let ch = chars[i];
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                i += 1;
+                continue;
+            }
+            if ch == '"' {
+                in_string = true;
+                i += 1;
+                continue;
+            }
+            if ch == '/' && chars.get(i + 1) == Some(&'/') {
+                break;
+            }
+            if ch == '#' {
+                let color_end = i + 7;
+                let color = color_end <= n
+                    && chars[i + 1..color_end]
+                        .iter()
+                        .all(|digit| digit.is_ascii_hexdigit())
+                    && chars
+                        .get(color_end)
+                        .is_none_or(|next| !next.is_ascii_alphanumeric() && *next != '_');
+                i = if color { color_end } else { n };
+                continue;
+            }
+            if ch.is_ascii_alphabetic() || ch == '_' {
+                let start = i;
+                i += 1;
+                while i < n && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                    i += 1;
+                }
+                let mut next = i;
+                while next < n && chars[next].is_whitespace() {
+                    next += 1;
+                }
+                if chars.get(next) == Some(&':') || chars.get(next) == Some(&'=') {
+                    names.insert(chars[start..i].iter().collect());
+                }
+                continue;
+            }
+            i += 1;
+        }
+    }
+    names
+}
+
+#[cfg(test)]
 pub(crate) fn code_runs(line: &str) -> Vec<(String, SynKind)> {
+    code_runs_with_names(line, &BTreeSet::new())
+}
+
+pub(crate) fn code_runs_with_names(
+    line: &str,
+    user_names: &BTreeSet<String>,
+) -> Vec<(String, SynKind)> {
     let chars: Vec<char> = line.chars().collect();
     let n = chars.len();
     let mut runs: Vec<(String, SynKind)> = Vec::new();
@@ -970,8 +970,8 @@ pub(crate) fn code_runs(line: &str) -> Vec<(String, SynKind)> {
                 i += 1;
             }
             let ident: String = chars[start..i].iter().collect();
-            let kind = if SYN_KEYWORDS.contains(&ident.as_str()) {
-                SynKind::Keyword
+            let kind = if user_names.contains(&ident) {
+                SynKind::UserName
             } else {
                 SynKind::Plain
             };
@@ -1000,7 +1000,7 @@ pub(crate) fn code_runs(line: &str) -> Vec<(String, SynKind)> {
 pub(crate) fn syn_color(kind: SynKind) -> egui::Color32 {
     match kind {
         SynKind::Plain => theme().editor_text,
-        SynKind::Keyword => theme().syn_keyword,
+        SynKind::UserName => theme().syn_keyword,
         SynKind::Comment => theme().syn_comment,
     }
 }
@@ -1012,10 +1012,11 @@ pub(crate) fn paint_code_line(
     y: f32,
     line: &str,
     code_w: f32,
+    user_names: &BTreeSet<String>,
 ) {
     let end = code_x + code_w;
     let mut x = code_x;
-    for (text, kind) in code_runs(line) {
+    for (text, kind) in code_runs_with_names(line, user_names) {
         if x >= end {
             break;
         }

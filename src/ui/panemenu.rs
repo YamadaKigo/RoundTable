@@ -10,15 +10,13 @@ impl StockApp {
         if count == 0 {
             return None;
         }
-        Some(MenuPanel::right(self.pane_menu_anchor, PANE_MENU_W, count, window_bottom).rect)
+        Some(MenuPanel::left(self.pane_menu_anchor, PANE_MENU_W, count, window_bottom).rect)
     }
 
     pub(crate) fn set_pane_indicator(&mut self, pane: usize, index: usize) {
-        let mut list = indicator::builtin();
-        if index >= list.len() {
+        let Some(mut ind) = indicator::builtin_indicator(index) else {
             return;
-        }
-        let mut ind = list.swap_remove(index);
+        };
 
         ind.set_palette(self.current_palette());
 
@@ -57,7 +55,7 @@ impl StockApp {
                 painter,
                 egui::pos2(text_left_x(row.min.x, panel.min.x), row.center().y),
                 egui::Align2::LEFT_CENTER,
-                &names[j],
+                names[j],
                 theme().menu_text,
             );
         });

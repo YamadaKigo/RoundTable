@@ -1097,11 +1097,16 @@ impl StockApp {
 
     pub(crate) const PANE_TABS: [&'static str; 2] = ["切换", "代码"];
 
-    pub(crate) const PANE_LEAD: &'static str = "圆桌";
-
     #[allow(dead_code)]
     pub(crate) fn pane_button_rects(title: egui::Rect, widths: &[f32]) -> Vec<egui::Rect> {
-        menu_item_rects(title, widths, MenuAlign::Right)
+        menu_item_rects(title, widths, MenuAlign::Left)
+    }
+
+    pub(crate) fn pane_name_x(title: egui::Rect, buttons: &[egui::Rect]) -> f32 {
+        let after = buttons
+            .last()
+            .map_or(title.min.x + TEXT_INSET_X, |rect| rect.max.x);
+        text_left_x(after, title.min.x)
     }
 
     pub(crate) fn ui_pane_title(
@@ -1116,16 +1121,21 @@ impl StockApp {
             None
         };
         let name = self.panes[pane].indicator.name().to_owned();
-        let out = menu_bar_ui_with_lead(
+        let out = menu_bar_ui(
             self,
             ui,
             title,
-            Self::PANE_LEAD,
             &Self::PANE_TABS,
-            MenuAlign::Right,
+            MenuAlign::Left,
             open,
-            Some(&name),
             MenuBarStyle::PANE_BAR,
+        );
+        self.text(
+            &ui.painter().clone(),
+            egui::pos2(Self::pane_name_x(title, &out.rects), title.center().y),
+            egui::Align2::LEFT_CENTER,
+            &name,
+            theme().menu_text,
         );
 
         match out.clicked {

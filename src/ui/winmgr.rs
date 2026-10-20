@@ -163,14 +163,13 @@ impl WinMgr {
 
     fn with_initial_chart(chart: bool) -> Self {
         let mut mgr = Self::new();
-        let panel = mgr.add(
+        mgr.add(
             WinKind::Panel,
             PANEL_TITLE,
             PANE_CANDLE,
             egui::vec2(PANEL_W, PANEL_CHILD_H),
             egui::vec2(PANEL_W, PANEL_CHILD_H),
         );
-        mgr.toggle_pin(panel);
         if chart {
             mgr.add(
                 WinKind::Chart,
@@ -240,9 +239,6 @@ impl WinMgr {
             let was_open = self.wins[i].w.open;
             self.wins[i].w.open = true;
             self.wins[i].minimized = false;
-            if !self.wins[i].pinned {
-                self.toggle_pin(i);
-            }
             if !was_open && !self.place_default(i, work) {
                 self.wins[i].w.open = false;
                 return None;
@@ -261,7 +257,6 @@ impl WinMgr {
             self.wins[i].w.open = false;
             return None;
         }
-        self.toggle_pin(i);
         Some(i)
     }
 
@@ -284,9 +279,6 @@ impl WinMgr {
             let was_open = self.wins[i].w.open;
             self.wins[i].w.open = true;
             self.wins[i].minimized = false;
-            if !self.wins[i].pinned {
-                self.toggle_pin(i);
-            }
             if !was_open && !self.place_default(i, work) {
                 self.wins[i].w.open = false;
                 return None;
@@ -308,7 +300,6 @@ impl WinMgr {
             return None;
         }
         self.wins[i].w.guard_open_click();
-        self.toggle_pin(i);
         Some(i)
     }
 
@@ -325,9 +316,6 @@ impl WinMgr {
             let was_open = self.wins[i].w.open;
             self.wins[i].w.open = true;
             self.wins[i].minimized = false;
-            if !self.wins[i].pinned {
-                self.set_pin(i, true);
-            }
             if !was_open && !self.place_default(i, work) {
                 self.wins[i].w.open = false;
                 return None;
@@ -344,7 +332,6 @@ impl WinMgr {
             return None;
         }
         self.wins[i].w.guard_open_click();
-        self.set_pin(i, true);
         Some(i)
     }
 
@@ -864,6 +851,7 @@ impl WinMgr {
         out
     }
 
+    #[cfg(test)]
     pub(crate) fn toggle_pin(&mut self, i: usize) {
         self.set_pin(i, !self.wins[i].pinned);
     }
@@ -1008,19 +996,36 @@ impl WinMgr {
         if !self.can_spawn_window(work, size) {
             return None;
         }
-        let i = self.add(
-            WinKind::Chart,
-            WIN_CHART_TITLE,
-            pane,
-            size,
-            Self::chart_min_size(),
-        );
+        let frame = egui::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME);
+        let i = if let Some(i) = self
+            .wins
+            .iter()
+            .position(|window| window.kind == WinKind::Chart && !window.w.open)
+        {
+            self.wins[i].pane = pane;
+            self.wins[i].w.open = true;
+            self.wins[i].w.size = size + frame;
+            self.wins[i].w.min_size = Self::chart_min_size() + frame;
+            self.wins[i].w.maximized = false;
+            self.wins[i].minimized = false;
+            self.wins[i].w.end_sessions();
+            i
+        } else {
+            self.add(
+                WinKind::Chart,
+                WIN_CHART_TITLE,
+                pane,
+                size,
+                Self::chart_min_size(),
+            )
+        };
         if !self.place_default(i, work) {
             self.wins[i].w.open = false;
             return None;
         }
+        self.activate(i);
 
-        Some(i)
+        Some(self.wins.len() - 1)
     }
 
     pub(crate) fn chart_min_size() -> egui::Vec2 {
@@ -1436,11 +1441,13 @@ impl WinMgr {
             self.set_pin(i, pinned);
         } else if out.close {
             self.close_win(app, i);
+            self.update_taskbar_layout(app);
         } else if out.maximize || out.restore_maximized {
             self.wins[i].w.toggle_maximize(work);
         } else if out.minimize && !self.wins[i].minimized {
             let width = Self::mini_width(app, &name);
             self.minimize(i, width);
+            self.update_taskbar_layout(app);
             app.tooltip = None;
         }
 
@@ -1450,7 +1457,7 @@ impl WinMgr {
     fn end_win(&mut self, ui: &mut egui::Ui, i: usize, busy: bool) {
         if self.wins[i].minimized {
             let rect = self.rect_of(i);
-            paint_shell_border(&ui.painter().clone(), rect);
+            border_hard(&ui.painter().clone(), rect, theme().window_border);
         } else {
             self.wins[i].w.end(ui, busy);
         }

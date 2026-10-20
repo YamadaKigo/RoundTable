@@ -585,8 +585,7 @@ impl StockApp {
         let cancel_text = ButtonContent::Text(CP_REVERT_TEXT.to_owned());
         if self.draw_button(ui, &painter, cancel_rect, &cancel_text, false, "") {
             cp.revert_initial();
-            self.status_msg = "颜色面板：已撤销，颜色没变".to_owned();
-            close_after = true;
+            self.status_msg = "颜色面板：已撤销到打开时的颜色".to_owned();
         }
 
         for row in [

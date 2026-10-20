@@ -944,7 +944,7 @@ fn parse_hex_color(text: &str) -> Result<egui::Color32, String> {
 }
 
 thread_local! {
-    static CURRENT: Cell<Theme> = const { Cell::new(Theme::DARK) };
+    static CURRENT: Cell<Theme> = const { Cell::new(Theme::CLASSIC) };
 }
 
 pub(crate) fn theme() -> Theme {

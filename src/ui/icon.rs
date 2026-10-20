@@ -7,6 +7,14 @@ pub(crate) const ICON_H: f32 = ICON_W;
 
 pub(crate) const ICON_PX: usize = 16;
 
+pub(crate) const CURSOR_PX: usize = 31;
+
+pub(crate) const CURSOR_W: f32 = CURSOR_PX as f32;
+
+pub(crate) const CURSOR_H: f32 = CURSOR_W;
+
+pub(crate) const CURSOR_CENTER: usize = CURSOR_PX / 2;
+
 pub(crate) const ICON_GAP: f32 = 3.0 * PITCH - ICON_W;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -92,9 +100,13 @@ impl IconKind {
 pub(crate) const ICON_TRANSPARENT_RGB: (u8, u8, u8) = (0xFF, 0x00, 0xFF);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) struct IconImage {
-    px: [[Option<egui::Color32>; ICON_PX]; ICON_PX],
+pub(crate) struct PixelImage<const N: usize> {
+    px: [[Option<egui::Color32>; N]; N],
 }
+
+pub(crate) type IconImage = PixelImage<ICON_PX>;
+
+type CursorPixels = PixelImage<CURSOR_PX>;
 
 pub(crate) fn snap_aabbcc_channel(v: u8) -> u8 {
     let step = ((v as u32 + 8) / 17).min(15);
@@ -109,15 +121,13 @@ fn snap_aabbcc(c: egui::Color32) -> egui::Color32 {
     )
 }
 
-impl IconImage {
+impl<const N: usize> PixelImage<N> {
     pub(crate) fn blank() -> Self {
-        Self {
-            px: [[None; ICON_PX]; ICON_PX],
-        }
+        Self { px: [[None; N]; N] }
     }
 
     fn from_pixels(w: usize, h: usize, data: &[u8], channels: usize) -> Self {
-        let mut px = [[None; ICON_PX]; ICON_PX];
+        let mut px = [[None; N]; N];
         if w == 0 || h == 0 || channels == 0 {
             return Self { px };
         }
@@ -133,8 +143,8 @@ impl IconImage {
         };
         for (y, row) in px.iter_mut().enumerate() {
             for (x, cell) in row.iter_mut().enumerate() {
-                let sx = (x * w / ICON_PX).min(w - 1);
-                let sy = (y * h / ICON_PX).min(h - 1);
+                let sx = (x * w / N).min(w - 1);
+                let sy = (y * h / N).min(h - 1);
                 let (r, g, b, a) = at(sx, sy);
                 if a < 128 || (r, g, b) == ICON_TRANSPARENT_RGB {
                     continue;
@@ -153,15 +163,15 @@ impl IconImage {
         let x0 = rect.min.x.round();
         let y0 = rect.min.y.round();
         let mut mesh = egui::Mesh::default();
-        for row in 0..ICON_PX {
+        for row in 0..N {
             let mut col = 0usize;
-            while col < ICON_PX {
+            while col < N {
                 let Some(px) = self.px[row][col] else {
                     col += 1;
                     continue;
                 };
                 let start = col;
-                while col < ICON_PX && self.px[row][col] == Some(px) {
+                while col < N && self.px[row][col] == Some(px) {
                     col += 1;
                 }
                 mesh.add_colored_rect(
@@ -258,8 +268,6 @@ pub(crate) fn decode_png_rgba(bytes: &[u8]) -> Option<egui::IconData> {
     })
 }
 
-pub(crate) const CURSOR_HOTSPOT: Option<[u16; 2]> = Some([0, 0]);
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum CursorKind {
     Normal,
@@ -353,9 +361,7 @@ impl CursorKind {
 }
 
 pub(crate) struct CursorImage {
-    img: IconImage,
-
-    hot: [u16; 2],
+    img: CursorPixels,
 
     #[cfg_attr(not(test), allow(dead_code))]
     cache: Option<std::sync::Arc<[u8]>>,
@@ -367,16 +373,11 @@ pub(crate) struct Cursors {
 
 impl CursorImage {
     fn blank() -> Self {
-        Self::new(IconImage::blank())
+        Self::new(CursorPixels::blank())
     }
 
-    fn new(img: IconImage) -> Self {
-        let hot = CURSOR_HOTSPOT.unwrap_or([0, 0]);
-        Self {
-            img,
-            hot,
-            cache: None,
-        }
+    fn new(img: CursorPixels) -> Self {
+        Self { img, cache: None }
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -384,13 +385,13 @@ impl CursorImage {
         if let Some(rgba) = &self.cache {
             return rgba.clone();
         }
-        let mut buf = vec![0u8; ICON_PX * ICON_PX * 4];
-        for row in 0..ICON_PX {
-            for col in 0..ICON_PX {
+        let mut buf = vec![0u8; CURSOR_PX * CURSOR_PX * 4];
+        for row in 0..CURSOR_PX {
+            for col in 0..CURSOR_PX {
                 let Some(px) = self.img.px[row][col] else {
                     continue;
                 };
-                let i = (row * ICON_PX + col) * 4;
+                let i = (row * CURSOR_PX + col) * 4;
                 buf[i] = px.r();
                 buf[i + 1] = px.g();
                 buf[i + 2] = px.b();
@@ -404,8 +405,8 @@ impl CursorImage {
 }
 
 impl Cursors {
-    pub(crate) fn hotspot(&self, kind: CursorKind) -> [u16; 2] {
-        self.imgs[kind.index()].hot
+    pub(crate) fn hotspot(&self, _kind: CursorKind) -> [u16; 2] {
+        [CURSOR_CENTER as u16; 2]
     }
 
     pub(crate) fn load() -> Self {
@@ -415,9 +416,9 @@ impl Cursors {
             let path = dir.join(format!("{}.png", kind.file_stem()));
             let img = std::fs::read(&path)
                 .ok()
-                .and_then(|bytes| decode_png(&bytes))
+                .and_then(|bytes| decode_cursor_png(&bytes))
                 .filter(|img| !img.is_blank())
-                .unwrap_or_else(IconImage::blank);
+                .unwrap_or_else(CursorPixels::blank);
             imgs[kind.index()] = CursorImage::new(img);
         }
         Self { imgs }
@@ -434,7 +435,7 @@ impl Cursors {
         }
     }
 
-    fn img(&self, kind: CursorKind) -> &IconImage {
+    fn img(&self, kind: CursorKind) -> &CursorPixels {
         let img = &self.imgs[kind.index()].img;
         if img.is_blank() {
             &self.imgs[CursorKind::Normal.index()].img
@@ -452,13 +453,21 @@ impl Cursors {
         let [hx, hy] = self.hotspot(kind);
         let rect = egui::Rect::from_min_size(
             egui::pos2(tip.x.round() - hx as f32, tip.y.round() - hy as f32),
-            egui::vec2(ICON_W, ICON_H),
+            egui::vec2(CURSOR_W, CURSOR_H),
         );
         self.img(kind).paint(painter, rect);
     }
 }
 
 pub(crate) fn decode_png(bytes: &[u8]) -> Option<IconImage> {
+    decode_pixels(bytes)
+}
+
+fn decode_cursor_png(bytes: &[u8]) -> Option<CursorPixels> {
+    decode_pixels(bytes)
+}
+
+fn decode_pixels<const N: usize>(bytes: &[u8]) -> Option<PixelImage<N>> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().ok()?;
@@ -475,7 +484,7 @@ pub(crate) fn decode_png(bytes: &[u8]) -> Option<IconImage> {
 
         png::ColorType::Indexed => return None,
     };
-    Some(IconImage::from_pixels(
+    Some(PixelImage::from_pixels(
         info.width as usize,
         info.height as usize,
         &buf,

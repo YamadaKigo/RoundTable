@@ -1,6 +1,6 @@
 ﻿[package]
 name = "RoundTable"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 description = "圆桌 - Windows 像素风行情图表工作台"
@@ -8,14 +8,14 @@ readme = "README.md"
 license = "MIT"
 
 [dependencies]
-eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wgpu"] }
+eframe = { version = "0.36.2", default-features = false, features = ["wgpu"] }
 raw-window-handle = "0.6"
 png = "0.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [profile.release]
-lto = true
-codegen-units = 1
+lto = "thin"
+codegen-units = 16
 opt-level = 3
 strip = true

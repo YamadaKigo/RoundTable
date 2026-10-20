@@ -630,19 +630,29 @@ pub trait Indicator {
     fn set_overlay_state(&mut self, _ov: Overlay) {}
 }
 
+#[cfg(test)]
 pub fn builtin() -> Vec<Box<dyn Indicator>> {
-    vec![
-        Box::new(candle::Candle::default()),
-        Box::new(bars::Bars::default()),
-        Box::new(volume::Volume::default()),
-        Box::new(macd::Macd::default()),
-        Box::new(kdj::Kdj::default()),
-        Box::new(rsi::Rsi::default()),
-        Box::new(boll::Boll::default()),
-        Box::new(obv::Obv::default()),
-        Box::new(cci::Cci::default()),
-        Box::new(bias::Bias::default()),
-    ]
+    (0..10).filter_map(builtin_indicator).collect()
+}
+
+pub(crate) fn builtin_indicator(index: usize) -> Option<Box<dyn Indicator>> {
+    Some(match index {
+        0 => Box::new(candle::Candle::default()),
+        1 => Box::new(bars::Bars::default()),
+        2 => Box::new(volume::Volume::default()),
+        3 => Box::new(macd::Macd::default()),
+        4 => Box::new(kdj::Kdj::default()),
+        5 => Box::new(rsi::Rsi::default()),
+        6 => Box::new(boll::Boll::default()),
+        7 => Box::new(obv::Obv::default()),
+        8 => Box::new(cci::Cci::default()),
+        9 => Box::new(bias::Bias::default()),
+        _ => return None,
+    })
+}
+
+pub(crate) fn default_indicator() -> Box<dyn Indicator> {
+    builtin_indicator(0).expect("candle is built in")
 }
 
 pub fn default_layout() -> Vec<Box<dyn Indicator>> {
@@ -653,8 +663,21 @@ pub fn default_layout() -> Vec<Box<dyn Indicator>> {
     ]
 }
 
-pub fn builtin_names() -> Vec<String> {
-    builtin().iter().map(|ind| ind.name().to_owned()).collect()
+pub(crate) const BUILTIN_NAMES: [&str; 10] = [
+    "蜡烛图",
+    "美国线",
+    "成交量",
+    "MACD(12,26,9)",
+    "KDJ(9,3,3)",
+    "RSI(6,12,24)",
+    "BOLL(20,2)",
+    "OBV",
+    "CCI(14)",
+    "BIAS(6,12,24)",
+];
+
+pub fn builtin_names() -> &'static [&'static str] {
+    &BUILTIN_NAMES
 }
 
 pub(crate) fn script_file(name: &str) -> &'static str {

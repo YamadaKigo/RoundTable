@@ -1,9 +1,7 @@
 use crate::grid::*;
 use eframe::egui;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-
-include!(concat!(env!("OUT_DIR"), "/embedded_fonts.rs"));
+use std::path::Path;
 
 pub(crate) const FONT_SIZE: f32 = 16.0;
 
@@ -218,11 +216,6 @@ unsafe extern "system" {
 }
 
 pub(crate) fn load_private_font(file: &str) -> bool {
-    if let Some(path) = embedded_font_path(file)
-        && register_private_font(&path)
-    {
-        return true;
-    }
     if register_private_font(&crate::assets::fonts_dir().join(file)) {
         return true;
     }
@@ -243,18 +236,6 @@ pub(crate) fn load_private_font(file: &str) -> bool {
         }
     }
     false
-}
-
-fn embedded_font_path(file: &str) -> Option<PathBuf> {
-    let bytes = embedded_font(file)?;
-    let dir = crate::assets::user_root().join("fonts");
-    let path = dir.join(file);
-    let current = std::fs::metadata(&path).ok().map(|meta| meta.len());
-    if current != Some(bytes.len() as u64) {
-        std::fs::create_dir_all(&dir).ok()?;
-        std::fs::write(&path, bytes).ok()?;
-    }
-    Some(path)
 }
 
 fn register_private_font(path: &Path) -> bool {
@@ -695,6 +676,7 @@ pub(crate) const fn ascii_glyph_offset(c: char) -> i32 {
 }
 
 pub(crate) fn split_areas(layout: egui::Rect) -> [egui::Rect; 5] {
+    let layout = layout.shrink(grid_line(1));
     let x0 = layout.min.x;
     let x1 = layout.max.x;
     let y0 = layout.min.y;

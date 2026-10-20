@@ -248,7 +248,7 @@ impl StockApp {
     }
 
     pub(crate) fn new_chart_pane(&mut self) -> usize {
-        let mut ind = indicator::builtin().swap_remove(0);
+        let mut ind = indicator::default_indicator();
         ind.set_palette(self.current_palette());
         match self.win_mgr.free_chart_pane() {
             Some(free) => {
@@ -382,7 +382,7 @@ impl StockApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
         configure_tessellation(&cc.egui_ctx);
         configure_zero_spacing(&cc.egui_ctx);
-        set_theme(Theme::load(ThemeId::Dark));
+        set_theme(Theme::load(ThemeId::Classic));
 
         cc.egui_ctx.set_pixels_per_point(1.0);
 
@@ -490,12 +490,11 @@ impl StockApp {
     }
 
     pub(crate) fn status_segments(&self) -> Vec<String> {
-        let mut segs = vec![format!("{:.0} FPS", self.fps)];
+        let mut segs = vec![current_time_text(), format!("{:.0} FPS", self.fps)];
 
         if !self.status_msg.is_empty() {
             segs.push(self.status_msg.clone());
         }
-        segs.push(current_time_text());
         segs
     }
 
@@ -611,9 +610,10 @@ impl StockApp {
     pub(crate) fn paint_skeleton(
         &mut self,
         painter: &egui::Painter,
-        _layout: egui::Rect,
+        layout: egui::Rect,
         areas: [egui::Rect; 5],
     ) {
+        painter.rect_filled(layout, egui::CornerRadius::ZERO, theme().work_bg);
         let [title, menu, work, taskbar, status] = areas;
         painter.rect_filled(title, egui::CornerRadius::ZERO, theme().title_bg);
         let name_slot = title_text_slot(self, title, APP_NAME);
@@ -631,22 +631,18 @@ impl StockApp {
     pub(crate) fn paint_separators(
         &self,
         painter: &egui::Painter,
-        layout: egui::Rect,
+        _layout: egui::Rect,
         areas: [egui::Rect; 5],
     ) {
+        let left = areas[0].min.x;
+        let right = areas[0].max.x;
         for y in [
             areas[1].min.y,
             areas[2].min.y,
             areas[3].min.y,
             areas[4].min.y,
         ] {
-            hline_hard(
-                painter,
-                layout.min.x,
-                layout.max.x,
-                y,
-                theme().menu_separator,
-            );
+            hline_hard(painter, left, right, y, theme().menu_separator);
         }
     }
 
@@ -818,6 +814,9 @@ impl StockApp {
         if self.panes.iter().any(|pane| pane.view.pan.is_some()) {
             return Some(CursorKind::Move);
         }
+        if self.source.editor.selecting {
+            return Some(CursorKind::Text);
+        }
         if self.color_panel.drag != ColorDrag::None || self.source.editor.scroll_grab.is_some() {
             return Some(CursorKind::Slider);
         }
@@ -910,6 +909,7 @@ impl StockApp {
         self.advance_software_pointer(&ctx, layout);
 
         let areas = split_areas(layout);
+        let content = egui::Rect::from_min_max(areas[0].min, areas[4].max);
 
         self.paint_skeleton(&ui.painter().clone(), layout, areas);
         self.ui_titlebar(ui, areas[0]);
@@ -979,7 +979,7 @@ impl StockApp {
             let mut state = self.menu.clone();
 
             if let Some(label) =
-                ui_menu_popup(self, ui, anchor, items, &mut state, layout, &[areas[1]])
+                ui_menu_popup(self, ui, anchor, items, &mut state, content, &[areas[1]])
             {
                 if TOP_TABS[idx].title == "布局" {
                     match label {
@@ -994,16 +994,17 @@ impl StockApp {
             self.menu = state;
         }
 
-        border_hard(&ui.painter().clone(), layout, theme().window_border);
-
         self.ui_pane_menu(ui);
         self.run_win_cmd();
 
         self.paint_tooltip(&ui.painter().clone(), layout);
 
-        if let Some(action) = ui_context_menu(self, ui, layout) {
+        if let Some(action) = ui_context_menu(self, ui, content) {
             self.run_context_action(ui, action);
         }
+
+        border_hard(&ui.painter().clone(), content, theme().window_border);
+        border_hard(&ui.painter().clone(), layout, theme().window_border);
 
         self.apply_cursor(&ctx);
     }

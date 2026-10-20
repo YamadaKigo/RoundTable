@@ -18,11 +18,11 @@ pub(crate) const SPLITTER_W: f32 = cells(SPLITTER_COLS);
 
 pub(crate) const PANEL_TITLE: &str = "控制面板";
 
-pub(crate) const PANEL_BTN_COUNT: i32 = 11;
+pub(crate) const PANEL_BTN_COUNT: i32 = 10;
 
 pub(crate) const PANEL_CHILD_ROWS: i32 = WIN_TITLE_ROWS + 1 + (PANEL_BTN_COUNT - 1) * 2 + 2 + 1;
 pub(crate) const PANEL_CHILD_H: f32 = cells(PANEL_CHILD_ROWS);
-const _: () = assert!(PANEL_BTN_COUNT == 11 && PANEL_CHILD_ROWS == 26);
+const _: () = assert!(PANEL_BTN_COUNT == 10 && PANEL_CHILD_ROWS == 24);
 
 pub(crate) const KLINE_ROWS: i32 = 50;
 pub(crate) const VOL_ROWS: i32 = 21;
@@ -75,8 +75,6 @@ pub(crate) enum PanelAction {
     TogglePointerMode,
 
     TogglePointerTrail,
-
-    ResetView,
 
     PrintState,
 
@@ -316,11 +314,6 @@ impl StockApp {
                 PanelAction::TogglePointerTrail,
             ),
             (
-                ButtonContent::Text("重置视图".to_owned()),
-                "缩放与平移都回到最初",
-                PanelAction::ResetView,
-            ),
-            (
                 ButtonContent::Text("切换主题".to_owned()),
                 "在浅色 / 深色两套皮肤之间切换",
                 PanelAction::ToggleTheme,
@@ -387,14 +380,6 @@ impl StockApp {
                 } else {
                     "鼠标轨迹：关".to_owned()
                 };
-            }
-            PanelAction::ResetView => {
-                if let Some(pane) = self.active_chart_pane() {
-                    let view = &mut self.panes[pane].view;
-                    view.scale = SCALE_MIN;
-                    view.offset = 0;
-                    view.crosshair = None;
-                }
             }
             PanelAction::ToggleTheme => self.switch_theme(),
             PanelAction::FollowSystemColors => self.follow_system_chart_colors(),

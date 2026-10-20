@@ -85,11 +85,6 @@ pub(crate) fn paint_title_fill(
     paint_fill(painter, fill, TITLE_FILL, theme().title_fill);
 }
 
-#[cfg(test)]
-pub(crate) fn sys_button_rects(bar: egui::Rect) -> Vec<egui::Rect> {
-    sys_button_rects_n(bar, 4)
-}
-
 pub(crate) fn sys_button_rects_n(bar: egui::Rect, count: usize) -> Vec<egui::Rect> {
     let mut rects = vec![egui::Rect::NOTHING; count];
     let mut right = bar.max.x;

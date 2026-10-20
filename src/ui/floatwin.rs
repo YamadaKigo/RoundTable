@@ -122,14 +122,17 @@ pub(crate) enum WinKeys {
 
     PinnedMinMaxClose,
 
+    ExclusiveMinMaxClose,
+
     CloseOnly,
 }
 
 impl WinKeys {
-    pub(crate) fn for_pin_state(self, pinned: bool) -> Self {
-        match (self, pinned) {
-            (WinKeys::MinMaxClose, true) => WinKeys::PinnedMinMaxClose,
-            (keys, _) => keys,
+    pub(crate) fn for_state(self, pinned: bool, exclusive: bool) -> Self {
+        match (self, pinned, exclusive) {
+            (WinKeys::MinMaxClose, true, _) => WinKeys::PinnedMinMaxClose,
+            (WinKeys::MinMaxClose, false, true) => WinKeys::ExclusiveMinMaxClose,
+            (keys, _, _) => keys,
         }
     }
 
@@ -149,6 +152,12 @@ impl WinKeys {
             ],
             WinKeys::PinnedMinMaxClose => &[
                 (SysButton::Pin, 0),
+                (SysButton::Minimize, 1),
+                (SysButton::Maximize, 2),
+                (SysButton::Close, 3),
+            ],
+            WinKeys::ExclusiveMinMaxClose => &[
+                (SysButton::Exclusive, 0),
                 (SysButton::Minimize, 1),
                 (SysButton::Maximize, 2),
                 (SysButton::Close, 3),
@@ -386,7 +395,13 @@ impl Win {
             } else {
                 0.0
             },
-            if edge.bottom() { rect.max.y - p.y } else { 0.0 },
+            if edge.bottom() {
+                rect.max.y - p.y
+            } else if edge.top() {
+                rect.min.y - p.y
+            } else {
+                0.0
+            },
         );
         self.drag = None;
         self.drag_pin = None;
@@ -462,7 +477,7 @@ impl Win {
     ) -> WinOut {
         self.update_geometry(app, ui, bounds);
         let rect = self.rect();
-        let keys = keys.for_pin_state(pinned);
+        let keys = keys.for_state(pinned, exclusive);
 
         let painter = ui.painter().clone();
 
@@ -595,6 +610,12 @@ impl Win {
         if self.drag.is_some() {
             self.enforce_move_guards(frame_rect, bounds);
         }
+        if self.rs.any()
+            && !app.pointer.system
+            && let Some(p) = pointer
+        {
+            app.pointer.pinned = Some(self.resize_pointer(p));
+        }
 
         if self.drag.is_some() {
             if app.pointer.system {
@@ -605,6 +626,25 @@ impl Win {
                 app.pointer.pinned = Some(pin);
             }
         }
+    }
+
+    fn resize_pointer(&self, pointer: egui::Pos2) -> egui::Pos2 {
+        let rect = self.rect();
+        let x = if self.rs.left() {
+            rect.min.x - self.rs_off.x
+        } else if self.rs.right() {
+            rect.max.x - self.rs_off.x
+        } else {
+            pointer.x
+        };
+        let y = if self.rs.top() {
+            rect.min.y - self.rs_off.y
+        } else if self.rs.bottom() {
+            rect.max.y - self.rs_off.y
+        } else {
+            pointer.y
+        };
+        egui::pos2(x, y)
     }
 
     fn enforce_move_guards(&mut self, frame_rect: egui::Rect, bounds: egui::Rect) {
@@ -956,6 +996,30 @@ mod tests {
     }
 
     #[test]
+    fn resize_pointer_keeps_the_original_grab_offset_at_the_workspace_edge() {
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0));
+        let mut window = Win::new(7, 10.0, 120.0, 80.0, 80.0);
+        window.resizable = true;
+        let press = egui::pos2(window.rect().max.x - 4.0, window.rect().center().y);
+        window.begin_resize(press);
+        window.stretch(egui::pos2(900.0, press.y), bounds);
+        assert_eq!(window.rect().max.x, bounds.max.x);
+        assert_eq!(
+            window.resize_pointer(egui::pos2(900.0, press.y)),
+            egui::pos2(bounds.max.x - 4.0, press.y)
+        );
+
+        let top_press = egui::pos2(window.rect().center().x, window.rect().min.y + 3.0);
+        window.begin_resize(top_press);
+        window.stretch(egui::pos2(top_press.x, -100.0), bounds);
+        assert_eq!(window.rect().min.y, bounds.min.y);
+        assert_eq!(
+            window.resize_pointer(egui::pos2(top_press.x, -100.0)),
+            egui::pos2(top_press.x, bounds.min.y + 3.0)
+        );
+    }
+
+    #[test]
     fn frame_band_resizes_but_the_outer_line_does_not() {
         let rect = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 160.0));
         assert_eq!(rect.shrink(WIN_FRAME).size(), egui::vec2(182.0, 142.0));
@@ -1007,9 +1071,10 @@ mod tests {
     }
 
     #[test]
-    fn pinned_title_keys_hide_the_exclusive_button() {
-        let normal = WinKeys::MinMaxClose.for_pin_state(false);
-        let pinned = WinKeys::MinMaxClose.for_pin_state(true);
+    fn pinned_and_exclusive_title_keys_hide_the_opposite_toggle() {
+        let normal = WinKeys::MinMaxClose.for_state(false, false);
+        let pinned = WinKeys::MinMaxClose.for_state(true, false);
+        let exclusive = WinKeys::MinMaxClose.for_state(false, true);
         assert!(
             normal
                 .shown()
@@ -1023,6 +1088,19 @@ mod tests {
                 .all(|(kind, _)| *kind != SysButton::Exclusive)
         );
         assert_eq!(pinned.shown().len(), 4);
+        assert!(
+            exclusive
+                .shown()
+                .iter()
+                .all(|(kind, _)| *kind != SysButton::Pin)
+        );
+        assert!(
+            exclusive
+                .shown()
+                .iter()
+                .any(|(kind, _)| *kind == SysButton::Exclusive)
+        );
+        assert_eq!(exclusive.shown().len(), 4);
     }
 
     #[test]
