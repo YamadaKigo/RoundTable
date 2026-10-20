@@ -94,12 +94,12 @@ assets/themes/dark.json
 主题 JSON 使用语义化颜色分组：
 
 - `application`：标题栏、菜单栏、工作区、任务栏和状态栏
-- `window`：窗口内容、面板、边框、分隔线和符号
-- `controls`：按钮、输入框、滚动条、提示框和调色板
-- `editor`：编辑器正文、行号、注释、自定义名称和边框
-- `chart`：绘图区、坐标轴、十字光标、状态字段和涨跌色
-- `indicators`：内置指标线颜色
-- `pointer`：软件指针轨迹颜色
+- `window`：窗口背景、面板、边框、分隔线和符号
+- `controls`：按钮、输入框、滚动条、提示框、调色板和选择区域
+- `editor`：正文、行号、边框，以及语法高亮中的注释和自定义名称
+- `chart`：绘图区、坐标轴、十字光标、状态栏和涨跌色
+- `indicators`：MACD、KDJ、RSI、BOLL、OBV、CCI、BIAS、MA、EMA 分组
+- `pointer`：软件指针轨迹的普通色和高亮色
 
 ## 指标脚本
 

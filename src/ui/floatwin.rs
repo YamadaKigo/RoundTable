@@ -47,6 +47,10 @@ pub(crate) struct Win {
 
     rs_off: egui::Vec2,
 
+    rs_pointer: Option<egui::Pos2>,
+
+    rs_pointer_last: Option<egui::Pos2>,
+
     move_guards: Vec<(u64, egui::Rect, bool)>,
 }
 
@@ -217,14 +221,8 @@ pub(crate) fn edge_at(rect: egui::Rect, p: egui::Pos2, band: f32) -> WinEdge {
     }
 }
 
-fn edge_target(v: f32, lo: f32, hi: f32, band: f32) -> f32 {
-    if v <= lo + band {
-        lo
-    } else if v >= hi - band {
-        hi
-    } else {
-        v.round()
-    }
+fn edge_target(v: f32, lo: f32, hi: f32, _band: f32) -> f32 {
+    v.round().clamp(lo, hi)
 }
 
 fn press_anchor(ui: &egui::Ui) -> Option<egui::Pos2> {
@@ -324,6 +322,8 @@ impl Win {
             edge_guard: egui::Rect::NOTHING,
             rs_fix: egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, h)),
             rs_off: egui::Vec2::ZERO,
+            rs_pointer: None,
+            rs_pointer_last: None,
             move_guards: Vec::new(),
         }
     }
@@ -403,6 +403,8 @@ impl Win {
                 0.0
             },
         );
+        self.rs_pointer = Some(p);
+        self.rs_pointer_last = Some(p);
         self.drag = None;
         self.drag_pin = None;
     }
@@ -411,6 +413,8 @@ impl Win {
         self.drag = None;
         self.drag_pin = None;
         self.rs = WinEdge::None;
+        self.rs_pointer = None;
+        self.rs_pointer_last = None;
     }
 
     #[allow(dead_code)]
@@ -602,7 +606,7 @@ impl Win {
         }
         if self.rs.any() {
             if let Some(p) = pointer {
-                self.stretch(p, bounds);
+                self.follow_resize_pointer(p, bounds);
             }
         }
 
@@ -645,6 +649,24 @@ impl Win {
             pointer.y
         };
         egui::pos2(x, y)
+    }
+
+    fn follow_resize_pointer(&mut self, pointer: egui::Pos2, bounds: egui::Rect) {
+        let previous = self.rs_pointer_last.unwrap_or(pointer);
+        let mut effective = self.rs_pointer.unwrap_or(pointer) + (pointer - previous);
+        if self.rs.left() || self.rs.right() {
+            effective.x = effective
+                .x
+                .clamp(bounds.min.x - self.rs_off.x, bounds.max.x - self.rs_off.x);
+        }
+        if self.rs.top() || self.rs.bottom() {
+            effective.y = effective
+                .y
+                .clamp(bounds.min.y - self.rs_off.y, bounds.max.y - self.rs_off.y);
+        }
+        self.rs_pointer = Some(effective);
+        self.rs_pointer_last = Some(pointer);
+        self.stretch(effective, bounds);
     }
 
     fn enforce_move_guards(&mut self, frame_rect: egui::Rect, bounds: egui::Rect) {
@@ -994,6 +1016,19 @@ mod tests {
         assert_eq!(window.rect().max.x, guard.min.x + LINE_W);
         window.stretch(egui::pos2(99.0, 160.0), bounds);
         assert_eq!(window.rect().max.x, 99.0);
+    }
+
+    #[test]
+    fn resize_reverses_immediately_after_pointer_overshoots_the_workspace_edge() {
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0));
+        let mut window = Win::new(7, 10.0, 120.0, 80.0, 80.0);
+        window.resizable = true;
+        let press = egui::pos2(window.rect().center().x, window.rect().max.y - 4.0);
+        window.begin_resize(press);
+        window.follow_resize_pointer(egui::pos2(press.x, 640.0), bounds);
+        assert_eq!(window.rect().max.y, bounds.max.y);
+        window.follow_resize_pointer(egui::pos2(press.x, 639.0), bounds);
+        assert_eq!(window.rect().max.y, bounds.max.y - 1.0);
     }
 
     #[test]

@@ -1036,7 +1036,7 @@ impl StockApp {
         self.ui_pane_menu(ui);
         self.run_win_cmd();
 
-        self.paint_tooltip(&ui.painter().clone(), layout);
+        self.paint_tooltip(&ctx, layout);
 
         if let Some(action) = ui_context_menu(self, ui, content) {
             self.run_context_action(ui, action);

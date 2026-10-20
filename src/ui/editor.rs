@@ -331,8 +331,16 @@ impl TextEditor {
 
         let (open, state) = ui_menu_bar(app, ui, menu_band, &EDITOR_TABS, self.menu.clone());
         self.menu = state;
-        self.ui_buttonbar(app, ui, bar_band, &mut cmd);
-        self.ui_body(app, ui, panel, id, &mut cmd);
+        let menu_open = self.menu.open.is_some();
+        if menu_open {
+            ui.scope(|ui| {
+                ui.disable();
+                self.ui_buttonbar(app, ui, bar_band, &mut cmd);
+            });
+        } else {
+            self.ui_buttonbar(app, ui, bar_band, &mut cmd);
+        }
+        self.ui_body(app, ui, panel, id, menu_open, &mut cmd);
 
         self.paint_separators(&ui.painter().clone(), panel);
 
@@ -490,6 +498,7 @@ impl TextEditor {
         ui: &mut egui::Ui,
         panel: egui::Rect,
         id: egui::Id,
+        menu_open: bool,
         cmd: &mut EditorCmd,
     ) {
         let painter = ui.painter().clone();
@@ -527,7 +536,8 @@ impl TextEditor {
             theme().editor_border,
         );
 
-        let hovered = !app.win_silent
+        let hovered = !menu_open
+            && !app.win_silent
             && ui
                 .input(|i| i.pointer.hover_pos())
                 .is_some_and(|p| panel.contains(p));
@@ -563,27 +573,32 @@ impl TextEditor {
             self.focused = false;
             ui.memory_mut(|m| m.surrender_focus(id));
         }
-        let resp = ui.interact(body, id, egui::Sense::click_and_drag());
+        let resp = if menu_open {
+            ui.interact(body, id, egui::Sense::hover())
+        } else {
+            ui.interact(body, id, egui::Sense::click_and_drag())
+        };
         let text_area = egui::Rect::from_min_max(
             egui::pos2(panel.min.x + LINE_W, body_top),
             egui::pos2(bar_line, body_bottom),
         );
         if ui
             .input(|i| i.pointer.hover_pos())
-            .filter(|_| window_active)
+            .filter(|_| window_active && !menu_open)
             .is_some_and(|p| text_area.contains(p))
         {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
             app.pointer.text_hover = true;
             app.pointer.hint = CursorKind::Text;
         }
-        let primary_clicked_in_body = ui.input(|i| {
-            i.pointer.primary_clicked()
-                && i.pointer
-                    .interact_pos()
-                    .or_else(|| i.pointer.latest_pos())
-                    .is_some_and(|p| body.contains(p))
-        });
+        let primary_clicked_in_body = !menu_open
+            && ui.input(|i| {
+                i.pointer.primary_clicked()
+                    && i.pointer
+                        .interact_pos()
+                        .or_else(|| i.pointer.latest_pos())
+                        .is_some_and(|p| body.contains(p))
+            });
         if primary_clicked_in_body || resp.drag_started() {
             self.focused = true;
 
@@ -621,7 +636,7 @@ impl TextEditor {
                 p.y.clamp(text_area.min.y, text_area.max.y - LINE_W),
             )
         };
-        if let Some(p) = pointer_pos {
+        if !menu_open && let Some(p) = pointer_pos {
             if resp.secondary_clicked() {
                 self.focused = true;
                 ui.memory_mut(|m| m.request_focus(id));

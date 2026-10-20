@@ -206,7 +206,7 @@ impl StockApp {
         active && resp.clicked()
     }
 
-    pub(crate) fn paint_tooltip(&mut self, painter: &egui::Painter, layout: egui::Rect) {
+    pub(crate) fn paint_tooltip(&mut self, ctx: &egui::Context, layout: egui::Rect) {
         let Some((anchor, text)) = self.tooltip.take() else {
             return;
         };
@@ -224,9 +224,11 @@ impl StockApp {
             (anchor.min.y + LINE_W - h).max(layout.min.y)
         };
         let rect = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, h));
-        tag_box(painter, rect, theme().tooltip_bg, theme().tooltip_border);
+        let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("rt_tooltip"));
+        let painter = ctx.layer_painter(layer);
+        tag_box(&painter, rect, theme().tooltip_bg, theme().tooltip_border);
         self.text(
-            painter,
+            &painter,
             rect.center(),
             egui::Align2::CENTER_CENTER,
             &text,

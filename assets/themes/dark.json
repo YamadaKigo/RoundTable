@@ -1,6 +1,6 @@
 {
   "format": "roundtable-theme",
-  "version": 2,
+  "version": 3,
   "id": "dark",
   "name": "深色",
   "colors": {
@@ -32,8 +32,10 @@
       }
     },
     "window": {
-      "content_background": "#333333",
-      "panel_background": "#333333",
+      "background": "#333333",
+      "panel": {
+        "background": "#333333"
+      },
       "border": "#990000",
       "splitter": "#444444",
       "symbol": "#FFFFFF",
@@ -41,14 +43,16 @@
     },
     "controls": {
       "button": {
-        "face": "#444444",
+        "background": "#444444",
         "hover": "#666666",
         "pressed": "#666666",
         "text": "#FFFFFF",
         "border": "#990000"
       },
-      "generic_border": "#990000",
-      "selection_background": "#666666",
+      "border": "#990000",
+      "selection": {
+        "background": "#666666"
+      },
       "text_input": {
         "background": "#333333",
         "text": "#FFFFFF",
@@ -74,25 +78,33 @@
     },
     "editor": {
       "background": "#333333",
-      "gutter_background": "#333333",
       "text": "#FFFFFF",
-      "comment": "#009900",
-      "keyword": "#00FFFF",
-      "line_number": "#666666",
-      "border": "#990000"
+      "border": "#990000",
+      "gutter": {
+        "background": "#333333",
+        "line_number": "#666666"
+      },
+      "syntax": {
+        "comment": "#009900",
+        "custom_name": "#00FFFF"
+      }
     },
     "chart": {
       "background": "#222222",
       "border": "#990000",
-      "axis_background": "#333333",
-      "tick": "#333333",
-      "crosshair": "#666666",
-      "crosshair_label": {
-        "background": "#444444",
-        "text": "#FFFFFF",
-        "border": "#990000"
+      "axis": {
+        "background": "#333333",
+        "tick": "#333333"
       },
-      "status_field": {
+      "crosshair": {
+        "line": "#666666",
+        "label": {
+          "background": "#444444",
+          "text": "#FFFFFF",
+          "border": "#990000"
+        }
+      },
+      "status": {
         "background": "#333333",
         "label": "#FFFFFF",
         "divider": "#990000"
@@ -108,26 +120,58 @@
       }
     },
     "indicators": {
-      "dif": "#3333CC",
-      "dea": "#CC9900",
-      "kdj_k": "#3333CC",
-      "kdj_d": "#CC9900",
-      "kdj_j": "#FF00FF",
-      "rsi_1": "#3333CC",
-      "rsi_2": "#CC9900",
-      "rsi_3": "#FF00FF",
-      "boll_mid": "#3366CC",
-      "boll_up": "#CC0066",
-      "boll_down": "#009999",
-      "obv": "#CC6600",
-      "cci": "#6600CC",
-      "bias": ["#3333CC", "#CC9900", "#FF00FF"],
-      "ma": ["#3333CC", "#CC0066", "#009933", "#6600CC", "#009999", "#666666"],
-      "ema": ["#FF00FF", "#FF8800", "#00CCCC", "#88AA00", "#8888FF", "#AA00AA"]
+      "macd": {
+        "dif": "#3333CC",
+        "dea": "#CC9900"
+      },
+      "kdj": {
+        "k": "#3333CC",
+        "d": "#CC9900",
+        "j": "#FF00FF"
+      },
+      "rsi": {
+        "line_1": "#3333CC",
+        "line_2": "#CC9900",
+        "line_3": "#FF00FF"
+      },
+      "boll": {
+        "mid": "#3366CC",
+        "upper": "#CC0066",
+        "lower": "#009999"
+      },
+      "obv": {
+        "line": "#CC6600"
+      },
+      "cci": {
+        "line": "#6600CC"
+      },
+      "bias": {
+        "line_1": "#3333CC",
+        "line_2": "#CC9900",
+        "line_3": "#FF00FF"
+      },
+      "ma": {
+        "line_1": "#3333CC",
+        "line_2": "#CC0066",
+        "line_3": "#009933",
+        "line_4": "#6600CC",
+        "line_5": "#009999",
+        "line_6": "#666666"
+      },
+      "ema": {
+        "line_1": "#FF00FF",
+        "line_2": "#FF8800",
+        "line_3": "#00CCCC",
+        "line_4": "#88AA00",
+        "line_5": "#8888FF",
+        "line_6": "#AA00AA"
+      }
     },
     "pointer": {
-      "pointer_trail": "#FF3333",
-      "pointer_trail_hot": "#00FF00"
+      "trail": {
+        "normal": "#FF3333",
+        "hot": "#00FF00"
+      }
     }
   }
 }

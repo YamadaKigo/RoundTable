@@ -461,8 +461,8 @@ impl Theme {
                 file.format
             ));
         }
-        if file.version != 2 {
-            return Err(format!("version 必须是 2，当前是 {}", file.version));
+        if file.version != 3 {
+            return Err(format!("version 必须是 3，当前是 {}", file.version));
         }
         if file.id != expected.file_name() {
             return Err(format!(
@@ -486,7 +486,7 @@ impl Theme {
             menu_hover: colors.application.menu_bar.hover.0,
             menu_border: colors.application.menu_bar.border.0,
             menu_separator: colors.application.menu_bar.separator.0,
-            work_bg: colors.window.content_background.0,
+            work_bg: colors.window.background.0,
             desktop_bg: colors.application.workspace.background.0,
             status_bg: colors.application.status_bar.background.0,
             status_text: colors.application.status_bar.text.0,
@@ -494,38 +494,38 @@ impl Theme {
             taskbar_bg: colors.application.taskbar.background.0,
             taskbar_text: colors.application.taskbar.text.0,
             taskbar_border: colors.application.taskbar.border.0,
-            panel_bg: colors.window.panel_background.0,
+            panel_bg: colors.window.panel.background.0,
             splitter: colors.window.splitter.0,
             scroll_track: colors.controls.scrollbar.track.0,
             scroll_thumb: colors.controls.scrollbar.thumb.0,
             scroll_border: colors.controls.scrollbar.border.0,
-            btn_face: colors.controls.button.face.0,
+            btn_face: colors.controls.button.background.0,
             btn_hover: colors.controls.button.hover.0,
             btn_press: colors.controls.button.pressed.0,
             button_text: colors.controls.button.text.0,
             button_border: colors.controls.button.border.0,
-            sel_bg: colors.controls.selection_background.0,
+            sel_bg: colors.controls.selection.background.0,
             symbol: colors.window.symbol.0,
-            ctrl_border: colors.controls.generic_border.0,
+            ctrl_border: colors.controls.border.0,
             window_border: colors.window.border.0,
             line: colors.application.menu_bar.separator.0,
             chart_line: colors.chart.border.0,
             text: colors.window.text.0,
             text_white: colors.controls.color_picker.handle.0,
-            syn_comment: colors.editor.comment.0,
-            syn_keyword: colors.editor.keyword.0,
+            syn_comment: colors.editor.syntax.comment.0,
+            syn_keyword: colors.editor.syntax.custom_name.0,
             editor_bg: colors.editor.background.0,
-            editor_gutter_bg: colors.editor.gutter_background.0,
+            editor_gutter_bg: colors.editor.gutter.background.0,
             editor_text: colors.editor.text.0,
-            editor_line_number: colors.editor.line_number.0,
+            editor_line_number: colors.editor.gutter.line_number.0,
             editor_border: colors.editor.border.0,
             chart_bg: colors.chart.background.0,
-            axis_bg: colors.chart.axis_background.0,
-            tick: colors.chart.tick.0,
-            cross: colors.chart.crosshair.0,
-            cross_label: colors.chart.crosshair_label.background.0,
-            cross_label_text: colors.chart.crosshair_label.text.0,
-            cross_label_border: colors.chart.crosshair_label.border.0,
+            axis_bg: colors.chart.axis.background.0,
+            tick: colors.chart.axis.tick.0,
+            cross: colors.chart.crosshair.line.0,
+            cross_label: colors.chart.crosshair.label.background.0,
+            cross_label_text: colors.chart.crosshair.label.text.0,
+            cross_label_border: colors.chart.crosshair.label.border.0,
             tooltip_bg: colors.controls.tooltip.background.0,
             tooltip_text: colors.controls.tooltip.text.0,
             tooltip_border: colors.controls.tooltip.border.0,
@@ -537,50 +537,50 @@ impl Theme {
             color_picker_bg: colors.controls.color_picker.background.0,
             color_picker_border: colors.controls.color_picker.border.0,
             color_picker_handle: colors.controls.color_picker.handle.0,
-            chart_status_bg: colors.chart.status_field.background.0,
-            chart_status_label: colors.chart.status_field.label.0,
-            chart_status_divider: colors.chart.status_field.divider.0,
+            chart_status_bg: colors.chart.status.background.0,
+            chart_status_label: colors.chart.status.label.0,
+            chart_status_divider: colors.chart.status.divider.0,
             ind_zero: colors.chart.zero_line.0,
             candle_up: colors.chart.candle.up.0,
             candle_down: colors.chart.candle.down.0,
             text_up: colors.chart.price_text.up.0,
             text_down: colors.chart.price_text.down.0,
-            dif: colors.indicators.dif.0,
-            dea: colors.indicators.dea.0,
-            kdj_k: colors.indicators.kdj_k.0,
-            kdj_d: colors.indicators.kdj_d.0,
-            kdj_j: colors.indicators.kdj_j.0,
-            rsi_1: colors.indicators.rsi_1.0,
-            rsi_2: colors.indicators.rsi_2.0,
-            rsi_3: colors.indicators.rsi_3.0,
-            boll_mid: colors.indicators.boll_mid.0,
-            boll_up: colors.indicators.boll_up.0,
-            boll_down: colors.indicators.boll_down.0,
-            obv: colors.indicators.obv.0,
-            cci: colors.indicators.cci.0,
+            dif: colors.indicators.macd.dif.0,
+            dea: colors.indicators.macd.dea.0,
+            kdj_k: colors.indicators.kdj.k.0,
+            kdj_d: colors.indicators.kdj.d.0,
+            kdj_j: colors.indicators.kdj.j.0,
+            rsi_1: colors.indicators.rsi.line_1.0,
+            rsi_2: colors.indicators.rsi.line_2.0,
+            rsi_3: colors.indicators.rsi.line_3.0,
+            boll_mid: colors.indicators.boll.mid.0,
+            boll_up: colors.indicators.boll.upper.0,
+            boll_down: colors.indicators.boll.lower.0,
+            obv: colors.indicators.obv.line.0,
+            cci: colors.indicators.cci.line.0,
             bias: [
-                colors.indicators.bias[0].0,
-                colors.indicators.bias[1].0,
-                colors.indicators.bias[2].0,
+                colors.indicators.bias.line_1.0,
+                colors.indicators.bias.line_2.0,
+                colors.indicators.bias.line_3.0,
             ],
             ma: [
-                colors.indicators.ma[0].0,
-                colors.indicators.ma[1].0,
-                colors.indicators.ma[2].0,
-                colors.indicators.ma[3].0,
-                colors.indicators.ma[4].0,
-                colors.indicators.ma[5].0,
+                colors.indicators.ma.line_1.0,
+                colors.indicators.ma.line_2.0,
+                colors.indicators.ma.line_3.0,
+                colors.indicators.ma.line_4.0,
+                colors.indicators.ma.line_5.0,
+                colors.indicators.ma.line_6.0,
             ],
             ema: [
-                colors.indicators.ema[0].0,
-                colors.indicators.ema[1].0,
-                colors.indicators.ema[2].0,
-                colors.indicators.ema[3].0,
-                colors.indicators.ema[4].0,
-                colors.indicators.ema[5].0,
+                colors.indicators.ema.line_1.0,
+                colors.indicators.ema.line_2.0,
+                colors.indicators.ema.line_3.0,
+                colors.indicators.ema.line_4.0,
+                colors.indicators.ema.line_5.0,
+                colors.indicators.ema.line_6.0,
             ],
-            pointer_trail: colors.pointer.pointer_trail.0,
-            pointer_trail_hot: colors.pointer.pointer_trail_hot.0,
+            pointer_trail: colors.pointer.trail.normal.0,
+            pointer_trail_hot: colors.pointer.trail.hot.0,
         })
     }
 
@@ -763,8 +763,8 @@ struct BarColors {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WindowColors {
-    content_background: HexColor,
-    panel_background: HexColor,
+    background: HexColor,
+    panel: PanelColors,
     border: HexColor,
     splitter: HexColor,
     symbol: HexColor,
@@ -773,10 +773,16 @@ struct WindowColors {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct PanelColors {
+    background: HexColor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ControlColors {
     button: ButtonColors,
-    generic_border: HexColor,
-    selection_background: HexColor,
+    border: HexColor,
+    selection: SelectionColors,
     text_input: TextInputColors,
     scrollbar: ScrollbarColors,
     tooltip: TooltipColors,
@@ -786,11 +792,17 @@ struct ControlColors {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ButtonColors {
-    face: HexColor,
+    background: HexColor,
     hover: HexColor,
     pressed: HexColor,
     text: HexColor,
     border: HexColor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SelectionColors {
+    background: HexColor,
 }
 
 #[derive(Deserialize)]
@@ -831,12 +843,24 @@ struct ColorPickerColors {
 #[serde(deny_unknown_fields)]
 struct EditorColors {
     background: HexColor,
-    gutter_background: HexColor,
     text: HexColor,
-    comment: HexColor,
-    keyword: HexColor,
-    line_number: HexColor,
     border: HexColor,
+    gutter: GutterColors,
+    syntax: SyntaxColors,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GutterColors {
+    background: HexColor,
+    line_number: HexColor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SyntaxColors {
+    comment: HexColor,
+    custom_name: HexColor,
 }
 
 #[derive(Deserialize)]
@@ -844,14 +868,26 @@ struct EditorColors {
 struct ChartColors {
     background: HexColor,
     border: HexColor,
-    axis_background: HexColor,
-    tick: HexColor,
-    crosshair: HexColor,
-    crosshair_label: LabelColors,
-    status_field: StatusFieldColors,
+    axis: AxisColors,
+    crosshair: CrosshairColors,
+    status: StatusFieldColors,
     zero_line: HexColor,
     candle: CandleColors,
     price_text: PriceTextColors,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AxisColors {
+    background: HexColor,
+    tick: HexColor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CrosshairColors {
+    line: HexColor,
+    label: LabelColors,
 }
 
 #[derive(Deserialize)]
@@ -887,29 +923,95 @@ struct PriceTextColors {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct IndicatorColors {
+    macd: MacdColors,
+    kdj: KdjColors,
+    rsi: RsiColors,
+    boll: BollColors,
+    obv: LineColor,
+    cci: LineColor,
+    bias: BiasColors,
+    ma: MaColors,
+    ema: EmaColors,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MacdColors {
     dif: HexColor,
     dea: HexColor,
-    kdj_k: HexColor,
-    kdj_d: HexColor,
-    kdj_j: HexColor,
-    rsi_1: HexColor,
-    rsi_2: HexColor,
-    rsi_3: HexColor,
-    boll_mid: HexColor,
-    boll_up: HexColor,
-    boll_down: HexColor,
-    obv: HexColor,
-    cci: HexColor,
-    bias: [HexColor; 3],
-    ma: [HexColor; 6],
-    ema: [HexColor; 6],
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KdjColors {
+    k: HexColor,
+    d: HexColor,
+    j: HexColor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RsiColors {
+    line_1: HexColor,
+    line_2: HexColor,
+    line_3: HexColor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BollColors {
+    mid: HexColor,
+    upper: HexColor,
+    lower: HexColor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LineColor {
+    line: HexColor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BiasColors {
+    line_1: HexColor,
+    line_2: HexColor,
+    line_3: HexColor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MaColors {
+    line_1: HexColor,
+    line_2: HexColor,
+    line_3: HexColor,
+    line_4: HexColor,
+    line_5: HexColor,
+    line_6: HexColor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EmaColors {
+    line_1: HexColor,
+    line_2: HexColor,
+    line_3: HexColor,
+    line_4: HexColor,
+    line_5: HexColor,
+    line_6: HexColor,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PointerColors {
-    pointer_trail: HexColor,
-    pointer_trail_hot: HexColor,
+    trail: PointerTrailColors,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PointerTrailColors {
+    normal: HexColor,
+    hot: HexColor,
 }
 
 struct HexColor(egui::Color32);

@@ -922,7 +922,7 @@ impl StockApp {
                             geom.bottom,
                             geom.origin.y,
                         );
-                        self.label_box(
+                        self.axis_label_box(
                             painter,
                             s,
                             egui::pos2(x0, y0),
@@ -1107,6 +1107,26 @@ impl StockApp {
         );
     }
 
+    fn axis_label_box(
+        &mut self,
+        painter: &egui::Painter,
+        text: &str,
+        pos: egui::Pos2,
+        w: f32,
+        bg: egui::Color32,
+        fg: egui::Color32,
+    ) {
+        let rect = egui::Rect::from_min_size(pos, egui::vec2(w, CROSS_LABEL_H));
+        tag_box(painter, rect, bg, theme().cross_label_border);
+        self.text(
+            painter,
+            egui::pos2(rect.min.x + PITCH, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            text,
+            fg,
+        );
+    }
+
     pub(crate) const PANE_TABS: [&'static str; 2] = ["切换", "代码"];
 
     #[allow(dead_code)]
@@ -1213,10 +1233,8 @@ impl StockApp {
         ((need / advance).ceil() as usize).max(1)
     }
 
-    pub(crate) fn cross_label_w(&mut self, text: &str) -> f32 {
-        snap_cells_up(self.text_width(text) + 2.0 * TEXT_PAD_X)
-            .max(cells(2))
-            .min(cells(AXIS_COLS - 2))
+    pub(crate) fn cross_label_w(&mut self, _text: &str) -> f32 {
+        cells(AXIS_COLS - 2)
     }
 
     pub(crate) fn axis_tick_x(axis: egui::Rect) -> f32 {

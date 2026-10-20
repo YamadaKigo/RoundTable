@@ -6345,8 +6345,8 @@ fn theme_json_files_parse_and_accept_user_edits() {
     edit["colors"]["controls"]["tooltip"]["background"] = serde_json::json!("#654321");
     edit["colors"]["controls"]["button"]["text"] = serde_json::json!("#010203");
     edit["colors"]["controls"]["text_input"]["background"] = serde_json::json!("#040506");
-    edit["colors"]["editor"]["keyword"] = serde_json::json!("#070809");
-    edit["colors"]["chart"]["status_field"]["divider"] = serde_json::json!("#0A0B0C");
+    edit["colors"]["editor"]["syntax"]["custom_name"] = serde_json::json!("#070809");
+    edit["colors"]["chart"]["status"]["divider"] = serde_json::json!("#0A0B0C");
     let edited =
         Theme::from_json(&edit.to_string(), ThemeId::Classic).expect("修改后的主题应能解析");
     assert_eq!(edited.title_bg, egui::Color32::from_rgb(0xAA, 0xBB, 0xCC));
@@ -7778,7 +7778,7 @@ fn hover_tooltip_shares_the_button_bottom_border() {
         let mut out = ctx.run_ui(raw, |ui| {
             let painter = ui.painter().clone();
             app.draw_button(ui, &painter, rect, &content, false, tip);
-            app.paint_tooltip(&painter, layout);
+            app.paint_tooltip(&ctx, layout);
         });
         let shapes = std::mem::take(&mut out.shapes);
         absorb_textures(&mut out.textures_delta);
@@ -8241,6 +8241,72 @@ fn editor_body_takes_focus_and_types() {
         text,
         "没焦点还在收键盘事件"
     );
+}
+
+#[test]
+fn editor_edit_menu_actions_keep_the_text_selection() {
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    let mut app = blank_app();
+    app.text_engine = HardText::new(&ctx);
+    if app.text_engine.is_none() {
+        return;
+    }
+    app.open_source_window(PANE_CANDLE);
+    app.source.editor.buf = TextBuffer::from_text("abcdef");
+    app.source.editor.buf.select_all();
+    app.source.editor.menu = MenuState {
+        open: Some(1),
+        path: Vec::new(),
+    };
+    let _ = render_events_in(&ctx, &mut app, vec![]);
+    let panel = app
+        .win_mgr
+        .wins
+        .iter()
+        .find(|w| w.kind == WinKind::Source)
+        .expect("source window")
+        .w
+        .inner_rect();
+    let menu_band = grid_band(panel, SRC_TITLE_ROWS, SRC_MENU_ROWS);
+    let widths: Vec<f32> = EDITOR_TABS
+        .iter()
+        .map(|tab| tab_width(&mut app, tab.title))
+        .collect();
+    let anchor = menu_item_rects(menu_band, &widths, MenuAlign::Left)[1];
+    let items = EDITOR_TABS[1].items;
+    let menu = MenuPanel::bounded(
+        anchor,
+        menu_panel_width(&mut app, items),
+        items.len(),
+        panel,
+    );
+    let at = menu.row(1).center();
+    let _ = render_events_in(
+        &ctx,
+        &mut app,
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    let _ = render_events_in(
+        &ctx,
+        &mut app,
+        vec![egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert_eq!(app.source.editor.buf.to_text(), "");
 }
 
 #[test]
