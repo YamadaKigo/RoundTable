@@ -1067,6 +1067,8 @@ impl StockApp {
 
     pub(crate) const PANE_TABS: [&'static str; 2] = ["切换", "代码"];
 
+    pub(crate) const PANE_LEAD: &'static str = "圆桌";
+
     #[allow(dead_code)]
     pub(crate) fn pane_button_rects(title: egui::Rect, widths: &[f32]) -> Vec<egui::Rect> {
         menu_item_rects(title, widths, MenuAlign::Right)
@@ -1084,10 +1086,11 @@ impl StockApp {
             None
         };
         let name = self.panes[pane].indicator.name().to_owned();
-        let out = menu_bar_ui(
+        let out = menu_bar_ui_with_lead(
             self,
             ui,
             title,
+            Self::PANE_LEAD,
             &Self::PANE_TABS,
             MenuAlign::Right,
             open,

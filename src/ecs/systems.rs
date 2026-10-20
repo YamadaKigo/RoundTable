@@ -1,13 +1,13 @@
-use crate::ecs::AppWorld;
+use crate::ecs::ChartWorld;
 use crate::grid::{BAR_COUNT, BAR_START};
 
-pub(crate) fn mark_panes_dirty(world: &mut AppWorld) {
+pub(crate) fn mark_panes_dirty(world: &mut ChartWorld) {
     for pane in &mut world.panes {
         pane.dirty = true;
     }
 }
 
-pub(crate) fn ensure_pane_computed(world: &mut AppWorld, pane: usize) {
+pub(crate) fn ensure_pane_computed(world: &mut ChartWorld, pane: usize) {
     if !world.panes[pane].dirty {
         return;
     }
@@ -31,7 +31,7 @@ pub(crate) fn ensure_pane_computed(world: &mut AppWorld, pane: usize) {
     world.panes[pane].dirty = false;
 }
 
-pub(crate) fn regenerate_market(world: &mut AppWorld) {
+pub(crate) fn regenerate_market(world: &mut ChartWorld) {
     let bars = crate::data::random_walk::generate(world.bar_seed, BAR_COUNT, BAR_START);
     world.bars.replace(bars);
     mark_panes_dirty(world);

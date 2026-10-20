@@ -38,6 +38,7 @@ pub(crate) enum ButtonContent {
     #[allow(dead_code)]
     IconText(IconKind, String),
 
+    #[allow(dead_code)]
     Icon(IconKind),
 }
 
@@ -198,7 +199,7 @@ impl StockApp {
             (anchor.min.y + LINE_W - h).max(layout.min.y)
         };
         let rect = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, h));
-        tag_box(painter, rect, theme().cross_label, theme().ctrl_border);
+        tag_box(painter, rect, theme().tooltip_bg, theme().ctrl_border);
         self.text(
             painter,
             rect.center(),

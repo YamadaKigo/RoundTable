@@ -62,7 +62,7 @@ pub(crate) const FIXED_PITCH_MODERN: u32 = 0x31;
 
 pub(crate) const GDI_FACES: [&str; 4] = ["宋体", "新宋体", "SimSun", "NSimSun"];
 
-pub(crate) const ASCII_FON_FILES: [&str; 2] = ["svgafix.fon", "8514fix.fon"];
+pub(crate) const ASCII_FON_FILES: [&str; 2] = ["vgafix.fon", "8514fix.fon"];
 
 pub(crate) const RAS_DIB_W: i32 = 32;
 pub(crate) const RAS_DIB_H: i32 = 32;
@@ -694,7 +694,7 @@ pub(crate) const fn ascii_glyph_offset(c: char) -> i32 {
     if c == '0' { -1 } else { 0 }
 }
 
-pub(crate) fn split_areas(layout: egui::Rect) -> [egui::Rect; 4] {
+pub(crate) fn split_areas(layout: egui::Rect) -> [egui::Rect; 5] {
     let x0 = layout.min.x;
     let x1 = layout.max.x;
     let y0 = layout.min.y;
@@ -702,13 +702,15 @@ pub(crate) fn split_areas(layout: egui::Rect) -> [egui::Rect; 4] {
         |y: f32, h: f32| egui::Rect::from_min_size(egui::pos2(x0, y), egui::vec2(x1 - x0, h));
 
     let status = band(layout.max.y - STATUS_H, STATUS_H);
+    let taskbar = band(status.min.y - TASKBAR_H + LINE_W, TASKBAR_H);
     [
         band(y0 + grid_line(TITLE_LINE), TITLEBAR_H),
         band(y0 + grid_line(MENU_LINE), MENUBAR_H),
         egui::Rect::from_min_max(
             egui::pos2(x0, y0 + grid_line(WORK_LINE)),
-            egui::pos2(x1, status.min.y + LINE_W),
+            egui::pos2(x1, taskbar.min.y + LINE_W),
         ),
+        taskbar,
         status,
     ]
 }

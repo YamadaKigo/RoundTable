@@ -22,6 +22,9 @@ pub struct Kdj {
 
 impl Kdj {
     pub fn new(n: usize, m1: usize, m2: usize) -> Self {
+        let n = n.max(1);
+        let m1 = m1.max(1);
+        let m2 = m2.max(1);
         Self {
             n,
             m1,
@@ -80,8 +83,8 @@ impl Indicator for Kdj {
         &self.title
     }
 
-    fn value_range(&self, _lo: f64, _hi: f64) -> (f64, f64) {
-        (RANGE_LO, RANGE_HI)
+    fn value_range(&self, lo: f64, hi: f64) -> (f64, f64) {
+        (lo.min(RANGE_LO), hi.max(RANGE_HI))
     }
 
     fn layout(&self) -> ChartLayout {
@@ -220,5 +223,11 @@ mod tests {
         assert_eq!(j[last].0, k[last].0);
 
         assert!(j[last].1 > k[last].1);
+    }
+
+    #[test]
+    fn value_range_keeps_j_above_and_below_the_reference_band() {
+        let kdj = Kdj::default();
+        assert_eq!(kdj.value_range(-20.0, 130.0), (-20.0, 130.0));
     }
 }

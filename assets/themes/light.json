@@ -6,6 +6,7 @@
   "colors": {
     "window": {
       "title_bg": "#BBBBBB",
+      "title_fill": "#999999",
       "menu_bg": "#DDDDDD",
       "work_bg": "#FFFFFF",
       "desktop_bg": "#EEEEEE",
@@ -23,7 +24,8 @@
       "line": "#999999",
       "text": "#000000",
       "text_white": "#FFFFFF",
-      "syn_comment": "#009900"
+      "syn_comment": "#009900",
+      "tooltip_bg": "#DDDDDD"
     },
     "chart": {
       "chart_bg": "#FFFFFF",

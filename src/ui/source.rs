@@ -106,6 +106,7 @@ impl StockApp {
     pub(crate) fn run_editor_cmd(&mut self, cmd: EditorCmd) {
         match cmd {
             EditorCmd::None => {}
+            EditorCmd::New => self.new_source(),
             EditorCmd::Save => self.save_source(),
             EditorCmd::Reload => {
                 let pane = self.source.pane;
@@ -117,6 +118,14 @@ impl StockApp {
 
             _ => {}
         }
+    }
+
+    pub(crate) fn new_source(&mut self) {
+        self.source.editor.load("");
+        self.source.editor.modified = true;
+        self.source.last_text.clear();
+        self.apply_script_source(String::new());
+        self.status_msg = "新建空白文件".to_owned();
     }
 
     pub(crate) fn save_source(&mut self) {

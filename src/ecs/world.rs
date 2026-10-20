@@ -5,24 +5,16 @@ use crate::ecs::entity::EntityAllocator;
 use crate::ecs::{MarketBars, Pane};
 use crate::grid::*;
 use crate::indicator;
-use crate::theme::{DOWN_RGB_DEFAULT, UP_RGB_DEFAULT};
-use crate::ui::panel::{IND_H_DEFAULT, KLINE_H_DEFAULT, VOL_H_DEFAULT};
 
-pub(crate) struct AppWorld {
+pub(crate) struct ChartWorld {
     pub(crate) bars: MarketBars,
     pub(crate) bar_seed: u64,
     pub(crate) panes: ComponentTable<Pane>,
     pub(crate) panes_palette: indicator::Palette,
-    pub(crate) kline_h: f32,
-    pub(crate) vol_h: f32,
-    pub(crate) ind_h: f32,
-    pub(crate) up_color: (u8, u8, u8),
-    pub(crate) down_color: (u8, u8, u8),
-    pub(crate) chart_follows_theme: bool,
     entities: EntityAllocator,
 }
 
-impl AppWorld {
+impl ChartWorld {
     pub(crate) fn new(panes: Vec<Pane>, palette: indicator::Palette) -> Self {
         let mut entities = EntityAllocator::default();
         let mut pane_components = ComponentTable::default();
@@ -38,12 +30,6 @@ impl AppWorld {
             bar_seed: BAR_SEED,
             panes: pane_components,
             panes_palette: palette,
-            kline_h: KLINE_H_DEFAULT,
-            vol_h: VOL_H_DEFAULT,
-            ind_h: IND_H_DEFAULT,
-            up_color: UP_RGB_DEFAULT,
-            down_color: DOWN_RGB_DEFAULT,
-            chart_follows_theme: true,
             entities,
         }
     }

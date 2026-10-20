@@ -352,6 +352,7 @@ pub(crate) struct MenuBarOut {
 
 pub(crate) struct MenuBar<'a, 'b> {
     bar: egui::Rect,
+    lead: Option<String>,
     titles: &'a [&'static str],
     align: MenuAlign,
     label: Option<&'b str>,
@@ -368,11 +369,17 @@ impl<'a, 'b> MenuBar<'a, 'b> {
     ) -> Self {
         Self {
             bar,
+            lead: None,
             titles,
             align,
             label,
             style,
         }
+    }
+
+    pub(crate) fn with_lead(mut self, lead: &str) -> Self {
+        self.lead = Some(lead.to_owned());
+        self
     }
 
     pub(crate) fn ui(
@@ -382,8 +389,13 @@ impl<'a, 'b> MenuBar<'a, 'b> {
         mut open: Option<usize>,
     ) -> MenuBarOut {
         let painter = ui.painter().clone();
-        let widths: Vec<f32> = self
-            .titles
+        let offset = usize::from(self.lead.is_some());
+        let mut display_titles: Vec<&str> = Vec::with_capacity(self.titles.len() + offset);
+        if let Some(lead) = &self.lead {
+            display_titles.push(lead.as_str());
+        }
+        display_titles.extend(self.titles.iter().copied());
+        let widths: Vec<f32> = display_titles
             .iter()
             .map(|title| tab_width(app, title))
             .collect();
@@ -391,7 +403,7 @@ impl<'a, 'b> MenuBar<'a, 'b> {
 
         if ui
             .input(|i| i.pointer.hover_pos())
-            .is_some_and(|p| self.bar.contains(p))
+            .is_some_and(|p| rects.iter().any(|rect| menu_hit_rect(*rect).contains(p)))
         {
             app.pointer.force_hint(CursorKind::Normal, ui);
         }
@@ -410,21 +422,26 @@ impl<'a, 'b> MenuBar<'a, 'b> {
                 theme().text,
             );
         }
-        let mut hovered = vec![false; self.titles.len()];
+        let mut hovered = vec![false; display_titles.len()];
         let mut clicked = None;
         for (i, rect) in rects.iter().enumerate() {
             let resp = interact_rect(ui, menu_hit_rect(*rect), egui::Sense::click());
             hovered[i] = resp.hovered();
+            if offset == 1 && i == 0 {
+                continue;
+            }
+            let item = i - offset;
             if resp.clicked() {
-                clicked = Some(i);
-                open = if open == Some(i) { None } else { Some(i) };
-            } else if self.style.hover_switch && hovered[i] && open.is_some_and(|cur| cur != i) {
-                open = Some(i);
+                clicked = Some(item);
+                open = if open == Some(item) { None } else { Some(item) };
+            } else if self.style.hover_switch && hovered[i] && open.is_some_and(|cur| cur != item) {
+                open = Some(item);
             }
         }
 
-        for (i, title) in self.titles.iter().enumerate() {
-            if hovered[i] || open == Some(i) {
+        for (i, title) in display_titles.iter().enumerate() {
+            let item_open = !(offset == 1 && i == 0) && open == Some(i.saturating_sub(offset));
+            if hovered[i] || item_open {
                 Self::paint_hover(&painter, rects[i]);
             }
             app.text(
@@ -464,7 +481,7 @@ impl<'a, 'b> MenuBar<'a, 'b> {
         );
 
         MenuBarOut {
-            rects,
+            rects: rects[offset..].to_vec(),
             clicked,
             open,
         }
@@ -488,6 +505,23 @@ pub(crate) fn menu_bar_ui(
     style: MenuBarStyle,
 ) -> MenuBarOut {
     MenuBar::new(bar, titles, align, label, style).ui(app, ui, open)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn menu_bar_ui_with_lead(
+    app: &mut StockApp,
+    ui: &mut egui::Ui,
+    bar: egui::Rect,
+    lead: &str,
+    titles: &[&'static str],
+    align: MenuAlign,
+    open: Option<usize>,
+    label: Option<&str>,
+    style: MenuBarStyle,
+) -> MenuBarOut {
+    MenuBar::new(bar, titles, align, label, style)
+        .with_lead(lead)
+        .ui(app, ui, open)
 }
 
 pub(crate) fn ui_menu_bar(

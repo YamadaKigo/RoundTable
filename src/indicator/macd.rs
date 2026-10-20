@@ -25,6 +25,9 @@ pub struct Macd {
 
 impl Macd {
     pub fn new(fast: usize, slow: usize, signal: usize) -> Self {
+        let fast = fast.max(1);
+        let slow = slow.max(1);
+        let signal = signal.max(1);
         Self {
             fast,
             slow,

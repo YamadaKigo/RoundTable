@@ -5,9 +5,7 @@ use crate::ui::icon::*;
 use crate::ui::titlebar::*;
 use eframe::egui;
 
-pub(crate) const EDGE_BAND: f32 = 5.0;
-
-pub(crate) const WIN_ID_COLOR: u64 = 0x43_4c_52;
+pub(crate) const EDGE_BAND: f32 = 0.5;
 
 pub(crate) const WINDOW_DRAG_SPEED: f32 = 1.4;
 
@@ -47,7 +45,7 @@ pub(crate) struct Win {
 
     rs_off: egui::Vec2,
 
-    move_guards: Vec<(u64, egui::Rect)>,
+    move_guards: Vec<(u64, egui::Rect, bool)>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
@@ -103,13 +101,23 @@ impl WinEdge {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+#[allow(clippy::enum_variant_names)]
 pub(crate) enum WinKeys {
     MinAndClose,
 
     MinMaxClose,
+
+    PinnedMinMaxClose,
 }
 
 impl WinKeys {
+    pub(crate) fn for_pin_state(self, pinned: bool) -> Self {
+        match (self, pinned) {
+            (WinKeys::MinMaxClose, true) => WinKeys::PinnedMinMaxClose,
+            (keys, _) => keys,
+        }
+    }
+
     fn shown(self) -> &'static [(SysButton, usize)] {
         match self {
             WinKeys::MinAndClose => &[
@@ -124,6 +132,12 @@ impl WinKeys {
                 (SysButton::Maximize, 3),
                 (SysButton::Close, 4),
             ],
+            WinKeys::PinnedMinMaxClose => &[
+                (SysButton::Pin, 0),
+                (SysButton::Minimize, 1),
+                (SysButton::Maximize, 2),
+                (SysButton::Close, 3),
+            ],
         }
     }
 }
@@ -131,6 +145,7 @@ impl WinKeys {
 #[derive(Clone, Copy)]
 pub(crate) struct WinOut {
     pub(crate) panel: Option<egui::Rect>,
+    pub(crate) restore_maximized: bool,
     pub(crate) exclusive: bool,
     pub(crate) pin: bool,
     pub(crate) minimize: bool,
@@ -139,12 +154,12 @@ pub(crate) struct WinOut {
 }
 
 pub(crate) fn edge_at(rect: egui::Rect, p: egui::Pos2, band: f32) -> WinEdge {
-    let left = p.x >= rect.min.x - band && p.x <= rect.min.x + band;
-    let right = p.x >= rect.max.x - band && p.x <= rect.max.x + band;
-    let bottom = p.y >= rect.max.y - band && p.y <= rect.max.y + band;
+    let left = p.x >= rect.min.x - band && p.x < rect.min.x + LINE_W - band;
+    let right = p.x >= rect.max.x - LINE_W - band && p.x < rect.max.x - band;
+    let bottom = p.y >= rect.max.y - LINE_W - band && p.y < rect.max.y - band;
 
-    let in_x = p.x >= rect.min.x - band && p.x <= rect.max.x + band;
-    let in_y = p.y >= rect.min.y - band && p.y <= rect.max.y + band;
+    let in_x = p.x >= rect.min.x - band && p.x < rect.max.x - band;
+    let in_y = p.y >= rect.min.y - band && p.y < rect.max.y - band;
 
     if p.y < rect.min.y + WIN_TITLE_H {
         return WinEdge::None;
@@ -177,6 +192,7 @@ pub(crate) fn overlap_span(a0: f32, a1: f32, b0: f32, b1: f32) -> f32 {
     (a1.min(b1) - a0.max(b0)).max(0.0)
 }
 
+#[allow(dead_code)]
 pub(crate) fn shares_border(a: egui::Rect, b: egui::Rect) -> bool {
     let w = overlap_span(a.min.x, a.max.x, b.min.x, b.max.x);
     let h = overlap_span(a.min.y, a.max.y, b.min.y, b.max.y);
@@ -189,18 +205,59 @@ pub(crate) fn interior_overlap(a: egui::Rect, b: egui::Rect) -> bool {
     w > LINE_W && h > LINE_W
 }
 
-fn guard_accepts(start: egui::Rect, target: egui::Rect, guard: egui::Rect) -> bool {
-    if shares_border(target, guard) {
-        return true;
+fn fits_bounds(rect: egui::Rect, bounds: egui::Rect) -> bool {
+    rect.min.x >= bounds.min.x - 0.01
+        && rect.min.y >= bounds.min.y - 0.01
+        && rect.max.x <= bounds.max.x + 0.01
+        && rect.max.y <= bounds.max.y + 0.01
+}
+
+fn guard_side_position(
+    guard: egui::Rect,
+    start: egui::Rect,
+    desired: egui::Pos2,
+    size: egui::Vec2,
+    bounds: egui::Rect,
+) -> Option<egui::Pos2> {
+    let target = egui::Rect::from_min_size(desired, size);
+    let vertical = overlap_span(target.min.y, target.max.y, guard.min.y, guard.max.y);
+    let horizontal = overlap_span(target.min.x, target.max.x, guard.min.x, guard.max.x);
+    let mut best: Option<egui::Pos2> = None;
+    let mut best_distance = f32::INFINITY;
+    let mut consider = |pos: egui::Pos2| {
+        let rect = egui::Rect::from_min_size(pos, size);
+        if !fits_bounds(rect, bounds) {
+            return;
+        }
+        let distance = (pos - desired).length_sq();
+        if distance < best_distance {
+            best = Some(pos);
+            best_distance = distance;
+        }
+    };
+    if start.max.x <= guard.min.x + LINE_W
+        && desired.x + size.x > guard.min.x + LINE_W
+        && vertical > LINE_W
+    {
+        consider(egui::pos2(guard.min.x + LINE_W - size.x, desired.y));
     }
-    if shares_border(start, guard) {
-        return false;
+    if start.min.x >= guard.max.x - LINE_W && desired.x < guard.max.x - LINE_W && vertical > LINE_W
+    {
+        consider(egui::pos2(guard.max.x - LINE_W, desired.y));
     }
-    let start_area = overlap_span(start.min.x, start.max.x, guard.min.x, guard.max.x)
-        * overlap_span(start.min.y, start.max.y, guard.min.y, guard.max.y);
-    let target_area = overlap_span(target.min.x, target.max.x, guard.min.x, guard.max.x)
-        * overlap_span(target.min.y, target.max.y, guard.min.y, guard.max.y);
-    target_area + 0.01 < start_area
+    if start.max.y <= guard.min.y + LINE_W
+        && desired.y + size.y > guard.min.y + LINE_W
+        && horizontal > LINE_W
+    {
+        consider(egui::pos2(desired.x, guard.min.y + LINE_W - size.y));
+    }
+    if start.min.y >= guard.max.y - LINE_W
+        && desired.y < guard.max.y - LINE_W
+        && horizontal > LINE_W
+    {
+        consider(egui::pos2(desired.x, guard.max.y - LINE_W));
+    }
+    best
 }
 
 impl Win {
@@ -228,7 +285,7 @@ impl Win {
         }
     }
 
-    pub(crate) fn set_move_guards(&mut self, guards: Vec<(u64, egui::Rect)>) {
+    pub(crate) fn set_move_guards(&mut self, guards: Vec<(u64, egui::Rect, bool)>) {
         self.move_guards = guards;
     }
 
@@ -343,6 +400,14 @@ impl Win {
         self.end_sessions();
     }
 
+    pub(crate) fn restore_rect(&self) -> (egui::Pos2, egui::Vec2) {
+        if self.maximized {
+            self.max_restore
+        } else {
+            (self.pos, self.size)
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn begin(
         &mut self,
@@ -352,20 +417,26 @@ impl Win {
         title_text: &str,
         keys: WinKeys,
         busy: bool,
+        active: bool,
         pinned: bool,
         minimized: bool,
         exclusive: bool,
     ) -> WinOut {
         self.update_geometry(app, ui, bounds);
         let rect = self.rect();
+        let keys = keys.for_pin_state(pinned);
 
         let painter = ui.painter().clone();
 
         painter.rect_filled(rect, egui::CornerRadius::ZERO, theme().work_bg);
         let enabled = ui.is_enabled();
         if enabled {
-            interact_rect(ui, rect, egui::Sense::click_and_drag());
-            self.grips(ui);
+            if active {
+                self.grips(ui);
+            } else {
+                self.grip_hot = WinEdge::None;
+                self.grip_down = false;
+            }
         } else {
             self.grip_hot = WinEdge::None;
             self.grip_down = false;
@@ -397,16 +468,49 @@ impl Win {
             exclusive,
         );
 
-        if enabled && let Some(p) = self.drag_title(ui, handle, busy, app.pointer.live) {
-            app.pointer.pinned = Some(p);
+        let pointer = ui.input(|i| i.pointer.latest_pos()).or(app.pointer.live);
+        let in_handle = pointer.is_some_and(|p| handle.contains(p));
+        self.handle_hot = enabled && active && in_handle;
+        if self.handle_hot {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
+        }
+        let primary_pressed = ui.input(|i| i.pointer.primary_pressed());
+        let primary_clicked = ui.input(|i| i.pointer.primary_clicked());
+        let double_clicked = ui.input(|i| {
+            i.pointer
+                .button_double_clicked(egui::PointerButton::Primary)
+        });
+        let mut restore_maximized = false;
+        let mut maximize = false;
+        if enabled && active && in_handle {
+            if self.maximized {
+                restore_maximized = primary_clicked;
+            } else {
+                if double_clicked {
+                    maximize = true;
+                    self.end_sessions();
+                } else if primary_pressed
+                    && !busy
+                    && !self.open_guard
+                    && self.drag.is_none()
+                    && !self.rs.any()
+                    && let Some(p) = pointer
+                {
+                    self.drag = Some(p - self.pos);
+                    self.drag_pin = Some(p);
+                    app.pointer.pinned = Some(p);
+                    self.rs = WinEdge::None;
+                }
+            }
         }
 
         WinOut {
             panel: Some(rect),
+            restore_maximized,
             exclusive: hit == Some(SysButton::Exclusive),
             pin: hit == Some(SysButton::Pin),
             minimize: hit == Some(SysButton::Minimize),
-            maximize: hit == Some(SysButton::Maximize),
+            maximize: maximize || hit == Some(SysButton::Maximize),
             close: hit == Some(SysButton::Close),
         }
     }
@@ -450,8 +554,8 @@ impl Win {
         }
 
         self.clamp_into(bounds);
-        if self.drag.is_some() || self.rs.any() {
-            self.enforce_move_guards(frame_rect);
+        if self.drag.is_some() {
+            self.enforce_move_guards(frame_rect, bounds);
         }
 
         if self.drag.is_some() {
@@ -465,89 +569,37 @@ impl Win {
         }
     }
 
-    fn enforce_move_guards(&mut self, frame_rect: egui::Rect) {
+    fn enforce_move_guards(&mut self, frame_rect: egui::Rect, bounds: egui::Rect) {
         if self.move_guards.is_empty() {
             return;
         }
-
-        if self.drag.is_none() {
-            let current = self.rect();
-            if self
-                .move_guards
-                .iter()
-                .any(|(_, guard)| !guard_accepts(frame_rect, current, *guard))
-            {
-                self.pos = frame_rect.min;
-                self.size = frame_rect.size();
-            }
+        if self
+            .move_guards
+            .iter()
+            .any(|(_, guard, exclusive)| *exclusive && interior_overlap(frame_rect, *guard))
+        {
             return;
         }
-
         let size = self.size;
-        let mut x = self.pos.x;
-        for (_, guard) in &self.move_guards {
-            let vertical =
-                overlap_span(frame_rect.min.y, frame_rect.max.y, guard.min.y, guard.max.y);
-            if vertical <= LINE_W || !shares_border(frame_rect, *guard) {
-                continue;
+        for _ in 0..=self.move_guards.len() {
+            let desired = self.pos;
+            let mut moved = false;
+            for (_, guard, _) in &self.move_guards {
+                if interior_overlap(frame_rect, *guard) {
+                    continue;
+                }
+                if let Some(next) = guard_side_position(*guard, frame_rect, desired, size, bounds)
+                    && next != desired
+                {
+                    self.pos = next;
+                    moved = true;
+                    break;
+                }
             }
-            if frame_rect.max.x <= guard.min.x + LINE_W {
-                x = x.min(guard.min.x + LINE_W - size.x);
-            } else if frame_rect.min.x >= guard.max.x - LINE_W {
-                x = x.max(guard.max.x - LINE_W);
-            }
-        }
-
-        let horizontal_candidate = egui::Rect::from_min_size(egui::pos2(x, frame_rect.min.y), size);
-        let mut y = self.pos.y;
-        for (_, guard) in &self.move_guards {
-            let horizontal = overlap_span(
-                horizontal_candidate.min.x,
-                horizontal_candidate.max.x,
-                guard.min.x,
-                guard.max.x,
-            );
-            if horizontal <= LINE_W || !shares_border(frame_rect, *guard) {
-                continue;
-            }
-            if frame_rect.max.y <= guard.min.y + LINE_W {
-                y = y.min(guard.min.y + LINE_W - size.y);
-            } else if frame_rect.min.y >= guard.max.y - LINE_W {
-                y = y.max(guard.max.y - LINE_W);
+            if !moved {
+                break;
             }
         }
-
-        let target = egui::Rect::from_min_size(egui::pos2(x, y), size);
-        if self
-            .move_guards
-            .iter()
-            .all(|(_, guard)| guard_accepts(frame_rect, target, *guard))
-        {
-            self.pos = target.min;
-            return;
-        }
-
-        let x_only = egui::Rect::from_min_size(egui::pos2(x, frame_rect.min.y), size);
-        if self
-            .move_guards
-            .iter()
-            .all(|(_, guard)| guard_accepts(frame_rect, x_only, *guard))
-        {
-            self.pos = x_only.min;
-            return;
-        }
-
-        let y_only = egui::Rect::from_min_size(egui::pos2(frame_rect.min.x, y), size);
-        if self
-            .move_guards
-            .iter()
-            .all(|(_, guard)| guard_accepts(frame_rect, y_only, *guard))
-        {
-            self.pos = y_only.min;
-            return;
-        }
-
-        self.pos = frame_rect.min;
     }
 
     pub(crate) fn end(&mut self, ui: &mut egui::Ui, busy: bool) {
@@ -557,133 +609,26 @@ impl Win {
         paint_shell_border(&ui.painter().clone(), self.rect());
     }
 
-    fn drag_title(
-        &mut self,
-        ui: &mut egui::Ui,
-        handle: egui::Rect,
-        busy: bool,
-        live: Option<egui::Pos2>,
-    ) -> Option<egui::Pos2> {
-        let resp = ui.interact(
-            handle,
-            egui::Id::new(("rt_win_drag", self.id)),
-            egui::Sense::click_and_drag(),
-        );
-
-        self.handle_hot = resp.hovered();
-        if resp.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
-        }
-        if !resp.is_pointer_button_down_on()
-            || busy
-            || self.open_guard
-            || self.drag.is_some()
-            || self.rs.any()
-        {
-            return None;
-        }
-        if !ui.input(|i| i.pointer.primary_down()) {
-            return None;
-        }
-
-        let p = live.or_else(|| press_anchor(ui))?;
-
-        if self.resizable && edge_at(self.rect(), p, EDGE_BAND).any() {
-            return None;
-        }
-
-        self.drag = Some(p - self.pos);
-
-        self.drag_pin = Some(p);
-        self.rs = WinEdge::None;
-        Some(p)
-    }
-
     fn grips(&mut self, ui: &mut egui::Ui) {
         self.grip_hot = WinEdge::None;
         self.grip_down = false;
-        if !self.resizable {
+        if !self.resizable || self.maximized {
             return;
         }
         let rect = self.rect();
-        let b = EDGE_BAND;
         let pointer = ui.input(|i| i.pointer.hover_pos());
-        let band = |x0: f32, y0: f32, x1: f32, y1: f32| {
-            egui::Rect::from_min_max(egui::pos2(x0, y0), egui::pos2(x1, y1))
+        let Some(p) = pointer else {
+            return;
         };
-
-        let bands = [
-            (
-                band(
-                    rect.min.x - b,
-                    rect.max.y - b,
-                    rect.min.x + b,
-                    rect.max.y + b,
-                ),
-                WinEdge::BottomLeft,
-            ),
-            (
-                band(
-                    rect.max.x - b,
-                    rect.max.y - b,
-                    rect.max.x + b,
-                    rect.max.y + b,
-                ),
-                WinEdge::BottomRight,
-            ),
-            (
-                band(
-                    rect.min.x - b,
-                    rect.min.y + WIN_TITLE_H,
-                    rect.min.x + b,
-                    rect.max.y - b,
-                ),
-                WinEdge::Left,
-            ),
-            (
-                band(
-                    rect.max.x - b,
-                    rect.min.y + WIN_TITLE_H,
-                    rect.max.x + b,
-                    rect.max.y - b,
-                ),
-                WinEdge::Right,
-            ),
-            (
-                band(
-                    rect.min.x + b,
-                    rect.max.y - b,
-                    rect.max.x - b,
-                    rect.max.y + b,
-                ),
-                WinEdge::Bottom,
-            ),
-        ];
-        let mut hot = WinEdge::None;
-        let mut down = false;
-        for (k, (band, edge)) in bands.into_iter().enumerate() {
-            let resp = ui.interact(
-                band,
-                egui::Id::new(("rt_win_edge", self.id, k)),
-                egui::Sense::click_and_drag(),
-            );
-            if resp.hovered() || resp.is_pointer_button_down_on() {
-                hot = edge;
-            }
-            down |= resp.is_pointer_button_down_on();
+        if self.edge_guard.contains(p) {
+            return;
         }
-
-        self.grip_hot = match (hot, pointer) {
-            (WinEdge::None, _) => WinEdge::None,
-            (_, Some(p)) if self.edge_guard.contains(p) => WinEdge::None,
-            (e, Some(p)) if edge_at(rect, p, b) == e => e,
-            _ => WinEdge::None,
-        };
-        self.grip_down = down;
+        self.grip_hot = edge_at(rect, p, EDGE_BAND);
+        self.grip_down = self.grip_hot.any() && ui.input(|i| i.pointer.primary_down());
     }
 
     fn resize_grips(&mut self, ui: &mut egui::Ui, busy: bool) {
-        if !self.resizable {
+        if !self.resizable || self.maximized {
             return;
         }
 
@@ -717,19 +662,41 @@ impl Win {
         if self.rs.left() {
             let want = edge_target(p.x + self.rs_off.x, bounds.min.x, bounds.max.x, EDGE_BAND);
             x0 = clamp_soft(want, bounds.min.x, (x1 - min.x).max(bounds.min.x));
-            self.rs_off.x = x0 - p.x;
         } else if self.rs.right() {
             let want = edge_target(p.x + self.rs_off.x, bounds.min.x, bounds.max.x, EDGE_BAND);
             x1 = clamp_soft(want, (x0 + min.x).min(bounds.max.x), bounds.max.x);
-            self.rs_off.x = x1 - p.x;
         }
         if self.rs.bottom() {
             let want = edge_target(p.y + self.rs_off.y, bounds.min.y, bounds.max.y, EDGE_BAND);
             y1 = clamp_soft(want, (y0 + min.y).min(bounds.max.y), bounds.max.y);
-            self.rs_off.y = y1 - p.y;
         }
+        self.clamp_resize_guards(&mut x0, &mut x1, &mut y1);
         self.pos = egui::pos2(x0, y0);
         self.size = egui::vec2((x1 - x0).max(LINE_W), (y1 - y0).max(LINE_W));
+    }
+
+    fn clamp_resize_guards(&self, x0: &mut f32, x1: &mut f32, y1: &mut f32) {
+        let fix = self.rs_fix;
+        if self
+            .move_guards
+            .iter()
+            .any(|(_, guard, exclusive)| *exclusive && interior_overlap(fix, *guard))
+        {
+            return;
+        }
+        for (_, guard, _) in &self.move_guards {
+            let vertical = overlap_span(fix.min.y, *y1, guard.min.y, guard.max.y);
+            if self.rs.right() && fix.max.x <= guard.min.x + LINE_W && vertical > LINE_W {
+                *x1 = x1.min(guard.min.x + LINE_W);
+            }
+            if self.rs.left() && fix.min.x >= guard.max.x - LINE_W && vertical > LINE_W {
+                *x0 = x0.max(guard.max.x - LINE_W);
+            }
+            let horizontal = overlap_span(*x0, *x1, guard.min.x, guard.max.x);
+            if self.rs.bottom() && fix.max.y <= guard.min.y + LINE_W && horizontal > LINE_W {
+                *y1 = y1.min(guard.min.y + LINE_W);
+            }
+        }
     }
 }
 
@@ -739,7 +706,7 @@ pub(crate) fn paint_title_bar(
     ui: &mut egui::Ui,
     painter: &egui::Painter,
     title: egui::Rect,
-    id: u64,
+    _id: u64,
     text: &str,
     keys: WinKeys,
     maximized: bool,
@@ -763,6 +730,7 @@ pub(crate) fn paint_title_bar(
     if (text_slot.max.x - keys_left).abs() > 0.5 {
         paint_title_text_edge(painter, text_slot);
     }
+    paint_title_fill(painter, title, text_slot, keys_left);
 
     app.text(
         painter,
@@ -773,25 +741,22 @@ pub(crate) fn paint_title_bar(
     );
 
     let mut hit = None;
+    let pointer = ui.input(|i| i.pointer.hover_pos()).or(app.pointer.live);
+    let pointer_clicked = ui.input(|i| i.pointer.primary_clicked());
     for &(kind, slot) in keys.shown() {
         let rect = rects[slot];
-
-        let resp = ui.is_enabled().then(|| {
-            ui.interact(
-                rect,
-                egui::Id::new(("rt_win_key", id, kind)),
-                egui::Sense::click(),
-            )
-        });
-        let hot = resp.as_ref().is_some_and(|resp| resp.hovered());
+        let hot = pointer.is_some_and(|p| rect.contains(p));
         let restore = minimized && kind == SysButton::Minimize;
         paint_sys_button(
             app, painter, rect, hot, kind, maximized, restore, pinned, exclusive,
         );
 
-        if resp.is_some_and(|resp| resp.clicked()) {
+        if hot && pointer_clicked && ui.is_enabled() {
             hit = Some(kind);
         }
+    }
+    if minimized {
+        app.tooltip = None;
     }
     hit
 }
@@ -813,49 +778,190 @@ mod tests {
 
     #[test]
     fn exclusive_guard_stops_on_one_pixel_shared_border() {
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 800.0));
         let guard = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
         let mut window = Win::new(7, 500.0, 100.0, 80.0, 80.0);
-        window.set_move_guards(vec![(9, guard)]);
+        window.set_move_guards(vec![(9, guard, true)]);
         window.drag = Some(egui::vec2(1.0, 1.0));
         let frame = window.rect();
         window.pos = egui::pos2(250.0, 150.0);
-        window.enforce_move_guards(frame);
+        window.enforce_move_guards(frame, bounds);
         assert_eq!(window.pos.x, guard.max.x - LINE_W);
         assert!(shares_border(window.rect(), guard));
     }
 
     #[test]
     fn exclusive_guard_slides_along_the_contact_edge() {
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 800.0));
         let guard = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
         let mut window = Win::new(7, 500.0, 100.0, 80.0, 80.0);
-        window.set_move_guards(vec![(9, guard)]);
+        window.set_move_guards(vec![(9, guard, true)]);
         window.drag = Some(egui::vec2(1.0, 1.0));
         let frame = window.rect();
         window.pos = egui::pos2(250.0, 240.0);
-        window.enforce_move_guards(frame);
+        window.enforce_move_guards(frame, bounds);
         assert_eq!(window.pos.x, guard.max.x - LINE_W);
         assert_eq!(window.pos.y, 240.0);
         assert!(shares_border(window.rect(), guard));
     }
 
     #[test]
-    fn exclusive_guard_allows_exit_but_not_deeper_entry() {
+    fn exclusive_guard_ignores_overlap_until_the_window_fully_exits() {
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 800.0));
         let guard = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
         let mut window = Win::new(7, 150.0, 150.0, 80.0, 80.0);
-        window.set_move_guards(vec![(9, guard)]);
+        window.set_move_guards(vec![(9, guard, true)]);
         window.drag = Some(egui::vec2(1.0, 1.0));
         let frame = window.rect();
         window.pos = egui::pos2(200.0, 200.0);
-        window.enforce_move_guards(frame);
-        assert_eq!(window.pos, frame.min);
+        window.enforce_move_guards(frame, bounds);
+        assert_eq!(window.pos, egui::pos2(200.0, 200.0));
 
         window.end_sessions();
-        window.pos = frame.min;
-        window.set_move_guards(vec![(9, guard)]);
+        window.pos = egui::pos2(500.0, 120.0);
+        window.set_move_guards(vec![(9, guard, true)]);
         window.drag = Some(egui::vec2(1.0, 1.0));
         let frame = window.rect();
-        window.pos = egui::pos2(500.0, 120.0);
-        window.enforce_move_guards(frame);
-        assert_eq!(window.pos, egui::pos2(500.0, 120.0));
+        window.pos = egui::pos2(250.0, 120.0);
+        window.enforce_move_guards(frame, bounds);
+        assert_eq!(window.pos.x, guard.max.x - LINE_W);
+    }
+
+    #[test]
+    fn any_exclusive_overlap_suspends_all_exclusive_guards() {
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 800.0));
+        let first = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
+        let second = egui::Rect::from_min_size(egui::pos2(360.0, 100.0), egui::vec2(200.0, 200.0));
+        let mut window = Win::new(7, 150.0, 150.0, 80.0, 80.0);
+        window.set_move_guards(vec![(9, first, true), (10, second, true)]);
+        window.drag = Some(egui::vec2(1.0, 1.0));
+        let frame = window.rect();
+        window.pos = egui::pos2(400.0, 120.0);
+        window.enforce_move_guards(frame, bounds);
+        assert_eq!(window.pos, egui::pos2(400.0, 120.0));
+    }
+
+    #[test]
+    fn exclusive_rect_does_not_block_an_entire_row_or_column() {
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 800.0));
+        let guard = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
+
+        let mut row = Win::new(7, 10.0, 10.0, 80.0, 80.0);
+        row.set_move_guards(vec![(9, guard, true)]);
+        row.drag = Some(egui::vec2(1.0, 1.0));
+        let frame = row.rect();
+        row.pos = egui::pos2(350.0, 10.0);
+        row.enforce_move_guards(frame, bounds);
+        assert_eq!(row.pos, egui::pos2(350.0, 10.0));
+
+        let mut column = Win::new(8, 10.0, 120.0, 80.0, 80.0);
+        column.set_move_guards(vec![(9, guard, true)]);
+        column.drag = Some(egui::vec2(1.0, 1.0));
+        let frame = column.rect();
+        column.pos = egui::pos2(10.0, 400.0);
+        column.enforce_move_guards(frame, bounds);
+        assert_eq!(column.pos, egui::pos2(10.0, 400.0));
+    }
+
+    #[test]
+    fn a_fast_move_does_not_cross_an_exclusive_window() {
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 800.0));
+        let guard = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
+        let mut window = Win::new(7, 10.0, 120.0, 80.0, 80.0);
+        window.set_move_guards(vec![(9, guard, true)]);
+        window.drag = Some(egui::vec2(1.0, 1.0));
+        let frame = window.rect();
+        window.pos = egui::pos2(120.0, 120.0);
+        window.enforce_move_guards(frame, bounds);
+        assert_eq!(window.rect().max.x, guard.min.x + LINE_W);
+        assert!(shares_border(window.rect(), guard));
+    }
+
+    #[test]
+    fn a_fast_resize_stops_on_the_exclusive_border() {
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 800.0));
+        let guard = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
+        let mut window = Win::new(7, 10.0, 120.0, 80.0, 80.0);
+        window.set_move_guards(vec![(9, guard, true)]);
+        window.rs_fix = window.rect();
+        window.rs = WinEdge::Right;
+        window.stretch(egui::pos2(400.0, 160.0), bounds);
+        assert_eq!(window.rect().max.x, guard.min.x + LINE_W);
+        assert!(shares_border(window.rect(), guard));
+    }
+
+    #[test]
+    fn resize_follows_the_pointer_back_immediately_after_the_border() {
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 800.0));
+        let guard = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
+        let mut window = Win::new(7, 10.0, 120.0, 80.0, 80.0);
+        window.set_move_guards(vec![(9, guard, true)]);
+        window.rs_fix = window.rect();
+        window.rs = WinEdge::Right;
+        window.stretch(egui::pos2(400.0, 160.0), bounds);
+        assert_eq!(window.rect().max.x, guard.min.x + LINE_W);
+        window.stretch(egui::pos2(99.0, 160.0), bounds);
+        assert_eq!(window.rect().max.x, 99.0);
+    }
+
+    #[test]
+    fn maximize_fills_the_work_area_without_exclusive_edges() {
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 500.0));
+        let guard = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
+        let mut window = Win::new(7, 100.0, 150.0, 100.0, 100.0);
+        window.set_move_guards(vec![(1, guard, true)]);
+
+        window.toggle_maximize(bounds);
+
+        assert_eq!(window.rect(), bounds);
+        assert!(interior_overlap(window.rect(), guard));
+    }
+
+    #[test]
+    fn pinned_title_keys_hide_the_exclusive_button() {
+        let normal = WinKeys::MinMaxClose.for_pin_state(false);
+        let pinned = WinKeys::MinMaxClose.for_pin_state(true);
+        assert!(
+            normal
+                .shown()
+                .iter()
+                .any(|(kind, _)| *kind == SysButton::Exclusive)
+        );
+        assert!(
+            pinned
+                .shown()
+                .iter()
+                .all(|(kind, _)| *kind != SysButton::Exclusive)
+        );
+        assert_eq!(pinned.shown().len(), 4);
+    }
+
+    #[test]
+    fn a_non_suspending_guard_still_blocks() {
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 800.0));
+        let guard = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
+        let mut window = Win::new(7, 10.0, 120.0, 80.0, 80.0);
+        window.set_move_guards(vec![(9, guard, false)]);
+        window.drag = Some(egui::vec2(1.0, 1.0));
+        let frame = window.rect();
+        window.pos = egui::pos2(120.0, 120.0);
+        window.enforce_move_guards(frame, bounds);
+        assert_eq!(window.rect().max.x, guard.min.x + LINE_W);
+        assert!(shares_border(window.rect(), guard));
+    }
+
+    #[test]
+    fn exclusive_overlap_still_suspends_normal_guards() {
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 800.0));
+        let normal = egui::Rect::from_min_size(egui::pos2(360.0, 100.0), egui::vec2(200.0, 200.0));
+        let exclusive =
+            egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 200.0));
+        let mut window = Win::new(7, 150.0, 150.0, 80.0, 80.0);
+        window.set_move_guards(vec![(9, normal, false), (10, exclusive, true)]);
+        window.drag = Some(egui::vec2(1.0, 1.0));
+        let frame = window.rect();
+        window.pos = egui::pos2(400.0, 120.0);
+        window.enforce_move_guards(frame, bounds);
+        assert_eq!(window.pos, egui::pos2(400.0, 120.0));
     }
 }

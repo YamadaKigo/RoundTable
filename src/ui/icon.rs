@@ -73,7 +73,7 @@ impl IconKind {
         }
     }
 
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn label(self) -> &'static str {
         match self {
             IconKind::Cross => "删除",

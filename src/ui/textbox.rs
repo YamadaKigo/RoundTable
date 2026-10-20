@@ -125,6 +125,7 @@ impl TextInput {
         let resp = ui.interact(rect, id, egui::Sense::click());
         if resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+            app.pointer.text_hover = true;
             app.pointer.hint = CursorKind::Text;
         }
         if resp.clicked() {

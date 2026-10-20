@@ -23,7 +23,7 @@ pub(crate) const PANEL_CHILD_ROWS: i32 = WIN_TITLE_ROWS + 1 + (PANEL_BTN_COUNT -
 pub(crate) const PANEL_CHILD_H: f32 = cells(PANEL_CHILD_ROWS);
 const _: () = assert!(PANEL_BTN_COUNT == 11 && PANEL_CHILD_ROWS == 26);
 
-pub(crate) const KLINE_ROWS: i32 = 52;
+pub(crate) const KLINE_ROWS: i32 = 50;
 pub(crate) const VOL_ROWS: i32 = 21;
 pub(crate) const IND_ROWS: i32 = 21;
 pub(crate) const KLINE_H_DEFAULT: f32 = cells(KLINE_ROWS);
@@ -42,7 +42,7 @@ pub(crate) enum LeftSplit {
 
 pub(crate) const LEFT_FIXED_H: f32 = 2.0 * HSPLIT_H - 4.0 * LINE_W;
 
-const _: () = assert!(KLINE_ROWS == 52 && VOL_ROWS == 21 && IND_ROWS == 21);
+const _: () = assert!(KLINE_ROWS == 50 && VOL_ROWS == 21 && IND_ROWS == 21);
 const _: () = assert!((KLINE_H_DEFAULT as i32 - 1) % 9 == 0);
 const _: () = assert!((VOL_H_DEFAULT as i32 - 1) % 9 == 0);
 const _: () = assert!((IND_H_DEFAULT as i32 - 1) % 9 == 0);
@@ -112,6 +112,7 @@ impl StockApp {
         [left, splitter, panel]
     }
 
+    #[cfg(test)]
     pub(crate) fn child_areas(work: egui::Rect) -> [egui::Rect; 2] {
         let x0 = work.min.x;
         let y0 = work.min.y;
@@ -367,8 +368,8 @@ impl StockApp {
                 self.regenerate_random_walk();
             }
 
-            PanelAction::OpenUpColor => self.open_color_panel(ColorTarget::Up),
-            PanelAction::OpenDownColor => self.open_color_panel(ColorTarget::Down),
+            PanelAction::OpenUpColor => self.request_win(WinCmd::OpenColor(ColorTarget::Up)),
+            PanelAction::OpenDownColor => self.request_win(WinCmd::OpenColor(ColorTarget::Down)),
             PanelAction::TogglePointerMode => {
                 self.pointer.system = !self.pointer.system;
                 self.pointer.pinned = None;
@@ -418,7 +419,7 @@ impl StockApp {
             .bar_seed
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1_442_695_040_888_963_407);
-        crate::ecs::regenerate_market(&mut self.world);
+        crate::ecs::regenerate_market(&mut self.chart_world);
         for pane in &mut self.panes {
             pane.view.offset = 0;
             pane.view.scale = BAR_SCALE_DEFAULT;

@@ -3,6 +3,7 @@ use crate::grid::*;
 use crate::theme::*;
 use crate::ui::button::*;
 use crate::ui::menu::*;
+use crate::ui::pattern::*;
 use eframe::egui;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -35,12 +36,21 @@ impl SysButton {
         }
     }
 
-    pub(crate) fn label(self, pinned: bool) -> &'static str {
+    pub(crate) fn label(
+        self,
+        maximized: bool,
+        restore_minimized: bool,
+        pinned: bool,
+        exclusive: bool,
+    ) -> &'static str {
         match self {
+            SysButton::Exclusive if exclusive => "解除独占",
             SysButton::Exclusive => "独占",
             SysButton::Pin if pinned => "解除置顶",
             SysButton::Pin => "置顶",
+            SysButton::Minimize if restore_minimized => "还原",
             SysButton::Minimize => "最小化",
+            SysButton::Maximize if maximized => "还原",
             SysButton::Maximize => "最大化",
             SysButton::Close => "关闭",
         }
@@ -60,6 +70,19 @@ pub(crate) fn paint_title_text_edge(painter: &egui::Painter, slot: egui::Rect) {
         slot.max.y - LINE_W,
         theme().ctrl_border,
     );
+}
+
+pub(crate) fn paint_title_fill(
+    painter: &egui::Painter,
+    title: egui::Rect,
+    text_slot: egui::Rect,
+    keys_left: f32,
+) {
+    let fill = egui::Rect::from_min_max(
+        egui::pos2(text_slot.max.x, title.min.y),
+        egui::pos2(keys_left.max(text_slot.max.x), title.max.y),
+    );
+    paint_fill(painter, fill, TITLE_FILL, theme().title_fill);
 }
 
 #[cfg(test)]
@@ -112,7 +135,11 @@ pub(crate) fn paint_sys_button(
         .paint(painter, symbol_rect, theme().symbol);
 
     if hot {
-        app.tooltip = Some((rect, kind.label(pinned).to_owned()));
+        app.tooltip = Some((
+            rect,
+            kind.label(maximized, restore_minimized, pinned, exclusive)
+                .to_owned(),
+        ));
     }
 }
 
@@ -132,6 +159,7 @@ impl StockApp {
         );
 
         let buttons = sys_button_rects_n(bar, 2);
+        paint_title_fill(&painter, bar, name_slot, buttons[0].min.x);
         for (i, kind) in [SysButton::Minimize, SysButton::Close]
             .into_iter()
             .enumerate()

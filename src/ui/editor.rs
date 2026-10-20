@@ -4,7 +4,7 @@ use crate::grid::*;
 use crate::theme::*;
 use crate::ui::button::*;
 use crate::ui::contextmenu::*;
-use crate::ui::icon::*;
+use crate::ui::icon::CursorKind;
 use crate::ui::menu::*;
 use crate::ui::textbuf::*;
 use eframe::egui;
@@ -35,19 +35,21 @@ pub(crate) const EDITOR_TABS: [MenuTab; 3] = [
     },
 ];
 
-pub(crate) const EDITOR_BUTTONS: [(IconKind, &str, EditorCmd); 7] = [
-    (IconKind::New, "还原原始指标代码", EditorCmd::Reload),
-    (IconKind::Save, "保存指标代码", EditorCmd::Save),
-    (IconKind::Cut, "剪切选中", EditorCmd::Cut),
-    (IconKind::Copy, "复制选中", EditorCmd::Copy),
-    (IconKind::Paste, "粘贴", EditorCmd::Paste),
-    (IconKind::Undo, "撤销", EditorCmd::Undo),
-    (IconKind::Find, "查找下一个", EditorCmd::Find),
+pub(crate) const EDITOR_BUTTONS: [(&str, &str, EditorCmd); 7] = [
+    ("新建", "新建空白文件", EditorCmd::New),
+    ("保存", "保存指标代码", EditorCmd::Save),
+    ("剪切", "剪切选中", EditorCmd::Cut),
+    ("复制", "复制选中", EditorCmd::Copy),
+    ("粘贴", "粘贴", EditorCmd::Paste),
+    ("撤销", "撤销", EditorCmd::Undo),
+    ("查找", "查找下一个", EditorCmd::Find),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EditorCmd {
     None,
+
+    New,
 
     Save,
 
@@ -357,7 +359,7 @@ impl TextEditor {
         let caret_before = self.buf.cursor;
         let out = match cmd {
             EditorCmd::None => EditorCmd::None,
-            EditorCmd::Save | EditorCmd::Reload | EditorCmd::Close => cmd,
+            EditorCmd::New | EditorCmd::Save | EditorCmd::Reload | EditorCmd::Close => cmd,
             EditorCmd::Cut => {
                 let text = self.buf.cut();
                 if !text.is_empty() {
@@ -446,15 +448,16 @@ impl TextEditor {
             egui::CornerRadius::ZERO,
             theme().panel_bg,
         );
-        let w = cells(2);
         let mut x = band.min.x + grid_line(1);
-        for (icon, tip, action) in EDITOR_BUTTONS {
+        for (label, tip, action) in EDITOR_BUTTONS {
+            let label = label.to_owned();
+            let content = ButtonContent::Text(label.clone());
+            let w = app.button_width(&content);
             if x + w > band.max.x {
                 break;
             }
             let rect =
                 egui::Rect::from_min_size(egui::pos2(x, band.min.y), egui::vec2(w, band.height()));
-            let content = ButtonContent::Icon(icon);
             if app.draw_button(ui, &painter, rect, &content, false, tip) {
                 *cmd = action;
             }
@@ -552,8 +555,16 @@ impl TextEditor {
             ui.memory_mut(|m| m.surrender_focus(id));
         }
         let resp = ui.interact(body, id, egui::Sense::click_and_drag());
-        if resp.hovered() || resp.dragged() {
+        let text_area = egui::Rect::from_min_max(
+            egui::pos2(panel.min.x + LINE_W, body_top),
+            egui::pos2(bar_line, body_bottom),
+        );
+        if ui
+            .input(|i| i.pointer.hover_pos())
+            .is_some_and(|p| text_area.contains(p))
+        {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+            app.pointer.text_hover = true;
             app.pointer.hint = CursorKind::Text;
         }
         if resp.clicked() || resp.drag_started() {

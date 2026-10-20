@@ -4,6 +4,8 @@ use std::cell::Cell;
 
 pub(crate) const C_TITLE_BG: egui::Color32 = egui::Color32::from_rgb(0xBB, 0xBB, 0xBB);
 
+pub(crate) const C_TITLE_FILL: egui::Color32 = egui::Color32::from_rgb(0x99, 0x99, 0x99);
+
 pub(crate) const C_MENU_BG: egui::Color32 = egui::Color32::from_rgb(0xDD, 0xDD, 0xDD);
 
 pub(crate) const C_WORK_BG: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
@@ -91,6 +93,8 @@ pub(crate) struct Theme {
 
     pub(crate) title_bg: egui::Color32,
 
+    pub(crate) title_fill: egui::Color32,
+
     pub(crate) menu_bg: egui::Color32,
 
     pub(crate) work_bg: egui::Color32,
@@ -139,6 +143,8 @@ pub(crate) struct Theme {
 
     pub(crate) cross_label: egui::Color32,
 
+    pub(crate) tooltip_bg: egui::Color32,
+
     pub(crate) ind_zero: egui::Color32,
 
     pub(crate) candle_up: egui::Color32,
@@ -180,6 +186,7 @@ impl Theme {
     pub(crate) const CLASSIC: Self = Self {
         id: ThemeId::Classic,
         title_bg: C_TITLE_BG,
+        title_fill: C_TITLE_FILL,
         menu_bg: C_MENU_BG,
         work_bg: C_WORK_BG,
         desktop_bg: C_DESKTOP_BG,
@@ -204,6 +211,7 @@ impl Theme {
         tick: C_TICK,
         cross: C_CROSS,
         cross_label: C_CROSS_LABEL,
+        tooltip_bg: C_CROSS_LABEL,
         ind_zero: C_IND_ZERO,
         candle_up: C_UP,
         candle_down: C_DOWN,
@@ -240,6 +248,7 @@ impl Theme {
         let mut t = l;
         t.id = ThemeId::Dark;
         t.title_bg = invert_color(l.title_bg);
+        t.title_fill = egui::Color32::from_rgb(0x66, 0x66, 0x66);
         t.menu_bg = invert_color(l.menu_bg);
         t.work_bg = invert_color(l.work_bg);
         t.desktop_bg = invert_color(l.desktop_bg);
@@ -329,6 +338,7 @@ impl Theme {
         Ok(Self {
             id: expected,
             title_bg: colors.window.title_bg.0,
+            title_fill: colors.window.title_fill.0,
             menu_bg: colors.window.menu_bg.0,
             work_bg: colors.window.work_bg.0,
             desktop_bg: colors.window.desktop_bg.0,
@@ -353,6 +363,7 @@ impl Theme {
             tick: colors.chart.tick.0,
             cross: colors.chart.cross.0,
             cross_label: colors.chart.cross_label.0,
+            tooltip_bg: colors.window.tooltip_bg.0,
             ind_zero: colors.chart.ind_zero.0,
             candle_up: colors.chart.candle_up.0,
             candle_down: colors.chart.candle_down.0,
@@ -397,9 +408,10 @@ impl Theme {
         })
     }
 
-    pub(crate) const fn colors(&self) -> [egui::Color32; 60] {
+    pub(crate) const fn colors(&self) -> [egui::Color32; 62] {
         [
             self.title_bg,
+            self.title_fill,
             self.menu_bg,
             self.work_bg,
             self.desktop_bg,
@@ -424,6 +436,7 @@ impl Theme {
             self.tick,
             self.cross,
             self.cross_label,
+            self.tooltip_bg,
             self.ind_zero,
             self.candle_up,
             self.candle_down,
@@ -495,6 +508,7 @@ struct ThemeColors {
 #[serde(deny_unknown_fields)]
 struct WindowColors {
     title_bg: HexColor,
+    title_fill: HexColor,
     menu_bg: HexColor,
     work_bg: HexColor,
     desktop_bg: HexColor,
@@ -513,6 +527,7 @@ struct WindowColors {
     text: HexColor,
     text_white: HexColor,
     syn_comment: HexColor,
+    tooltip_bg: HexColor,
 }
 
 #[derive(Deserialize)]

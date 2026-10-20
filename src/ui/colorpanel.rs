@@ -2,7 +2,6 @@ use crate::app::*;
 use crate::grid::*;
 use crate::theme::*;
 use crate::ui::button::*;
-use crate::ui::floatwin::*;
 use crate::ui::icon::*;
 use crate::ui::textbox::*;
 use eframe::egui;
@@ -75,7 +74,7 @@ pub(crate) const CP_TRACK_INNER_W: i32 = 9 * CP_TRACK_COLS - 1;
 pub(crate) const CP_HANDLE_W: f32 = cells(1);
 pub(crate) const CP_HANDLE_TRAVEL: f32 = CP_TRACK_W - CP_HANDLE_W;
 
-pub(crate) const HUE_STEPS: i32 = CP_COLS - 1;
+pub(crate) const HUE_TRAVEL: f32 = CP_CONTENT_W - CP_HANDLE_W;
 
 pub(crate) const CP_HALF_COLS: i32 = CP_COLS / 2;
 pub(crate) const CP_HALF_W: f32 = cells(CP_HALF_COLS);
@@ -117,7 +116,7 @@ const _: () = assert!(CP_TRACK_W > CP_HANDLE_W);
 const _: () = assert!((CP_TRACK_W as i32 - 1) % 9 == 0 && (CP_HANDLE_W as i32 - 1) % 9 == 0);
 
 const _: () = assert!(CP_HANDLE_TRAVEL > 0.0 && CP_HANDLE_TRAVEL % 1.0 == 0.0);
-const _: () = assert!(HUE_STEPS > 0);
+const _: () = assert!(HUE_TRAVEL > 0.0 && HUE_TRAVEL % 1.0 == 0.0);
 
 const _: () = assert!((CP_Y_SV as i32) % 9 == 0 && (CP_Y_HUE as i32) % 9 == 0);
 const _: () = assert!((CP_Y_RGB as i32) % 9 == 0 && (CP_Y_HEX as i32) % 9 == 0);
@@ -259,21 +258,15 @@ pub(crate) fn hue_of_bar(i: i32) -> u16 {
     (i as f32 * 360.0 / (HUE_BARS - 1) as f32).round() as u16
 }
 
-pub(crate) fn hue_step(h: u16) -> i32 {
-    (h as f32 / 360.0 * HUE_STEPS as f32)
-        .round()
-        .clamp(0.0, HUE_STEPS as f32) as i32
-}
-
-pub(crate) fn hue_of_step(j: i32) -> u16 {
-    (j as f32 * 360.0 / HUE_STEPS as f32).round() as u16
-}
-
 pub(crate) fn hue_handle_left(h: u16) -> f32 {
-    grid_line(hue_step(h))
+    (h.min(360) as f32 / 360.0 * HUE_TRAVEL).round()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) fn hue_at_x(x: f32) -> u16 {
+    (x.clamp(0.0, HUE_TRAVEL) / HUE_TRAVEL * 360.0).round() as u16
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ColorTarget {
     Up,
     Down,
@@ -299,10 +292,6 @@ pub(crate) enum ColorDrag {
 
 #[derive(Clone)]
 pub(crate) struct ColorPanel {
-    pub(crate) win: Win,
-    pub(crate) minimized: bool,
-    pub(crate) pinned: bool,
-    pub(crate) restore: (egui::Pos2, egui::Vec2),
     pub(crate) target: ColorTarget,
 
     pub(crate) h: u16,
@@ -325,13 +314,6 @@ pub(crate) struct ColorPanel {
 impl ColorPanel {
     pub(crate) fn new() -> Self {
         Self {
-            win: Win::new(WIN_ID_COLOR, CP_DEFAULT_X, CP_DEFAULT_Y, CP_W, CP_H),
-            minimized: false,
-            pinned: false,
-            restore: (
-                egui::pos2(CP_DEFAULT_X, CP_DEFAULT_Y),
-                egui::vec2(CP_W, CP_H),
-            ),
             target: ColorTarget::Up,
             h: 0,
             s: 0,
@@ -384,8 +366,6 @@ impl ColorPanel {
     }
 
     pub(crate) fn close_cancelled(&mut self) {
-        self.win.open = false;
-        self.win.end_sessions();
         self.drag = ColorDrag::None;
     }
 }
@@ -393,73 +373,18 @@ impl ColorPanel {
 impl StockApp {
     pub(crate) fn open_color_panel(&mut self, target: ColorTarget) {
         let (up, down) = (self.up_color, self.down_color);
-        let cp = &mut self.color_panel;
-        cp.win.open = true;
-        if cp.minimized {
-            cp.minimized = false;
-            cp.win.pos = cp.restore.0;
-            cp.win.size = cp.restore.1;
-            cp.win.min_size.y = CP_H;
-        }
-        cp.pending_up = up;
-        cp.pending_down = down;
-        cp.target = target;
-        cp.drag = ColorDrag::None;
-        let rgb = cp.pending_for(target);
-        cp.load(rgb);
+        self.color_panel.pending_up = up;
+        self.color_panel.pending_down = down;
+        self.color_panel.target = target;
+        self.color_panel.drag = ColorDrag::None;
+        let rgb = self.color_panel.pending_for(target);
+        self.color_panel.load(rgb);
+        self.win_mgr.show_color(self.work_rect);
         self.status_msg = format!("颜色面板：正在编辑{}色", target.name());
     }
 
-    pub(crate) fn ui_color_panel(&mut self, ui: &mut egui::Ui, work: egui::Rect) {
+    pub(crate) fn ui_color_panel_content(&mut self, ui: &mut egui::Ui, panel: egui::Rect) {
         let mut cp = self.color_panel.clone();
-        if !cp.win.open {
-            return;
-        }
-
-        let out = cp.win.begin(
-            self,
-            ui,
-            work,
-            "颜色设置",
-            WinKeys::MinAndClose,
-            false,
-            cp.pinned,
-            cp.minimized,
-            false,
-        );
-
-        if out.pin {
-            cp.pinned = !cp.pinned;
-        }
-        if out.minimize {
-            if cp.minimized {
-                cp.minimized = false;
-                cp.win.pos = cp.restore.0;
-                cp.win.size = cp.restore.1;
-                cp.win.min_size.y = CP_H;
-            } else {
-                cp.restore = (cp.win.pos, cp.win.size);
-                cp.minimized = true;
-                cp.win.size.y = WIN_TITLE_H;
-                cp.win.min_size.y = WIN_TITLE_H;
-            }
-            cp.win.end_sessions();
-        }
-        if cp.minimized {
-            cp.win.end(ui, false);
-            self.color_panel = cp;
-            return;
-        }
-        if out.close {
-            cp.close_cancelled();
-            self.color_panel = cp;
-            self.status_msg = "颜色面板：已取消，颜色没变".to_owned();
-            return;
-        }
-
-        let Some(panel) = out.panel else {
-            return;
-        };
 
         let painter = ui.painter().clone();
 
@@ -542,6 +467,13 @@ impl StockApp {
         if hue_resp.hovered() || hue_resp.is_pointer_button_down_on() {
             self.pointer.hint = CursorKind::Slider;
         }
+        if hue_resp.hovered() && cp.drag == ColorDrag::None {
+            let notches = color_wheel_notches(ui);
+            if notches != 0 {
+                let hue_value = (cp.h as i32 + notches).clamp(0, 360) as u16;
+                cp.set_hsv(hue_value, cp.s, cp.v);
+            }
+        }
         if hue_resp.is_pointer_button_down_on() && cp.drag == ColorDrag::None {
             cp.drag = ColorDrag::Hue;
 
@@ -556,10 +488,8 @@ impl StockApp {
         }
         if cp.drag == ColorDrag::Hue {
             if let Some(p) = pointer {
-                let x =
-                    (p.x - hue.min.x - cp.drag_off.x).clamp(0.0, (HUE_STEPS * PITCH as i32) as f32);
-                let step = (x / PITCH).round() as i32;
-                cp.set_hsv(hue_of_step(step.clamp(0, HUE_STEPS)), cp.s, cp.v);
+                let x = (p.x - hue.min.x - cp.drag_off.x).clamp(0.0, HUE_TRAVEL);
+                cp.set_hsv(hue_at_x(x), cp.s, cp.v);
             }
         }
 
@@ -668,6 +598,7 @@ impl StockApp {
             egui::pos2(btn_band.min.x + CP_HALF_W - LINE_W, btn_band.min.y),
             egui::vec2(CP_HALF_W, btn_band.height()),
         );
+        let mut close_after = false;
         let apply_text = ButtonContent::Text("应用".to_owned());
         if self.draw_button(ui, &painter, apply_rect, &apply_text, false, "") {
             cp.save_pending();
@@ -683,11 +614,13 @@ impl StockApp {
                 cp.target.name(),
                 hex_of(rgb)
             );
+            close_after = true;
         }
         let cancel_text = ButtonContent::Text("取消".to_owned());
         if self.draw_button(ui, &painter, cancel_rect, &cancel_text, false, "") {
             cp.close_cancelled();
             self.status_msg = "颜色面板：已取消，颜色没变".to_owned();
+            close_after = true;
         }
 
         for row in [
@@ -707,8 +640,6 @@ impl StockApp {
                 theme().ctrl_border,
             );
         }
-
-        cp.win.end(ui, false);
 
         let mark = contrast_on(cp.rgb);
         let [horizontal, vertical] = selection_cross_rects(sel_center);
@@ -746,6 +677,9 @@ impl StockApp {
             cp.hex_valid = true;
         }
         self.color_panel = cp;
+        if close_after {
+            self.win_mgr.hide_color();
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -811,6 +745,15 @@ impl StockApp {
 
         let track_resp = ui.allocate_rect(track, egui::Sense::click_and_drag());
         let over_track = track_resp.hovered();
+        let wheel_value = if over_track && *drag == ColorDrag::None {
+            let notches = color_wheel_notches(ui);
+            (notches != 0).then(|| {
+                let current = (ratio.clamp(0.0, 1.0) * max as f32).round() as i32;
+                (current + notches).clamp(0, max)
+            })
+        } else {
+            None
+        };
 
         let knob = ui.interact(
             rest,
@@ -847,9 +790,10 @@ impl StockApp {
             None
         };
 
-        let hx = match drag_x {
-            Some(x) => track.min.x + x,
-            None => rest_x,
+        let hx = match (drag_x, wheel_value) {
+            (Some(x), _) => track.min.x + x,
+            (None, Some(value)) => handle_left(track.min.x, value as f32 / max as f32),
+            (None, None) => rest_x,
         };
         let handle = egui::Rect::from_min_size(
             egui::pos2(hx, row.min.y),
@@ -874,6 +818,24 @@ impl StockApp {
             theme().ctrl_border,
         );
 
-        drag_x.map(|x| (x / CP_HANDLE_TRAVEL * max as f32).round() as i32)
+        drag_x
+            .map(|x| (x / CP_HANDLE_TRAVEL * max as f32).round() as i32)
+            .or(wheel_value)
     }
+}
+
+fn color_wheel_notches(ui: &egui::Ui) -> i32 {
+    let mut acc = 0.0f32;
+    ui.input(|i| {
+        for event in &i.events {
+            if let egui::Event::MouseWheel { unit, delta, .. } = event {
+                acc += match unit {
+                    egui::MouseWheelUnit::Line => delta.y,
+                    egui::MouseWheelUnit::Point => delta.y / WHEEL_POINTS_PER_NOTCH,
+                    egui::MouseWheelUnit::Page => delta.y,
+                };
+            }
+        }
+    });
+    acc.round() as i32
 }

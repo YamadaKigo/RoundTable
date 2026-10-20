@@ -45,17 +45,20 @@ pub(crate) fn snap_cells_round(v: f32) -> f32 {
 
 pub(crate) const TITLE_ROWS: i32 = 2;
 pub(crate) const MENU_ROWS: i32 = 2;
-pub(crate) const WORK_ROWS: i32 = 96;
+pub(crate) const WORK_ROWS: i32 = 94;
+pub(crate) const TASKBAR_ROWS: i32 = 2;
 pub(crate) const STATUS_ROWS: i32 = 2;
 
 pub(crate) const TITLEBAR_H: f32 = cells(TITLE_ROWS);
 pub(crate) const MENUBAR_H: f32 = cells(MENU_ROWS);
+pub(crate) const TASKBAR_H: f32 = cells(TASKBAR_ROWS);
 pub(crate) const STATUS_H: f32 = cells(STATUS_ROWS);
 
 pub(crate) const TITLE_LINE: i32 = 0;
 pub(crate) const MENU_LINE: i32 = TITLE_LINE + TITLE_ROWS;
 pub(crate) const WORK_LINE: i32 = MENU_LINE + MENU_ROWS;
-pub(crate) const STATUS_LINE: i32 = WORK_LINE + WORK_ROWS;
+pub(crate) const TASKBAR_LINE: i32 = WORK_LINE + WORK_ROWS;
+pub(crate) const STATUS_LINE: i32 = TASKBAR_LINE + TASKBAR_ROWS;
 pub(crate) const WINDOW_ROWS: i32 = STATUS_LINE + STATUS_ROWS;
 
 pub(crate) const WINDOW_COLS: i32 = 125;
@@ -71,7 +74,8 @@ pub(crate) const WINDOW_H: f32 = cells(WINDOW_ROWS);
 
 pub(crate) const WINDOW_MIN_COLS: i32 = PANE_MIN_COLS * 2 + SPLITTER_COLS;
 pub(crate) const LEFT_WORK_MIN_ROWS: i32 = 3 * PANE_ROWS_MIN + 2;
-pub(crate) const WINDOW_MIN_ROWS: i32 = TITLE_ROWS + MENU_ROWS + STATUS_ROWS + LEFT_WORK_MIN_ROWS;
+pub(crate) const WINDOW_MIN_ROWS: i32 =
+    TITLE_ROWS + MENU_ROWS + TASKBAR_ROWS + STATUS_ROWS + LEFT_WORK_MIN_ROWS;
 pub(crate) const WINDOW_MIN_W: f32 = cells(WINDOW_MIN_COLS);
 pub(crate) const WINDOW_MIN_H: f32 = cells(WINDOW_MIN_ROWS);
 
@@ -230,13 +234,18 @@ const _: () = assert!((CHART_BAR_H as i32 - 1) % 9 == 0);
 const _: () = assert!(PANE_PLOT_ROWS_MIN >= 8);
 
 const _: () = assert!(TEXT_ROWS == 2);
-const _: () =
-    assert!(TITLE_ROWS == TEXT_ROWS && MENU_ROWS == TEXT_ROWS && STATUS_ROWS == TEXT_ROWS);
+const _: () = assert!(
+    TITLE_ROWS == TEXT_ROWS
+        && MENU_ROWS == TEXT_ROWS
+        && TASKBAR_ROWS == TEXT_ROWS
+        && STATUS_ROWS == TEXT_ROWS
+);
 const _: () = assert!(PANE_TITLE_ROWS == TEXT_ROWS && PANE_MENU_ROW_ROWS == TEXT_ROWS);
 const _: () = assert!(MENU_ROW_ROWS == TEXT_ROWS);
 const _: () = assert!((PANE_H_MIN as i32 - 1) % 9 == 0);
 const _: () = assert!((TITLEBAR_H as i32 - 1) % 9 == 0);
 const _: () = assert!((MENUBAR_H as i32 - 1) % 9 == 0);
+const _: () = assert!((TASKBAR_H as i32 - 1) % 9 == 0);
 const _: () = assert!((STATUS_H as i32 - 1) % 9 == 0);
 const _: () = assert!((SYS_BTN_W as i32 - 1) % 9 == 0);
 const _: () = assert!((SYS_BTN_H as i32 - 1) % 9 == 0);

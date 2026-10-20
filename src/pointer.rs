@@ -56,6 +56,7 @@ pub(crate) struct PointerManager {
     pub(crate) show_trail: bool,
     pub(crate) hint: CursorKind,
     pub(crate) forced_hint: Option<CursorKind>,
+    pub(crate) text_hover: bool,
     pub(crate) wheel_until: f64,
     pub(crate) live: Option<egui::Pos2>,
     pub(crate) pinned: Option<egui::Pos2>,
@@ -69,6 +70,7 @@ impl PointerManager {
             show_trail: false,
             hint: CursorKind::Normal,
             forced_hint: None,
+            text_hover: false,
             wheel_until: 0.0,
             live: None,
             pinned: None,
@@ -79,6 +81,7 @@ impl PointerManager {
         self.pinned = None;
         self.hint = CursorKind::Normal;
         self.forced_hint = None;
+        self.text_hover = false;
     }
 
     pub(crate) fn wheel_active(&self, ctx: &egui::Context) -> bool {
@@ -170,7 +173,7 @@ impl PointerMotion {
     }
 
     pub(crate) fn sync(&mut self, position: egui::Pos2, time: f64) {
-        if !self.initialized || position.distance(self.position) > 1.0 {
+        if !self.initialized || position != self.position {
             self.reset(position, time);
         }
     }

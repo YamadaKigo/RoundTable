@@ -17,6 +17,8 @@ pub(crate) enum SymbolKind {
     Unpin,
     Exclusive,
     ExclusiveOn,
+    PageUp,
+    PageDown,
 }
 
 impl SymbolKind {
@@ -29,9 +31,11 @@ impl SymbolKind {
         SymbolKind::Unpin,
         SymbolKind::Exclusive,
         SymbolKind::ExclusiveOn,
+        SymbolKind::PageUp,
+        SymbolKind::PageDown,
     ];
 
-    pub(crate) const COUNT: usize = 8;
+    pub(crate) const COUNT: usize = 10;
 
     pub(crate) fn file_stem(self) -> &'static str {
         match self {
@@ -43,6 +47,8 @@ impl SymbolKind {
             SymbolKind::Unpin => "unpin",
             SymbolKind::Exclusive => "exclusive",
             SymbolKind::ExclusiveOn => "exclusive_on",
+            SymbolKind::PageUp => "page_up",
+            SymbolKind::PageDown => "page_down",
         }
     }
 
@@ -56,6 +62,8 @@ impl SymbolKind {
             SymbolKind::Unpin => 5,
             SymbolKind::Exclusive => 6,
             SymbolKind::ExclusiveOn => 7,
+            SymbolKind::PageUp => 8,
+            SymbolKind::PageDown => 9,
         }
     }
 }

@@ -141,16 +141,28 @@ impl ScriptProgram {
             let args = parser.args()?;
             parser.accept(&Token::Semi);
             match name.as_str() {
-                "STATUS" => {
+                "STATUS" | "STATUS_SHOW" | "SHOW_STATUS" => {
                     settings.show_status = Some(switch_arg(&name, &args)?);
                     continue;
                 }
-                "TIME" => {
+                "STATUS_HIDE" | "HIDE_STATUS" => {
+                    settings.show_status = Some(false);
+                    continue;
+                }
+                "TIME" | "TIME_SHOW" | "SHOW_TIME" => {
                     settings.show_time = Some(switch_arg(&name, &args)?);
                     continue;
                 }
-                "AXIS" => {
+                "TIME_HIDE" | "HIDE_TIME" => {
+                    settings.show_time = Some(false);
+                    continue;
+                }
+                "AXIS" | "AXIS_SHOW" | "SHOW_AXIS" => {
                     settings.show_axis = Some(switch_arg(&name, &args)?);
+                    continue;
+                }
+                "AXIS_HIDE" | "HIDE_AXIS" => {
+                    settings.show_axis = Some(false);
                     continue;
                 }
                 "AXIS_FIXED" => {
@@ -165,21 +177,21 @@ impl ScriptProgram {
                         values,
                         zero: false,
                     });
-                    settings.show_axis = Some(true);
+                    settings.show_axis.get_or_insert(true);
                     continue;
                 }
                 "AXIS_DYNAMIC" | "AXIS_AUTO" => {
                     let zero = args.first().map(bool_expr).transpose()?.unwrap_or(false);
                     axis = Some(AxisSpec::Auto { zero });
-                    settings.show_axis = Some(true);
+                    settings.show_axis.get_or_insert(true);
                     continue;
                 }
                 "AXIS_ZERO" => {
                     axis = Some(AxisSpec::Auto { zero: true });
-                    settings.show_axis = Some(true);
+                    settings.show_axis.get_or_insert(true);
                     continue;
                 }
-                "STATUS_FIELD" => {
+                "STATUS_FIELD" | "STATUS_VALUE" => {
                     if args.len() < 2 || args.len() > 4 {
                         return Err(
                             "STATUS_FIELD 需要 2 到 4 个参数：标签、数值、颜色、格式".to_owned()
@@ -191,7 +203,7 @@ impl ScriptProgram {
                         color: args.get(2).cloned(),
                         tmpl: args.get(3).cloned(),
                     });
-                    settings.show_status = Some(true);
+                    settings.show_status.get_or_insert(true);
                     continue;
                 }
                 _ => {}
@@ -412,6 +424,24 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             continue;
         }
         if c == '#' {
+            let end = i + 7;
+            let color_slot = matches!(
+                out.last(),
+                Some(Token::LParen | Token::Comma | Token::Colon | Token::Equal)
+            );
+            let is_color = color_slot
+                && end <= chars.len()
+                && chars[i + 1..end]
+                    .iter()
+                    .all(|digit| digit.is_ascii_hexdigit())
+                && chars
+                    .get(end)
+                    .is_none_or(|next| !next.is_ascii_alphanumeric() && *next != '_');
+            if is_color {
+                out.push(Token::Str(chars[i..end].iter().collect()));
+                i = end;
+                continue;
+            }
             while i < chars.len() && chars[i] != '\n' {
                 i += 1;
             }
@@ -1076,13 +1106,15 @@ fn draw_commands(
             }
         }
         DrawKind::Zero => {
-            if !draw.args.is_empty() {
-                return Err("ZERO 不接受参数".to_owned());
+            if draw.args.len() > 2 {
+                return Err("ZERO 最多接受 2 个参数：颜色、线宽".to_owned());
             }
             out.push(DrawCmd::HLine {
                 p: 0.0,
-                color: indicator::chart_zero(),
-                w: 1,
+                color: color_arg(0)?
+                    .filter(|color| *color != u32::MAX)
+                    .unwrap_or_else(indicator::chart_zero),
+                w: draw.args.get(1).map(line_width).transpose()?.unwrap_or(1),
             });
         }
         DrawKind::Line => {
@@ -1106,29 +1138,42 @@ fn draw_commands(
             });
         }
         DrawKind::Hist => {
-            if draw.args.is_empty() || draw.args.len() > 4 {
-                return Err("HIST 需要数值，可附加颜色、空心和线宽".to_owned());
+            if draw.args.is_empty() || draw.args.len() > 5 {
+                return Err(
+                    "HIST 需要数值，可附加颜色、空心、线宽或上涨色、下跌色、空心、线宽".to_owned(),
+                );
             }
             let values = eval(&draw.args[0], env, bars.len())?;
-            let color = color_arg(1)?;
+            let separate = draw.args.len() == 5;
+            let first = color_arg(1)?.filter(|color| *color != u32::MAX);
+            let (up, down, color) = if separate {
+                let up = first.unwrap_or(pal.candle_up);
+                let down = color_arg(2)?
+                    .filter(|color| *color != u32::MAX)
+                    .unwrap_or(pal.candle_down);
+                (up, down, None)
+            } else {
+                (pal.candle_up, pal.candle_down, first)
+            };
+            let hollow_index = if separate { 3 } else { 2 };
+            let width_index = if separate { 4 } else { 3 };
             let hollow = draw
                 .args
-                .get(2)
+                .get(hollow_index)
                 .map(bool_expr)
                 .transpose()?
                 .unwrap_or(false);
-            let w = draw.args.get(3).map(line_width).transpose()?.unwrap_or(1);
+            let w = draw
+                .args
+                .get(width_index)
+                .map(line_width)
+                .transpose()?
+                .unwrap_or(1);
             for (i, value) in values.iter().copied().enumerate() {
                 if !value.is_finite() {
                     continue;
                 }
-                let color = color
-                    .filter(|color| *color != u32::MAX)
-                    .unwrap_or(if value >= 0.0 {
-                        pal.candle_up
-                    } else {
-                        pal.candle_down
-                    });
+                let color = color.unwrap_or(if value >= 0.0 { up } else { down });
                 if w == 1 {
                     out.push(DrawCmd::Bar {
                         i,

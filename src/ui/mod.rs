@@ -9,6 +9,7 @@ pub(crate) mod icon;
 pub(crate) mod menu;
 pub(crate) mod panel;
 pub(crate) mod panemenu;
+pub(crate) mod pattern;
 pub(crate) mod pointerdebug;
 pub(crate) mod source;
 pub(crate) mod symbol;

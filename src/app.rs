@@ -38,6 +38,8 @@ pub(crate) enum WinCmd {
 
     OpenPanel,
 
+    OpenColor(ColorTarget),
+
     OpenSource(usize),
 
     OpenConsole,
@@ -45,7 +47,7 @@ pub(crate) enum WinCmd {
     CloseConsole,
 }
 
-pub(crate) use crate::ecs::{AppWorld, Crosshair, Pane};
+pub(crate) use crate::ecs::{ChartWorld, Crosshair, Pane};
 
 #[derive(Clone, Default)]
 pub(crate) struct DebugWindowSnapshot {
@@ -184,20 +186,19 @@ impl StockApp {
             || self.vsplit_grab.is_some()
             || self.win_mgr.drag_active()
             || self.color_panel.drag != ColorDrag::None
-            || self.color_panel.win.dragging()
     }
 
     pub(crate) fn mark_panes_dirty(&mut self) {
-        ecs::mark_panes_dirty(&mut self.world);
+        ecs::mark_panes_dirty(&mut self.chart_world);
     }
 
     #[cfg(test)]
     pub(crate) fn replace_bars(&mut self, bars: Vec<data::random_walk::Bar>) {
-        self.world.bars.replace(bars);
+        self.chart_world.bars.replace(bars);
     }
 
     pub(crate) fn ensure_pane_computed(&mut self, pane: usize) {
-        ecs::ensure_pane_computed(&mut self.world, pane);
+        ecs::ensure_pane_computed(&mut self.chart_world, pane);
     }
 
     pub(crate) fn request_win(&mut self, cmd: WinCmd) {
@@ -209,6 +210,7 @@ impl StockApp {
             None => {}
             Some(WinCmd::AddChart) => self.add_chart_window(),
             Some(WinCmd::OpenPanel) => self.open_panel_window(),
+            Some(WinCmd::OpenColor(target)) => self.open_color_panel(target),
             Some(WinCmd::OpenSource(pane)) => self.open_source_window(pane),
             Some(WinCmd::OpenConsole) => self.open_console_window(),
             Some(WinCmd::CloseConsole) => self.close_console_window(),
@@ -230,22 +232,22 @@ impl StockApp {
         ind.set_palette(self.current_palette());
         match self.win_mgr.free_chart_pane() {
             Some(free) => {
-                self.world.replace_pane(free, Pane::new(ind));
+                self.chart_world.replace_pane(free, Pane::new(ind));
                 free
             }
-            None => self.world.add_pane(Pane::new(ind)),
+            None => self.chart_world.add_pane(Pane::new(ind)),
         }
     }
 
     pub(crate) fn open_panel_window(&mut self) {
-        let docked = Self::child_areas(self.work_rect);
         if let Some(i) = self
             .win_mgr
             .wins
             .iter()
             .position(|w| w.kind == WinKind::Panel)
         {
-            self.win_mgr.dock(i, docked[1]);
+            let _ = i;
+            self.win_mgr.place_panel_at_default(self.work_rect);
             self.status_msg = "控制面板：已摆回来".to_owned();
         }
     }
@@ -263,7 +265,14 @@ impl StockApp {
 }
 
 pub(crate) struct StockApp {
-    pub(crate) world: AppWorld,
+    pub(crate) chart_world: ChartWorld,
+
+    pub(crate) kline_h: f32,
+    pub(crate) vol_h: f32,
+    pub(crate) ind_h: f32,
+    pub(crate) up_color: (u8, u8, u8),
+    pub(crate) down_color: (u8, u8, u8),
+    pub(crate) chart_follows_theme: bool,
 
     pub(crate) hwnd: isize,
     pub(crate) client_cover_ready: bool,
@@ -325,16 +334,16 @@ pub(crate) struct StockApp {
 }
 
 impl Deref for StockApp {
-    type Target = AppWorld;
+    type Target = ChartWorld;
 
     fn deref(&self) -> &Self::Target {
-        &self.world
+        &self.chart_world
     }
 }
 
 impl DerefMut for StockApp {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.world
+        &mut self.chart_world
     }
 }
 
@@ -354,10 +363,16 @@ impl StockApp {
         clear_window_frame(hwnd);
         let client_cover_ready = install_client_cover(hwnd);
         let palette = indicator::Palette::default();
-        let world = AppWorld::new(Self::build_panes(palette), palette);
+        let chart_world = ChartWorld::new(Self::build_panes(palette), palette);
 
         let mut app = Self {
-            world,
+            chart_world,
+            kline_h: KLINE_H_DEFAULT,
+            vol_h: VOL_H_DEFAULT,
+            ind_h: IND_H_DEFAULT,
+            up_color: UP_RGB_DEFAULT,
+            down_color: DOWN_RGB_DEFAULT,
+            chart_follows_theme: true,
             hwnd,
             client_cover_ready,
             icons: IconSet::load_or_create(),
@@ -559,15 +574,16 @@ impl StockApp {
         &mut self,
         painter: &egui::Painter,
         _layout: egui::Rect,
-        areas: [egui::Rect; 4],
+        areas: [egui::Rect; 5],
     ) {
-        let [title, menu, work, status] = areas;
+        let [title, menu, work, taskbar, status] = areas;
         painter.rect_filled(title, egui::CornerRadius::ZERO, theme().title_bg);
         let name_slot = title_text_slot(self, title, APP_NAME);
         paint_title_text_edge(painter, name_slot);
         painter.rect_filled(menu, egui::CornerRadius::ZERO, theme().menu_bg);
 
         painter.rect_filled(work, egui::CornerRadius::ZERO, theme().desktop_bg);
+        painter.rect_filled(taskbar, egui::CornerRadius::ZERO, theme().status_bg);
         painter.rect_filled(status, egui::CornerRadius::ZERO, theme().status_bg);
 
         let segs = self.status_segments();
@@ -578,17 +594,28 @@ impl StockApp {
         &self,
         painter: &egui::Painter,
         layout: egui::Rect,
-        areas: [egui::Rect; 4],
+        areas: [egui::Rect; 5],
     ) {
-        for y in [areas[1].min.y, areas[2].min.y, areas[3].min.y] {
+        for y in [
+            areas[1].min.y,
+            areas[2].min.y,
+            areas[3].min.y,
+            areas[4].min.y,
+        ] {
             hline_hard(painter, layout.min.x, layout.max.x, y, theme().line);
         }
     }
 
     pub(crate) fn floating_at(&self, p: egui::Pos2, window_bottom: f32) -> bool {
-        if self.color_panel.win.open && self.color_panel.win.rect().contains(p) {
+        if self.popup_at(p, window_bottom) {
             return true;
         }
+        self.win_mgr
+            .color_rect()
+            .is_some_and(|rect| rect.contains(p))
+    }
+
+    pub(crate) fn popup_at(&self, p: egui::Pos2, window_bottom: f32) -> bool {
         if self.pane_menu.is_some() {
             let count = indicator::builtin_names().len();
             if self
@@ -720,18 +747,21 @@ impl StockApp {
         if let Some(kind) = self.pointer.forced_hint {
             return kind;
         }
-        if let Some(kind) = self.drag_session_kind() {
-            return kind;
-        }
         let (left, right) = ctx.input(|i| (i.pointer.primary_down(), i.pointer.secondary_down()));
         if right {
             return CursorKind::Right;
         }
-        if left {
-            return CursorKind::Left;
-        }
         if self.wheel_active(ctx) {
             return CursorKind::Wheel;
+        }
+        if self.pointer.text_hover {
+            return CursorKind::Text;
+        }
+        if let Some(kind) = self.drag_session_kind() {
+            return kind;
+        }
+        if left {
+            return CursorKind::Left;
         }
         self.hover_kind()
     }
@@ -741,8 +771,7 @@ impl StockApp {
             return Some(kind);
         }
 
-        if self.color_panel.win.dragging() || self.panes.iter().any(|pane| pane.view.pan.is_some())
-        {
+        if self.panes.iter().any(|pane| pane.view.pan.is_some()) {
             return Some(CursorKind::Move);
         }
         if self.color_panel.drag != ColorDrag::None || self.source.editor.scroll_grab.is_some() {
@@ -761,9 +790,6 @@ impl StockApp {
 
     fn hover_kind(&self) -> CursorKind {
         if let Some(kind) = self.win_mgr.hover_kind() {
-            return kind;
-        }
-        if let Some(kind) = self.color_panel.win.hover_kind() {
             return kind;
         }
         self.pointer.hint
@@ -804,7 +830,7 @@ impl eframe::App for StockApp {
 
         ctx.request_repaint_after(Duration::from_millis(IDLE_REPAINT_MS));
 
-        if self.win_mgr.drag_active() || self.color_panel.win.dragging() {
+        if self.win_mgr.drag_active() {
             ctx.request_repaint();
         }
     }
@@ -816,6 +842,11 @@ impl StockApp {
 
         self.pointer.begin_frame();
         self.dismiss_popup_menus_on_keyboard(&ctx);
+        if ctx.input(|i| i.pointer.secondary_pressed()) {
+            self.menu = MenuState::default();
+            self.pane_menu = None;
+            self.source.editor.menu = MenuState::default();
+        }
 
         let (scrolled, now) = ctx.input(|i| (i.time_since_last_scroll() < 0.01, i.time));
         if scrolled {
@@ -845,7 +876,7 @@ impl StockApp {
 
         self.work_rect = areas[2];
         let mut mgr = self.win_mgr.take();
-        mgr.plan(self, ui, areas[2]);
+        mgr.plan(self, ui, areas[2], areas[3]);
         self.win_mgr = mgr;
 
         let plots = self.win_mgr.plots.clone();
@@ -860,7 +891,7 @@ impl StockApp {
         self.update_crosshair(ui, &plots);
 
         let mut mgr = self.win_mgr.take();
-        mgr.draw(self, ui, areas[2]);
+        mgr.draw(self, ui, areas[2], areas[3]);
         self.win_mgr = mgr;
 
         let blank_right_click = ctx.input(|i| {
@@ -877,10 +908,11 @@ impl StockApp {
                 .open()
                 .is_some_and(|m| menu_rect(self, m.kind, m.anchor, layout).contains(p))
         });
-        let floating_hit = self.color_panel.win.open
-            && blank_right_click
-                .1
-                .is_some_and(|p| self.color_panel.win.rect().contains(p));
+        let floating_hit = blank_right_click.1.is_some_and(|p| {
+            self.win_mgr
+                .color_rect()
+                .is_some_and(|rect| rect.contains(p))
+        });
         if blank_right_click.0
             && let Some(p) = blank_right_click.1
             && self.work_rect.contains(p)
@@ -920,8 +952,6 @@ impl StockApp {
 
         border_hard(&ui.painter().clone(), layout, theme().ctrl_border);
 
-        self.ui_color_panel(ui, areas[2]);
-
         self.ui_pane_menu(ui);
         self.run_win_cmd();
 
@@ -956,6 +986,7 @@ pub(crate) fn configure_zero_spacing(ctx: &egui::Context) {
         style.spacing.icon_width_inner = 0.0;
         style.spacing.icon_spacing = 0.0;
         style.spacing.default_area_size = egui::Vec2::ZERO;
+        style.interaction.interact_radius = 0.0;
 
         style.visuals.window_corner_radius = egui::CornerRadius::ZERO;
         style.visuals.menu_corner_radius = egui::CornerRadius::ZERO;
