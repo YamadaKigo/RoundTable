@@ -5,7 +5,9 @@ use crate::ui::icon::*;
 use crate::ui::titlebar::*;
 use eframe::egui;
 
-pub(crate) const EDGE_BAND: f32 = 0.5;
+pub(crate) const WIN_FRAME: f32 = grid_line(1);
+
+pub(crate) const EDGE_BAND: f32 = WIN_FRAME;
 
 pub(crate) const WINDOW_DRAG_SPEED: f32 = 1.4;
 
@@ -52,6 +54,9 @@ pub(crate) struct Win {
 pub(crate) enum WinEdge {
     #[default]
     None,
+    Top,
+    TopLeft,
+    TopRight,
     Left,
     Right,
     Bottom,
@@ -65,11 +70,18 @@ impl WinEdge {
     }
 
     fn left(self) -> bool {
-        matches!(self, WinEdge::Left | WinEdge::BottomLeft)
+        matches!(self, WinEdge::Left | WinEdge::TopLeft | WinEdge::BottomLeft)
     }
 
     fn right(self) -> bool {
-        matches!(self, WinEdge::Right | WinEdge::BottomRight)
+        matches!(
+            self,
+            WinEdge::Right | WinEdge::TopRight | WinEdge::BottomRight
+        )
+    }
+
+    fn top(self) -> bool {
+        matches!(self, WinEdge::Top | WinEdge::TopLeft | WinEdge::TopRight)
     }
 
     fn bottom(self) -> bool {
@@ -83,9 +95,10 @@ impl WinEdge {
         match self {
             WinEdge::None => None,
             WinEdge::Left | WinEdge::Right => Some(egui::CursorIcon::ResizeHorizontal),
+            WinEdge::Top => Some(egui::CursorIcon::ResizeVertical),
             WinEdge::Bottom => Some(egui::CursorIcon::ResizeVertical),
-            WinEdge::BottomRight => Some(egui::CursorIcon::ResizeNwSe),
-            WinEdge::BottomLeft => Some(egui::CursorIcon::ResizeNeSw),
+            WinEdge::TopLeft | WinEdge::BottomRight => Some(egui::CursorIcon::ResizeNwSe),
+            WinEdge::TopRight | WinEdge::BottomLeft => Some(egui::CursorIcon::ResizeNeSw),
         }
     }
 
@@ -93,9 +106,9 @@ impl WinEdge {
         match self {
             WinEdge::None => CursorKind::Normal,
             WinEdge::Left | WinEdge::Right => CursorKind::ResizeH,
-            WinEdge::Bottom => CursorKind::ResizeV,
-            WinEdge::BottomRight => CursorKind::ResizeNwSe,
-            WinEdge::BottomLeft => CursorKind::ResizeNeSw,
+            WinEdge::Top | WinEdge::Bottom => CursorKind::ResizeV,
+            WinEdge::TopLeft | WinEdge::BottomRight => CursorKind::ResizeNwSe,
+            WinEdge::TopRight | WinEdge::BottomLeft => CursorKind::ResizeNeSw,
         }
     }
 }
@@ -108,6 +121,8 @@ pub(crate) enum WinKeys {
     MinMaxClose,
 
     PinnedMinMaxClose,
+
+    CloseOnly,
 }
 
 impl WinKeys {
@@ -118,7 +133,7 @@ impl WinKeys {
         }
     }
 
-    fn shown(self) -> &'static [(SysButton, usize)] {
+    pub(crate) fn shown(self) -> &'static [(SysButton, usize)] {
         match self {
             WinKeys::MinAndClose => &[
                 (SysButton::Pin, 0),
@@ -138,6 +153,7 @@ impl WinKeys {
                 (SysButton::Maximize, 2),
                 (SysButton::Close, 3),
             ],
+            WinKeys::CloseOnly => &[(SysButton::Close, 0)],
         }
     }
 }
@@ -154,22 +170,40 @@ pub(crate) struct WinOut {
 }
 
 pub(crate) fn edge_at(rect: egui::Rect, p: egui::Pos2, band: f32) -> WinEdge {
-    let left = p.x >= rect.min.x - band && p.x < rect.min.x + LINE_W - band;
-    let right = p.x >= rect.max.x - LINE_W - band && p.x < rect.max.x - band;
-    let bottom = p.y >= rect.max.y - LINE_W - band && p.y < rect.max.y - band;
-
-    let in_x = p.x >= rect.min.x - band && p.x < rect.max.x - band;
-    let in_y = p.y >= rect.min.y - band && p.y < rect.max.y - band;
-
-    if p.y < rect.min.y + WIN_TITLE_H {
+    let on_line =
+        (p.x >= rect.min.x && p.x < rect.min.x + LINE_W && p.y >= rect.min.y && p.y < rect.max.y)
+            || (p.x >= rect.max.x - LINE_W
+                && p.x < rect.max.x
+                && p.y >= rect.min.y
+                && p.y < rect.max.y)
+            || (p.y >= rect.min.y
+                && p.y < rect.min.y + LINE_W
+                && p.x >= rect.min.x
+                && p.x < rect.max.x)
+            || (p.y >= rect.max.y - LINE_W
+                && p.y < rect.max.y
+                && p.x >= rect.min.x
+                && p.x < rect.max.x);
+    if on_line {
         return WinEdge::None;
     }
-    match (left && in_y, right && in_y, bottom && in_x) {
-        (true, _, true) => WinEdge::BottomLeft,
-        (_, true, true) => WinEdge::BottomRight,
-        (true, _, _) => WinEdge::Left,
-        (_, true, _) => WinEdge::Right,
-        (_, _, true) => WinEdge::Bottom,
+
+    let in_x = p.x >= rect.min.x + LINE_W && p.x < rect.max.x - LINE_W;
+    let in_y = p.y >= rect.min.y + LINE_W && p.y < rect.max.y - LINE_W;
+    let left = in_y && p.x >= rect.min.x + LINE_W && p.x < rect.min.x + band;
+    let right = in_y && p.x >= rect.max.x - band && p.x < rect.max.x - LINE_W;
+    let top = in_x && p.y >= rect.min.y + LINE_W && p.y < rect.min.y + band;
+    let bottom = in_x && p.y >= rect.max.y - band && p.y < rect.max.y - LINE_W;
+
+    match (top, left, right, bottom) {
+        (true, true, _, _) => WinEdge::TopLeft,
+        (true, _, true, _) => WinEdge::TopRight,
+        (_, true, _, true) => WinEdge::BottomLeft,
+        (_, _, true, true) => WinEdge::BottomRight,
+        (true, _, _, _) => WinEdge::Top,
+        (_, true, _, _) => WinEdge::Left,
+        (_, _, true, _) => WinEdge::Right,
+        (_, _, _, true) => WinEdge::Bottom,
         _ => WinEdge::None,
     }
 }
@@ -293,8 +327,12 @@ impl Win {
         egui::Rect::from_min_size(self.pos, self.size)
     }
 
+    pub(crate) fn inner_rect(&self) -> egui::Rect {
+        self.rect().shrink(WIN_FRAME)
+    }
+
     pub(crate) fn title_band(&self) -> egui::Rect {
-        free_band(self.rect(), 0, WIN_TITLE_ROWS)
+        free_band(self.inner_rect(), 0, WIN_TITLE_ROWS)
     }
 
     pub(crate) fn dragging(&self) -> bool {
@@ -657,7 +695,7 @@ impl Win {
         let min = self.min_size;
         let mut x0 = fix.min.x;
         let mut x1 = fix.max.x;
-        let y0 = fix.min.y;
+        let mut y0 = fix.min.y;
         let mut y1 = fix.max.y;
         if self.rs.left() {
             let want = edge_target(p.x + self.rs_off.x, bounds.min.x, bounds.max.x, EDGE_BAND);
@@ -669,13 +707,16 @@ impl Win {
         if self.rs.bottom() {
             let want = edge_target(p.y + self.rs_off.y, bounds.min.y, bounds.max.y, EDGE_BAND);
             y1 = clamp_soft(want, (y0 + min.y).min(bounds.max.y), bounds.max.y);
+        } else if self.rs.top() {
+            let want = edge_target(p.y + self.rs_off.y, bounds.min.y, bounds.max.y, EDGE_BAND);
+            y0 = clamp_soft(want, bounds.min.y, (y1 - min.y).max(bounds.min.y));
         }
-        self.clamp_resize_guards(&mut x0, &mut x1, &mut y1);
+        self.clamp_resize_guards(&mut x0, &mut x1, &mut y0, &mut y1);
         self.pos = egui::pos2(x0, y0);
         self.size = egui::vec2((x1 - x0).max(LINE_W), (y1 - y0).max(LINE_W));
     }
 
-    fn clamp_resize_guards(&self, x0: &mut f32, x1: &mut f32, y1: &mut f32) {
+    fn clamp_resize_guards(&self, x0: &mut f32, x1: &mut f32, y0: &mut f32, y1: &mut f32) {
         let fix = self.rs_fix;
         if self
             .move_guards
@@ -685,7 +726,7 @@ impl Win {
             return;
         }
         for (_, guard, _) in &self.move_guards {
-            let vertical = overlap_span(fix.min.y, *y1, guard.min.y, guard.max.y);
+            let vertical = overlap_span(*y0, *y1, guard.min.y, guard.max.y);
             if self.rs.right() && fix.max.x <= guard.min.x + LINE_W && vertical > LINE_W {
                 *x1 = x1.min(guard.min.x + LINE_W);
             }
@@ -695,6 +736,9 @@ impl Win {
             let horizontal = overlap_span(*x0, *x1, guard.min.x, guard.max.x);
             if self.rs.bottom() && fix.max.y <= guard.min.y + LINE_W && horizontal > LINE_W {
                 *y1 = y1.min(guard.min.y + LINE_W);
+            }
+            if self.rs.top() && fix.min.y >= guard.max.y - LINE_W && horizontal > LINE_W {
+                *y0 = y0.max(guard.max.y - LINE_W);
             }
         }
     }
@@ -762,11 +806,12 @@ pub(crate) fn paint_title_bar(
 }
 
 pub(crate) fn paint_shell_border(painter: &egui::Painter, rect: egui::Rect) {
+    let inner = rect.shrink(WIN_FRAME);
     hline_hard(
         painter,
-        rect.min.x,
-        rect.max.x,
-        rect.min.y + grid_line(WIN_TITLE_ROWS),
+        inner.min.x,
+        inner.max.x,
+        inner.min.y + grid_line(WIN_TITLE_ROWS),
         theme().ctrl_border,
     );
     border_hard(painter, rect, theme().ctrl_border);
@@ -902,6 +947,44 @@ mod tests {
         assert_eq!(window.rect().max.x, guard.min.x + LINE_W);
         window.stretch(egui::pos2(99.0, 160.0), bounds);
         assert_eq!(window.rect().max.x, 99.0);
+    }
+
+    #[test]
+    fn frame_band_resizes_but_the_outer_line_does_not() {
+        let rect = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(200.0, 160.0));
+        assert_eq!(rect.shrink(WIN_FRAME).size(), egui::vec2(182.0, 142.0));
+        assert_eq!(
+            edge_at(
+                rect,
+                egui::pos2(rect.max.x - 1.0, rect.center().y),
+                EDGE_BAND
+            ),
+            WinEdge::None
+        );
+        assert_eq!(
+            edge_at(
+                rect,
+                egui::pos2(rect.max.x - WIN_FRAME / 2.0, rect.center().y),
+                EDGE_BAND
+            ),
+            WinEdge::Right
+        );
+        assert_eq!(
+            edge_at(
+                rect,
+                egui::pos2(rect.center().x, rect.min.y + LINE_W),
+                EDGE_BAND
+            ),
+            WinEdge::Top
+        );
+        assert_eq!(
+            edge_at(
+                rect,
+                egui::pos2(rect.min.x + LINE_W, rect.min.y + LINE_W),
+                EDGE_BAND
+            ),
+            WinEdge::TopLeft
+        );
     }
 
     #[test]

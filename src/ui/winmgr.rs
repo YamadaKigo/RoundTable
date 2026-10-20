@@ -91,7 +91,7 @@ impl ManagedWin {
     }
 
     pub(crate) fn body(rect: egui::Rect) -> egui::Rect {
-        free_tail(rect, WIN_TITLE_ROWS)
+        free_tail(rect.shrink(WIN_FRAME), WIN_TITLE_ROWS)
     }
 }
 
@@ -195,16 +195,19 @@ impl WinMgr {
     ) -> usize {
         let id = self.next_id;
         self.next_id += 1;
+        let frame_size = egui::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME);
+        let outer_size = size + frame_size;
+        let outer_min = min_size + frame_size;
 
-        let mut w = Win::new(id, 0.0, 0.0, size.x, size.y);
+        let mut w = Win::new(id, 0.0, 0.0, outer_size.x, outer_size.y);
         w.open = true;
-        w.min_size = min_size;
+        w.min_size = outer_min;
         w.resizable = true;
         self.wins.push(ManagedWin {
             kind,
             title: title.to_owned(),
             minimized: false,
-            restore: (egui::Pos2::ZERO, size),
+            restore: (egui::Pos2::ZERO, outer_size),
             pane,
             pinned: false,
             exclusive: false,
@@ -234,7 +237,7 @@ impl WinMgr {
         self.wins.iter().position(|w| w.kind == WinKind::Source)
     }
 
-    pub(crate) fn show_source(&mut self, work: egui::Rect) -> usize {
+    pub(crate) fn show_source(&mut self, work: egui::Rect) -> Option<usize> {
         if let Some(i) = self.source_index() {
             let was_open = self.wins[i].w.open;
             self.wins[i].w.open = true;
@@ -242,11 +245,12 @@ impl WinMgr {
             if !self.wins[i].pinned {
                 self.toggle_pin(i);
             }
-            if !was_open {
-                self.place_default(i, work);
+            if !was_open && !self.place_default(i, work) {
+                self.wins[i].w.open = false;
+                return None;
             }
             self.activate(i);
-            return i;
+            return Some(i);
         }
         let i = self.add(
             WinKind::Source,
@@ -255,9 +259,12 @@ impl WinMgr {
             egui::vec2(SRC_W, SRC_H),
             egui::vec2(SRC_W, SRC_H),
         );
-        self.place_default(i, work);
+        if !self.place_default(i, work) {
+            self.wins[i].w.open = false;
+            return None;
+        }
         self.toggle_pin(i);
-        i
+        Some(i)
     }
 
     pub(crate) fn hide_source(&mut self) {
@@ -274,7 +281,7 @@ impl WinMgr {
             .any(|w| w.kind == WinKind::Console && w.w.open)
     }
 
-    pub(crate) fn show_console(&mut self, work: egui::Rect) -> usize {
+    pub(crate) fn show_console(&mut self, work: egui::Rect) -> Option<usize> {
         if let Some(i) = self.wins.iter().position(|w| w.kind == WinKind::Console) {
             let was_open = self.wins[i].w.open;
             self.wins[i].w.open = true;
@@ -282,12 +289,13 @@ impl WinMgr {
             if !self.wins[i].pinned {
                 self.toggle_pin(i);
             }
-            if !was_open {
-                self.place_default(i, work);
+            if !was_open && !self.place_default(i, work) {
+                self.wins[i].w.open = false;
+                return None;
             }
             self.wins[i].w.guard_open_click();
             self.activate(i);
-            return i;
+            return Some(i);
         }
         let size = egui::vec2(CONSOLE_W.min(work.width()), CONSOLE_H.min(work.height()));
         let i = self.add(
@@ -297,10 +305,13 @@ impl WinMgr {
             size,
             egui::vec2(CONSOLE_MIN_W, CONSOLE_MIN_H),
         );
-        self.place_default(i, work);
+        if !self.place_default(i, work) {
+            self.wins[i].w.open = false;
+            return None;
+        }
         self.wins[i].w.guard_open_click();
         self.toggle_pin(i);
-        i
+        Some(i)
     }
 
     pub(crate) fn hide_console(&mut self) {
@@ -311,7 +322,7 @@ impl WinMgr {
         }
     }
 
-    pub(crate) fn show_color(&mut self, work: egui::Rect) -> usize {
+    pub(crate) fn show_color(&mut self, work: egui::Rect) -> Option<usize> {
         if let Some(i) = self.wins.iter().position(|w| w.kind == WinKind::Color) {
             let was_open = self.wins[i].w.open;
             self.wins[i].w.open = true;
@@ -319,20 +330,24 @@ impl WinMgr {
             if !self.wins[i].pinned {
                 self.set_pin(i, true);
             }
-            if !was_open {
-                self.place_default(i, work);
+            if !was_open && !self.place_default(i, work) {
+                self.wins[i].w.open = false;
+                return None;
             }
             self.wins[i].w.guard_open_click();
             self.activate(i);
-            return i;
+            return Some(i);
         }
         let size = egui::vec2(CP_W, CP_H);
         let i = self.add(WinKind::Color, "颜色设置", 0, size, size);
         self.wins[i].w.resizable = false;
-        self.place_default(i, work);
+        if !self.place_default(i, work) {
+            self.wins[i].w.open = false;
+            return None;
+        }
         self.wins[i].w.guard_open_click();
         self.set_pin(i, true);
-        i
+        Some(i)
     }
 
     pub(crate) fn hide_color(&mut self) {
@@ -369,31 +384,64 @@ impl WinMgr {
             .map(|w| w.pane)
     }
 
-    fn spawn_position(&self, work: egui::Rect, skip: usize) -> egui::Pos2 {
+    fn spawn_position_for(
+        &self,
+        work: egui::Rect,
+        size: egui::Vec2,
+        skip: Option<usize>,
+    ) -> Option<egui::Pos2> {
         if !work.is_positive() {
-            return work.min;
+            return None;
         }
-        let size = self.wins[skip].w.size;
-        egui::pos2(
+        let occupied = |pos: egui::Pos2| {
+            self.wins.iter().enumerate().any(|(i, w)| {
+                Some(i) != skip && w.w.open && !w.minimized && (w.w.pos - pos).length_sq() < 0.5
+            })
+        };
+        let centered = egui::pos2(
             (work.center().x - size.x / 2.0).round(),
             (work.center().y - size.y / 2.0).round(),
-        )
+        );
+        if !occupied(centered) {
+            return Some(centered);
+        }
+
+        let mut y = work.min.y;
+        loop {
+            if y + size.y > work.max.y + 0.01 {
+                return None;
+            }
+            let pos = egui::pos2(work.min.x, y);
+            if !occupied(pos) {
+                return Some(pos);
+            }
+            y += WIN_TITLE_H;
+            if y + size.y > work.max.y + 0.01 {
+                return None;
+            }
+        }
     }
 
-    fn place_default(&mut self, i: usize, work: egui::Rect) {
+    fn place_default(&mut self, i: usize, work: egui::Rect) -> bool {
         if !work.is_positive() {
             let id = self.wins[i].w.id;
             if !self.pending_placement.contains(&id) {
                 self.pending_placement.push(id);
             }
-            return;
+            return true;
         }
-        let pos = self.spawn_position(work, i);
+        let size = self.wins[i].w.size;
+        let Some(pos) = self.spawn_position_for(work, size, Some(i)) else {
+            let id = self.wins[i].w.id;
+            self.pending_placement.retain(|pending| *pending != id);
+            return false;
+        };
         let id = self.wins[i].w.id;
         self.pending_placement.retain(|pending| *pending != id);
         self.wins[i].w.pos = pos;
         self.wins[i].w.clamp_into(work);
         self.wins[i].restore = (self.wins[i].w.pos, self.wins[i].w.size);
+        true
     }
 
     fn place_panel(&mut self, i: usize, work: egui::Rect) {
@@ -441,7 +489,9 @@ impl WinMgr {
         for i in 0..self.wins.len() {
             match self.wins[i].kind {
                 WinKind::Panel => self.place_panel(i, work),
-                WinKind::Chart => self.place_default(i, work),
+                WinKind::Chart => {
+                    self.place_default(i, work);
+                }
                 WinKind::Source | WinKind::Console | WinKind::Color => {}
             }
         }
@@ -554,7 +604,7 @@ impl WinMgr {
     }
 
     pub(crate) fn mini_width(app: &mut StockApp, title: &str) -> f32 {
-        let need = app.text_width(title) + 2.0 * TEXT_PAD_X + 3.0 * SYS_BTN_W - LINE_W;
+        let need = app.text_width(title) + 2.0 * TEXT_PAD_X + SYS_BTN_W - LINE_W;
         cells(((need - LINE_W) / PITCH).ceil() as i32).max(MINI_W)
     }
 
@@ -612,7 +662,7 @@ impl WinMgr {
         };
         let rect = self.rect_of(i);
         let title = free_band(rect, 0, WIN_TITLE_ROWS);
-        let keys = sys_button_rects_n(title, 3);
+        let keys = sys_button_rects_n(title, 1);
         let handle = egui::Rect::from_min_max(title.min, egui::pos2(keys[0].min.x, title.max.y));
         if !handle.contains(p) {
             return;
@@ -987,8 +1037,19 @@ impl WinMgr {
         })
     }
 
-    pub(crate) fn add_chart(&mut self, work: egui::Rect, pane: usize) -> usize {
+    pub(crate) fn can_spawn_window(&self, work: egui::Rect, size: egui::Vec2) -> bool {
+        if !work.is_positive() {
+            return true;
+        }
+        let outer = size + egui::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME);
+        self.spawn_position_for(work, outer, None).is_some()
+    }
+
+    pub(crate) fn add_chart(&mut self, work: egui::Rect, pane: usize) -> Option<usize> {
         let size = egui::vec2(NEW_WIN_W.min(work.width()), NEW_WIN_H.min(work.height()));
+        if !self.can_spawn_window(work, size) {
+            return None;
+        }
         let i = self.add(
             WinKind::Chart,
             WIN_CHART_TITLE,
@@ -996,9 +1057,12 @@ impl WinMgr {
             size,
             Self::chart_min_size(),
         );
-        self.place_default(i, work);
+        if !self.place_default(i, work) {
+            self.wins[i].w.open = false;
+            return None;
+        }
 
-        i
+        Some(i)
     }
 
     pub(crate) fn chart_min_size() -> egui::Vec2 {
@@ -1124,7 +1188,9 @@ impl WinMgr {
                 if let Some(i) = self.wins.iter().position(|w| w.w.id == id) {
                     match self.wins[i].kind {
                         WinKind::Panel => self.place_panel(i, work),
-                        _ => self.place_default(i, work),
+                        _ => {
+                            self.place_default(i, work);
+                        }
                     }
                 }
             }
@@ -1308,12 +1374,11 @@ impl WinMgr {
         };
         let rect = self.rect_of(i);
         let title = free_band(rect, 0, WIN_TITLE_ROWS);
-        let keys = sys_button_rects_n(title, 3);
+        let keys = sys_button_rects_n(title, 1);
         let handle = egui::Rect::from_min_max(title.min, egui::pos2(keys[0].min.x, title.max.y));
         if keys[0].contains(p) {
-            let pinned = !self.wins[i].pinned;
-            self.set_pin(i, pinned);
-        } else if keys[1].contains(p) || handle.contains(p) {
+            self.close_win(app, i);
+        } else if handle.contains(p) {
             self.restore(i);
             if let Some(j) = self.wins.iter().position(|window| window.w.id == id) {
                 self.focused_id = Some(id);
@@ -1322,8 +1387,6 @@ impl WinMgr {
                     self.wins[j].w.guard_open_click();
                 }
             }
-        } else if keys[2].contains(p) {
-            self.close_win(app, i);
         }
     }
 
@@ -1344,7 +1407,7 @@ impl WinMgr {
             WinKind::Source => {
                 self.wins[i].title = app.source_title();
 
-                let rect = self.wins[i].w.rect();
+                let rect = self.wins[i].w.inner_rect();
                 let cmd = app.ui_source_body(ui, rect);
                 app.run_editor_cmd(cmd);
             }
@@ -1383,7 +1446,7 @@ impl WinMgr {
                 title,
                 self.wins[i].w.id,
                 &name,
-                WinKeys::MinAndClose,
+                WinKeys::CloseOnly,
                 false,
                 self.wins[i].pinned,
                 true,

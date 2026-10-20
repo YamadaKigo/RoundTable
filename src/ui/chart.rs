@@ -190,6 +190,13 @@ pub(crate) fn chart_bar(area: egui::Rect) -> egui::Rect {
     )
 }
 
+pub(crate) fn status_field_metrics(label_w: f32, value_w: f32) -> (f32, f32) {
+    let divider_cells = ((TEXT_PAD_X + label_w + GRID) / PITCH).ceil() as i32;
+    let divider = grid_line(divider_cells);
+    let width = snap_cells_up(divider + GRID + value_w + TEXT_PAD_X);
+    (width, divider)
+}
+
 #[allow(dead_code)]
 pub(crate) fn frame_rects(area: egui::Rect) -> (egui::Rect, egui::Rect) {
     frame_rects_with_axis(area, true)
@@ -973,29 +980,36 @@ impl StockApp {
                 DrawCmd::StatusField {
                     label,
                     value,
-                    tmpl,
                     color,
                 } => {
                     let Some(band) = geom.status else {
                         continue;
                     };
-
-                    let w = snap_cells_up(
-                        self.text_width(label) + GRID + self.text_width(tmpl) + 2.0 * TEXT_PAD_X,
-                    );
-                    if sx + w > band.max.x {
+                    if sx >= band.max.x - LINE_W {
                         break;
                     }
-                    self.status_divider(painter, band, sx, first);
+                    let label_w = self.text_width(label);
+                    let value_w = self.text_width(value);
+                    let (w, divider) = status_field_metrics(label_w, value_w);
+                    let clipped = painter.with_clip_rect(band);
                     self.text(
-                        painter,
+                        &clipped,
                         egui::pos2(text_left_x(sx, geom.origin.x), band.center().y),
                         egui::Align2::LEFT_CENTER,
                         label,
                         theme().text,
                     );
+                    if sx + divider < band.max.x {
+                        vline_hard(
+                            &clipped,
+                            sx + divider,
+                            band.min.y + LINE_W,
+                            band.max.y - LINE_W,
+                            theme().chart_line,
+                        );
+                    }
                     self.text(
-                        painter,
+                        &clipped,
                         egui::pos2(
                             text_right_x(sx + w - LINE_W, geom.origin.x),
                             band.center().y,

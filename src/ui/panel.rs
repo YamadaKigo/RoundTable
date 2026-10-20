@@ -3,6 +3,7 @@ use crate::grid::*;
 use crate::theme::*;
 use crate::ui::button::*;
 use crate::ui::colorpanel::*;
+use crate::ui::floatwin::WIN_FRAME;
 use crate::ui::icon::*;
 use crate::ui::winmgr::*;
 use eframe::egui;
@@ -354,7 +355,7 @@ impl StockApp {
             })
             .collect();
 
-        let min = self.panel_min_size();
+        let min = self.panel_min_size() + egui::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME);
         for w in self.win_mgr.wins.iter_mut() {
             if w.kind == WinKind::Panel {
                 w.w.min_size = min;

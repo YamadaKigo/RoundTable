@@ -194,7 +194,8 @@ impl ScriptProgram {
                 "STATUS_FIELD" | "STATUS_VALUE" => {
                     if args.len() < 2 || args.len() > 4 {
                         return Err(
-                            "STATUS_FIELD 需要 2 到 4 个参数：标签、数值、颜色、格式".to_owned()
+                            "STATUS_FIELD 需要 2 到 4 个参数：标签、数值、颜色、格式；不支持位置参数"
+                                .to_owned(),
                         );
                     }
                     status.push(StatusStmt {

@@ -1,4 +1,5 @@
 use crate::app::*;
+use crate::grid::*;
 use crate::indicator;
 use crate::ui::editor::*;
 use eframe::egui;
@@ -28,10 +29,31 @@ pub(crate) const EDITOR_ID: &str = "rt_source_editor";
 
 impl StockApp {
     pub(crate) fn open_source_window(&mut self, pane: usize) {
+        if !self.win_mgr.source_open()
+            && !self
+                .win_mgr
+                .can_spawn_window(self.work_rect, egui::vec2(SRC_W, SRC_H))
+        {
+            let text = "窗口出生位置已触底，不能继续添加".to_owned();
+            self.status_msg = text.clone();
+            self.tooltip = Some((
+                egui::Rect::from_min_size(self.work_rect.center(), egui::vec2(LINE_W, LINE_W)),
+                text,
+            ));
+            return;
+        }
         if self.source.pane != pane || !self.win_mgr.source_open() {
             self.open_pane_source(pane);
         }
-        self.win_mgr.show_source(self.work_rect);
+        if self.win_mgr.show_source(self.work_rect).is_none() {
+            let text = "窗口出生位置已触底，不能继续添加".to_owned();
+            self.status_msg = text.clone();
+            self.tooltip = Some((
+                egui::Rect::from_min_size(self.work_rect.center(), egui::vec2(LINE_W, LINE_W)),
+                text,
+            ));
+            return;
+        }
         let name = self.panes[pane].indicator.name().to_owned();
         self.status_msg = format!("指标代码：{name}");
     }

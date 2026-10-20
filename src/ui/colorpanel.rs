@@ -7,7 +7,7 @@ use crate::ui::textbox::*;
 use eframe::egui;
 
 pub(crate) const CP_COLS: i32 = 26;
-pub(crate) const CP_ROWS: i32 = 30;
+pub(crate) const CP_ROWS: i32 = 28;
 pub(crate) const CP_W: f32 = cells(CP_COLS);
 pub(crate) const CP_H: f32 = cells(CP_ROWS);
 
@@ -15,19 +15,16 @@ pub(crate) const CP_CONTENT_W: f32 = CP_W - 2.0 * LINE_W;
 
 pub(crate) const CP_TITLE_ROWS: i32 = 2;
 pub(crate) const CP_SV_ROWS: i32 = 16;
-pub(crate) const CP_HUE_ROWS: i32 = 2;
 pub(crate) const CP_SLIDER_ROWS: i32 = 2;
 pub(crate) const CP_HEX_ROWS: i32 = 2;
 pub(crate) const CP_BTN_ROWS: i32 = 2;
 
 pub(crate) const CP_ROW_SV: i32 = CP_TITLE_ROWS;
-pub(crate) const CP_ROW_HUE: i32 = CP_ROW_SV + CP_SV_ROWS;
-pub(crate) const CP_ROW_RGB: i32 = CP_ROW_HUE + CP_HUE_ROWS;
+pub(crate) const CP_ROW_RGB: i32 = CP_ROW_SV + CP_SV_ROWS;
 pub(crate) const CP_ROW_HEX: i32 = CP_ROW_RGB + 3 * CP_SLIDER_ROWS;
 pub(crate) const CP_ROW_BTN: i32 = CP_ROW_HEX + CP_HEX_ROWS;
 
 pub(crate) const CP_Y_SV: f32 = grid_line(CP_ROW_SV);
-pub(crate) const CP_Y_HUE: f32 = grid_line(CP_ROW_HUE);
 pub(crate) const CP_Y_RGB: f32 = grid_line(CP_ROW_RGB);
 pub(crate) const CP_Y_HEX: f32 = grid_line(CP_ROW_HEX);
 pub(crate) const CP_Y_BTN: f32 = grid_line(CP_ROW_BTN);
@@ -58,8 +55,6 @@ pub(crate) const SV_COLS: i32 = CP_COLS;
 pub(crate) const SV_ROWS: i32 = CP_SV_ROWS;
 pub(crate) const SV_BLOCK: f32 = GRID;
 
-pub(crate) const HUE_BARS: i32 = CP_CONTENT_W as i32;
-
 pub(crate) const CP_SLIDER_LABEL_COLS: i32 = 2;
 pub(crate) const CP_SLIDER_GAP_COLS: i32 = 1;
 
@@ -73,8 +68,6 @@ pub(crate) const CP_TRACK_INNER_W: i32 = 9 * CP_TRACK_COLS - 1;
 
 pub(crate) const CP_HANDLE_W: f32 = cells(1);
 pub(crate) const CP_HANDLE_TRAVEL: f32 = CP_TRACK_W - CP_HANDLE_W;
-
-pub(crate) const HUE_TRAVEL: f32 = CP_CONTENT_W - CP_HANDLE_W;
 
 pub(crate) const CP_HALF_COLS: i32 = CP_COLS / 2;
 pub(crate) const CP_HALF_W: f32 = cells(CP_HALF_COLS);
@@ -91,7 +84,7 @@ pub(crate) fn hex_input_char(c: char) -> bool {
 pub(crate) const CP_DEFAULT_X: f32 = 450.0;
 pub(crate) const CP_DEFAULT_Y: f32 = 99.0;
 
-const _: () = assert!(CP_W == 235.0 && CP_H == 271.0);
+const _: () = assert!(CP_W == 235.0 && CP_H == 253.0);
 const _: () = assert!((CP_W as i32 - 1) % 9 == 0 && (CP_H as i32 - 1) % 9 == 0);
 const _: () = assert!(CP_ROW_BTN + CP_BTN_ROWS == CP_ROWS);
 
@@ -116,12 +109,9 @@ const _: () = assert!(CP_TRACK_W > CP_HANDLE_W);
 const _: () = assert!((CP_TRACK_W as i32 - 1) % 9 == 0 && (CP_HANDLE_W as i32 - 1) % 9 == 0);
 
 const _: () = assert!(CP_HANDLE_TRAVEL > 0.0 && CP_HANDLE_TRAVEL % 1.0 == 0.0);
-const _: () = assert!(HUE_TRAVEL > 0.0 && HUE_TRAVEL % 1.0 == 0.0);
-
-const _: () = assert!((CP_Y_SV as i32) % 9 == 0 && (CP_Y_HUE as i32) % 9 == 0);
+const _: () = assert!((CP_Y_SV as i32) % 9 == 0);
 const _: () = assert!((CP_Y_RGB as i32) % 9 == 0 && (CP_Y_HEX as i32) % 9 == 0);
 const _: () = assert!((CP_Y_BTN as i32) % 9 == 0);
-const _: () = assert!(HUE_BARS as f32 == CP_CONTENT_W);
 
 const _: () = assert!((CP_DEFAULT_X as i32) % 9 == 0 && (CP_DEFAULT_Y as i32) % 9 == 0);
 
@@ -254,18 +244,6 @@ pub(crate) fn row_of_v(v: u8) -> i32 {
     SV_ROWS - 1 - (v as f32 * (SV_ROWS - 1) as f32 / 255.0).round() as i32
 }
 
-pub(crate) fn hue_of_bar(i: i32) -> u16 {
-    (i as f32 * 360.0 / (HUE_BARS - 1) as f32).round() as u16
-}
-
-pub(crate) fn hue_handle_left(h: u16) -> f32 {
-    (h.min(360) as f32 / 360.0 * HUE_TRAVEL).round()
-}
-
-pub(crate) fn hue_at_x(x: f32) -> u16 {
-    (x.clamp(0.0, HUE_TRAVEL) / HUE_TRAVEL * 360.0).round() as u16
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ColorTarget {
     Up,
@@ -285,7 +263,6 @@ impl ColorTarget {
 pub(crate) enum ColorDrag {
     None,
     Sv,
-    Hue,
 
     Slider(u8),
 }
@@ -379,7 +356,15 @@ impl StockApp {
         self.color_panel.drag = ColorDrag::None;
         let rgb = self.color_panel.pending_for(target);
         self.color_panel.load(rgb);
-        self.win_mgr.show_color(self.work_rect);
+        if self.win_mgr.show_color(self.work_rect).is_none() {
+            let text = "窗口出生位置已触底，不能继续添加".to_owned();
+            self.status_msg = text.clone();
+            self.tooltip = Some((
+                egui::Rect::from_min_size(self.work_rect.center(), egui::vec2(LINE_W, LINE_W)),
+                text,
+            ));
+            return;
+        }
         self.status_msg = format!("颜色面板：正在编辑{}色", target.name());
     }
 
@@ -449,56 +434,6 @@ impl StockApp {
             sv.min.x + col_of_s(cp.s) as f32 * PITCH + SV_BLOCK / 2.0,
             sv.min.y + row_of_v(cp.v) as f32 * PITCH + SV_BLOCK / 2.0,
         );
-
-        let hue_band = cp_band(panel, CP_ROW_HUE, CP_HUE_ROWS);
-        let hue = hue_band.shrink(LINE_W);
-        for i in 0..HUE_BARS {
-            let bar = egui::Rect::from_min_size(
-                egui::pos2(hue.min.x + i as f32 * LINE_W, hue.min.y),
-                egui::vec2(LINE_W, hue.height()),
-            );
-            painter.rect_filled(
-                bar,
-                egui::CornerRadius::ZERO,
-                rgb32(hsv_to_rgb(hue_of_bar(i), 255, 255)),
-            );
-        }
-        let hue_resp = ui.allocate_rect(hue, egui::Sense::click_and_drag());
-        if hue_resp.hovered() || hue_resp.is_pointer_button_down_on() {
-            self.pointer.hint = CursorKind::Slider;
-        }
-        if hue_resp.hovered() && cp.drag == ColorDrag::None {
-            let notches = color_wheel_notches(ui);
-            if notches != 0 {
-                let hue_value = (cp.h as i32 + notches).clamp(0, 360) as u16;
-                cp.set_hsv(hue_value, cp.s, cp.v);
-            }
-        }
-        if hue_resp.is_pointer_button_down_on() && cp.drag == ColorDrag::None {
-            cp.drag = ColorDrag::Hue;
-
-            if let Some(p) = pointer {
-                let handle_x = hue.min.x + hue_handle_left(cp.h);
-                cp.drag_off.x = if p.x >= handle_x && p.x < handle_x + CP_HANDLE_W {
-                    p.x - handle_x
-                } else {
-                    CP_HANDLE_W / 2.0
-                };
-            }
-        }
-        if cp.drag == ColorDrag::Hue {
-            if let Some(p) = pointer {
-                let x = (p.x - hue.min.x - cp.drag_off.x).clamp(0.0, HUE_TRAVEL);
-                cp.set_hsv(hue_at_x(x), cp.s, cp.v);
-            }
-        }
-
-        let hue_handle = egui::Rect::from_min_size(
-            egui::pos2(hue_band.min.x + hue_handle_left(cp.h), hue_band.min.y),
-            egui::vec2(CP_HANDLE_W, hue_band.height()),
-        );
-        painter.rect_filled(hue_handle, egui::CornerRadius::ZERO, theme().text_white);
-        border_hard(&painter, hue_handle, theme().ctrl_border);
 
         let (mut cr, mut cg, mut cb) = cp.rgb;
         if let Some(x) = self.color_slider(
@@ -625,7 +560,6 @@ impl StockApp {
 
         for row in [
             CP_ROW_SV,
-            CP_ROW_HUE,
             CP_ROW_RGB,
             CP_ROW_RGB + CP_SLIDER_ROWS,
             CP_ROW_RGB + 2 * CP_SLIDER_ROWS,

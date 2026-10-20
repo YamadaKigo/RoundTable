@@ -222,9 +222,29 @@ impl StockApp {
             self.status_msg = format!("图表窗最多 {MAX_CHART_WINS} 块");
             return;
         }
+        let size = egui::vec2(
+            NEW_WIN_W.min(self.work_rect.width()),
+            NEW_WIN_H.min(self.work_rect.height()),
+        );
+        if !self.win_mgr.can_spawn_window(self.work_rect, size) {
+            self.report_spawn_blocked();
+            return;
+        }
         let pane = self.new_chart_pane();
-        self.win_mgr.add_chart(self.work_rect, pane);
+        if self.win_mgr.add_chart(self.work_rect, pane).is_none() {
+            self.report_spawn_blocked();
+            return;
+        }
         self.status_msg = format!("图表窗：已新增（共 {} 块）", self.win_mgr.chart_count());
+    }
+
+    fn report_spawn_blocked(&mut self) {
+        let text = "窗口出生位置已触底，不能继续添加".to_owned();
+        self.status_msg = text.clone();
+        self.tooltip = Some((
+            egui::Rect::from_min_size(self.work_rect.center(), egui::vec2(LINE_W, LINE_W)),
+            text,
+        ));
     }
 
     pub(crate) fn new_chart_pane(&mut self) -> usize {
@@ -253,7 +273,18 @@ impl StockApp {
     }
 
     pub(crate) fn open_console_window(&mut self) {
-        self.win_mgr.show_console(self.work_rect);
+        let size = egui::vec2(
+            CONSOLE_W.min(self.work_rect.width()),
+            CONSOLE_H.min(self.work_rect.height()),
+        );
+        if !self.win_mgr.console_open() && !self.win_mgr.can_spawn_window(self.work_rect, size) {
+            self.report_spawn_blocked();
+            return;
+        }
+        if self.win_mgr.show_console(self.work_rect).is_none() {
+            self.report_spawn_blocked();
+            return;
+        }
         self.console.log("控制台窗口已打开。");
         self.status_msg = "调试控制台：已打开".to_owned();
     }

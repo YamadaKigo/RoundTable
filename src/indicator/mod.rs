@@ -278,7 +278,6 @@ pub enum DrawCmd {
     StatusField {
         label: String,
         value: String,
-        tmpl: String,
         color: u32,
     },
 }
@@ -578,11 +577,10 @@ pub fn crosshair(
     out
 }
 
-pub fn status_field(label: &str, value: String, tmpl: &str, color: u32) -> DrawCmd {
+pub fn status_field(label: &str, value: String, _tmpl: &str, color: u32) -> DrawCmd {
     DrawCmd::StatusField {
         label: label.to_owned(),
         value,
-        tmpl: tmpl.to_owned(),
         color,
     }
 }

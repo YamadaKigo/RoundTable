@@ -25,6 +25,7 @@
       "text": "#000000",
       "text_white": "#FFFFFF",
       "syn_comment": "#009900",
+      "syn_keyword": "#0000FF",
       "tooltip_bg": "#DDDDDD"
     },
     "chart": {

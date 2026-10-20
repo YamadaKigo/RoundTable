@@ -567,7 +567,14 @@ impl TextEditor {
             app.pointer.text_hover = true;
             app.pointer.hint = CursorKind::Text;
         }
-        if resp.clicked() || resp.drag_started() {
+        let primary_clicked_in_body = ui.input(|i| {
+            i.pointer.primary_clicked()
+                && i.pointer
+                    .interact_pos()
+                    .or_else(|| i.pointer.latest_pos())
+                    .is_some_and(|p| body.contains(p))
+        });
+        if primary_clicked_in_body || resp.drag_started() {
             self.focused = true;
 
             ui.memory_mut(|m| m.request_focus(id));
@@ -590,13 +597,25 @@ impl TextEditor {
         }
         let focused = self.focused;
 
-        let (pointer_pos, press_pos) =
-            ui.input(|i| (i.pointer.interact_pos(), i.pointer.press_origin()));
+        let (pointer_pos, press_pos, primary_clicked) = ui.input(|i| {
+            let pointer_pos = i.pointer.interact_pos().or_else(|| i.pointer.latest_pos());
+            (
+                pointer_pos,
+                i.pointer.press_origin(),
+                i.pointer.primary_clicked() && pointer_pos.is_some_and(|p| body.contains(p)),
+            )
+        });
+        let clamp_to_text = |p: egui::Pos2| {
+            egui::pos2(
+                p.x.clamp(text_area.min.x, text_area.max.x - LINE_W),
+                p.y.clamp(text_area.min.y, text_area.max.y - LINE_W),
+            )
+        };
         if let Some(p) = pointer_pos {
             if resp.secondary_clicked() {
                 self.focused = true;
                 ui.memory_mut(|m| m.request_focus(id));
-                let pos = self.pos_at(p, code_x, body_top);
+                let pos = self.pos_at(clamp_to_text(p), code_x, body_top);
                 if !self.buf.selection_contains(pos) {
                     self.buf.set_cursor(pos, false);
                 }
@@ -604,16 +623,18 @@ impl TextEditor {
             } else if resp.drag_started() {
                 self.selecting = true;
 
-                let start = self.pos_at(press_pos.unwrap_or(p), code_x, body_top);
+                let start = self.pos_at(clamp_to_text(press_pos.unwrap_or(p)), code_x, body_top);
                 self.buf.set_cursor(start, false);
                 self.buf.sel_anchor = Some(start);
-                let now = self.pos_at(p, code_x, body_top);
+                let now = self.pos_at(clamp_to_text(p), code_x, body_top);
                 self.buf.set_cursor(now, true);
-            } else if self.selecting && resp.dragged() {
-                let pos = self.pos_at(p, code_x, body_top);
+            } else if self.selecting && ui.input(|i| i.pointer.primary_down()) {
+                let at = clamp_to_text(p);
+                app.pointer.pinned = Some(at);
+                let pos = self.pos_at(at, code_x, body_top);
                 self.buf.set_cursor(pos, true);
-            } else if resp.clicked() {
-                let pos = self.pos_at(p, code_x, body_top);
+            } else if primary_clicked {
+                let pos = self.pos_at(clamp_to_text(p), code_x, body_top);
                 self.buf.set_cursor(pos, false);
             }
         }
@@ -780,6 +801,14 @@ impl TextEditor {
             &mut self.scroll,
             &mut self.scroll_grab,
         );
+
+        if self.selecting
+            && ui.input(|i| i.pointer.primary_down())
+            && let Some(p) =
+                ui.input(|i| i.pointer.interact_pos().or_else(|| i.pointer.latest_pos()))
+        {
+            app.pointer.pinned = Some(clamp_to_text(p));
+        }
     }
 }
 
@@ -787,8 +816,97 @@ impl TextEditor {
 pub(crate) enum SynKind {
     Plain,
 
+    Keyword,
+
     Comment,
 }
+
+pub(crate) const SYN_KEYWORDS: &[&str] = &[
+    "ABS",
+    "AND",
+    "AUTO",
+    "AXIS",
+    "AXIS_AUTO",
+    "AXIS_DYNAMIC",
+    "AXIS_FIXED",
+    "AXIS_HIDE",
+    "AXIS_SHOW",
+    "AXIS_ZERO",
+    "BIAS1",
+    "BIAS2",
+    "BIAS3",
+    "BOLL_DOWN",
+    "BOLL_MID",
+    "BOLL_UP",
+    "CANDLE",
+    "CCI",
+    "CLOSE",
+    "COLOR",
+    "CROSS",
+    "D",
+    "DEA",
+    "DIF",
+    "DOWN",
+    "EMA",
+    "EMA1",
+    "EMA2",
+    "EMA3",
+    "EMA4",
+    "EMA5",
+    "EMA6",
+    "FALSE",
+    "HHV",
+    "HIDE_AXIS",
+    "HIDE_STATUS",
+    "HIDE_TIME",
+    "HIST",
+    "HLINE",
+    "IF",
+    "J",
+    "K",
+    "KDJ",
+    "LINE",
+    "LLV",
+    "MA",
+    "MA1",
+    "MA2",
+    "MA3",
+    "MA4",
+    "MA5",
+    "MA6",
+    "MAX",
+    "MIN",
+    "NOT",
+    "OBV",
+    "OHLC",
+    "OR",
+    "PAGODA",
+    "REF",
+    "RGB",
+    "RSI",
+    "RSI1",
+    "RSI2",
+    "RSI3",
+    "SHOW_AXIS",
+    "SHOW_STATUS",
+    "SHOW_TIME",
+    "STATUS",
+    "STATUS_FIELD",
+    "STATUS_HIDE",
+    "STATUS_SHOW",
+    "STATUS_VALUE",
+    "STD",
+    "SUM",
+    "SYSTEM_COLOR",
+    "TEXT",
+    "TIME",
+    "TIME_HIDE",
+    "TIME_SHOW",
+    "TRUE",
+    "UP",
+    "VOL",
+    "ZERO",
+];
 
 fn push_run(runs: &mut Vec<(String, SynKind)>, text: String, kind: SynKind) {
     if text.is_empty() {
@@ -819,6 +937,40 @@ pub(crate) fn code_runs(line: &str) -> Vec<(String, SynKind)> {
             push_run(&mut runs, chars[i..].iter().collect(), SynKind::Comment);
             return runs;
         }
+        if !in_string && ch == '#' {
+            let color_end = i + 7;
+            let color = color_end <= n
+                && chars[i + 1..color_end]
+                    .iter()
+                    .all(|digit| digit.is_ascii_hexdigit())
+                && chars
+                    .get(color_end)
+                    .is_none_or(|next| !next.is_ascii_alphanumeric() && *next != '_');
+            if color {
+                code.extend(chars[i..color_end].iter());
+                i = color_end;
+                continue;
+            }
+            push_run(&mut runs, std::mem::take(&mut code), SynKind::Plain);
+            push_run(&mut runs, chars[i..].iter().collect(), SynKind::Comment);
+            return runs;
+        }
+        if !in_string && (ch.is_ascii_alphabetic() || ch == '_') {
+            let start = i;
+            i += 1;
+            while i < n && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let ident: String = chars[start..i].iter().collect();
+            let kind = if SYN_KEYWORDS.contains(&ident.as_str()) {
+                SynKind::Keyword
+            } else {
+                SynKind::Plain
+            };
+            push_run(&mut runs, std::mem::take(&mut code), SynKind::Plain);
+            push_run(&mut runs, ident, kind);
+            continue;
+        }
         code.push(ch);
         if in_string {
             if escaped {
@@ -840,6 +992,7 @@ pub(crate) fn code_runs(line: &str) -> Vec<(String, SynKind)> {
 pub(crate) fn syn_color(kind: SynKind) -> egui::Color32 {
     match kind {
         SynKind::Plain => theme().text,
+        SynKind::Keyword => theme().syn_keyword,
         SynKind::Comment => theme().syn_comment,
     }
 }

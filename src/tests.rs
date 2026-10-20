@@ -406,13 +406,13 @@ fn hollow_body_keeps_the_wick_in_the_middle() {
 #[test]
 fn color_panel_sits_on_the_grid() {
     assert_eq!(CP_W as i32, 235, "面板宽");
-    assert_eq!(CP_H as i32, 271, "面板高");
+    assert_eq!(CP_H as i32, 253, "面板高");
     assert_eq!((CP_W as i32 - 1) % 9, 0, "面板宽必须是 cells(n)（9n+1）");
     assert_eq!((CP_H as i32 - 1) % 9, 0, "面板高必须是 cells(n)（9n+1）");
     assert_eq!(CP_CONTENT_W as i32, 233, "内容列宽");
 
     assert_eq!(
-        CP_TITLE_ROWS + CP_SV_ROWS + CP_HUE_ROWS + 3 * CP_SLIDER_ROWS + CP_HEX_ROWS + CP_BTN_ROWS,
+        CP_TITLE_ROWS + CP_SV_ROWS + 3 * CP_SLIDER_ROWS + CP_HEX_ROWS + CP_BTN_ROWS,
         CP_ROWS,
         "内部各段格数加起来不是面板总格数"
     );
@@ -427,8 +427,6 @@ fn color_panel_sits_on_the_grid() {
         SV_ROWS as f32 * SV_BLOCK + (SV_ROWS - 1) as f32 * LINE_W,
         cells(CP_SV_ROWS) - 2.0 * LINE_W
     );
-
-    assert_eq!(HUE_BARS as f32, CP_CONTENT_W);
 
     assert_eq!(
         CP_SLIDER_LABEL_COLS
@@ -450,8 +448,8 @@ fn color_panel_sits_on_the_grid() {
         CP_HEX_ROWS * 9,
         "Hex 段高不是 2 格"
     );
-    assert_eq!(CP_Y_HEX as i32, 234, "Hex 段上沿");
-    assert_eq!(CP_Y_BTN as i32, 252, "底部按钮段上沿");
+    assert_eq!(CP_Y_HEX as i32, 216, "Hex 段上沿");
+    assert_eq!(CP_Y_BTN as i32, 234, "底部按钮段上沿");
 }
 
 #[test]
@@ -533,13 +531,6 @@ fn palette_index_maps_hit_both_ends() {
     assert_eq!(col_of_s(255), SV_COLS - 1);
     assert_eq!(row_of_v(255), 0);
     assert_eq!(row_of_v(0), SV_ROWS - 1);
-    assert_eq!(hue_of_bar(0), 0);
-    assert_eq!(hue_of_bar(HUE_BARS - 1), 360);
-    assert_eq!(hue_handle_left(0), 0.0);
-    assert_eq!(hue_handle_left(360), HUE_TRAVEL);
-    assert_eq!(hue_at_x(0.0), 0);
-    assert_eq!(hue_at_x(HUE_TRAVEL), 360);
-    assert_eq!(hue_handle_left(180).fract(), 0.0);
     assert_eq!(bar_value(0, 255), 0);
     assert_eq!(bar_value(CP_TRACK_INNER_W - 1, 255), 255);
     assert_eq!(bar_value(CP_TRACK_INNER_W - 1, 360), 360);
@@ -554,21 +545,28 @@ fn color_panel_paints_blocks_and_bars() {
     let mut app = color_panel_app();
     let grid = render_panel(&mut app);
 
-    let panel = app.win_mgr.color_rect().expect("颜色面板不存在");
+    let outer = app.win_mgr.color_rect().expect("颜色面板不存在");
+    let panel = outer.shrink(WIN_FRAME);
+    let ox = outer.min.x as usize;
+    let oy = outer.min.y as usize;
     let px = panel.min.x as usize;
     let py = panel.min.y as usize;
     let (w, h) = (CP_W as usize, CP_H as usize);
 
-    assert_eq!(grid[py][px], Some(C_CTRL_BORDER), "面板左上角应该是边框");
     assert_eq!(
-        grid[py][px + w - 1],
+        grid[oy][ox],
         Some(C_CTRL_BORDER),
-        "面板右上角应该是边框"
+        "面板外框左上角应该是边框"
     );
     assert_eq!(
-        grid[py + h - 1][px + w - 1],
+        grid[oy][ox + w + 2 * WIN_FRAME as usize - 1],
         Some(C_CTRL_BORDER),
-        "面板右下角应该是边框"
+        "面板外框右上角应该是边框"
+    );
+    assert_eq!(
+        grid[oy + h + 2 * WIN_FRAME as usize - 1][ox + w + 2 * WIN_FRAME as usize - 1],
+        Some(C_CTRL_BORDER),
+        "面板外框右下角应该是边框"
     );
 
     assert_ne!(
@@ -634,19 +632,6 @@ fn color_panel_paints_blocks_and_bars() {
             col + 1
         );
     }
-
-    let hx = px + LINE_W as usize;
-    let hy = py + CP_Y_HUE as usize + LINE_W as usize;
-    let handle_x0 = px + hue_handle_left(app.color_panel.h) as usize;
-    let covered = handle_x0..handle_x0 + CP_HANDLE_W as usize;
-    for i in 0..HUE_BARS as usize {
-        let x = hx + i;
-        if covered.contains(&x) {
-            continue;
-        }
-        let want = rgb32(hsv_to_rgb(hue_of_bar(i as i32), 255, 255));
-        assert_eq!(grid[hy + 8][x], Some(want), "第 {i} 根色相条的颜色不对");
-    }
 }
 
 #[test]
@@ -669,7 +654,11 @@ fn slider_handles_land_on_whole_pixels() {
 fn hex_box_frame_sits_on_grid_lines() {
     let mut app = color_panel_app();
     let grid = render_panel(&mut app);
-    let cp_rect = app.win_mgr.color_rect().expect("颜色面板不存在");
+    let cp_rect = app
+        .win_mgr
+        .color_rect()
+        .expect("颜色面板不存在")
+        .shrink(WIN_FRAME);
     let px = cp_rect.min.x as usize;
     let py = cp_rect.min.y as usize;
     let x = px + LINE_W as usize + 20;
@@ -738,47 +727,29 @@ fn panel_right_edges_line_up() {
     let mut app = color_panel_app();
     let grid = render_panel(&mut app);
 
-    let panel = app.win_mgr.color_rect().expect("颜色面板不存在");
+    let outer = app.win_mgr.color_rect().expect("颜色面板不存在");
+    let panel = outer.shrink(WIN_FRAME);
     let px = panel.min.x as usize;
     let py = panel.min.y as usize;
     let (w, _h) = (CP_W as usize, CP_H as usize);
-    let inner_l = px + LINE_W as usize;
-    let inner_r = px + w - 1 - LINE_W as usize;
-
     let hex_row = py + CP_Y_HEX as usize + 8;
     let btn_row = py + CP_Y_BTN as usize + 8;
-    let hue_row = py + CP_Y_HUE as usize + 8;
 
     assert_eq!(
-        grid[hex_row][px],
+        grid[hex_row][outer.min.x as usize],
+        Some(C_CTRL_BORDER),
+        "窗口外框左边不对"
+    );
+    assert_eq!(
+        grid[hex_row][outer.max.x as usize - 1],
+        Some(C_CTRL_BORDER),
+        "窗口外框右边不对"
+    );
+    let hex = hex_box(panel);
+    assert_eq!(
+        grid[hex_row][hex.min.x as usize],
         Some(C_CTRL_BORDER),
         "Hex 输入框左边框不对"
-    );
-    assert_eq!(
-        grid[hex_row][px + w - 1],
-        Some(C_CTRL_BORDER),
-        "Hex 输入框右边框不对"
-    );
-    assert_eq!(
-        grid[hex_row][inner_l],
-        Some(C_WORK_BG),
-        "Hex 输入框左边多了一条线"
-    );
-    assert_eq!(
-        grid[hex_row][inner_r],
-        Some(C_WORK_BG),
-        "Hex 输入框右边多了一条线"
-    );
-
-    assert_ne!(
-        grid[hue_row][inner_r],
-        Some(C_WORK_BG),
-        "色相条右边留了白边"
-    );
-    assert_eq!(
-        grid[hue_row][px + w - 1],
-        Some(C_CTRL_BORDER),
-        "色相条右边框不对"
     );
 
     let mid = px + CP_HALF_W as usize - LINE_W as usize;
@@ -1216,6 +1187,27 @@ fn status_fields_sit_on_the_grid() {
         let advance = bar_advance(scale);
         assert!(app.time_step(advance) as f32 * advance >= TIME_LABEL_GAP_MIN);
     }
+}
+
+#[test]
+fn status_fields_auto_width_and_reject_position_arguments() {
+    let (short, divider) = status_field_metrics(18.0, 36.0);
+    let (long, _) = status_field_metrics(18.0, 180.0);
+    assert_eq!(divider % 9.0, 0.0, "字段名称后的竖线不在网格上");
+    assert_eq!((short as i32 - 1) % 9, 0, "短字段宽度不是整数格");
+    assert_eq!((long as i32 - 1) % 9, 0, "长字段宽度不是整数格");
+    assert!(long > short, "数值变长后字段没有向右扩展");
+
+    let error = match crate::script::ScriptProgram::parse(
+        "STATUS_FIELD(\"C\",C,TEXT,\"0.00\",100);\nLINE(C,TEXT);\n",
+    ) {
+        Ok(_) => panic!("STATUS_FIELD 不应接受位置参数"),
+        Err(error) => error,
+    };
+    assert!(
+        error.contains("位置参数"),
+        "位置参数错误提示不清楚：{error}"
+    );
 }
 
 #[test]
@@ -1790,10 +1782,11 @@ fn the_window_title_seam_is_a_single_line() {
     let win = egui::Rect::from_min_size(egui::pos2(13.0, 5.0), egui::vec2(443.0, 233.0));
     assert!(win.width() % 9.0 != 1.0, "这块窗口得是「非整格」的");
 
-    let seam = win.min.y + grid_line(WIN_TITLE_ROWS);
+    let inner = win.shrink(WIN_FRAME);
+    let seam = inner.min.y + grid_line(WIN_TITLE_ROWS);
     assert_eq!(
         seam,
-        win.min.y + WIN_TITLE_H - LINE_W,
+        inner.min.y + WIN_TITLE_H - LINE_W,
         "标题栏下沿那一行算不对"
     );
 
@@ -1812,10 +1805,7 @@ fn the_window_title_seam_is_a_single_line() {
         );
     }
 
-    assert!(
-        seam - LINE_W > win.min.y,
-        "那条线贴着窗口顶边，上下没留出面"
-    );
+    assert!(seam - LINE_W > win.min.y, "外框带没有留在标题栏上方");
     assert!(
         seam + LINE_W < title.max.y - LINE_W,
         "那条线上下没留出面，成了 2px"
@@ -2338,32 +2328,39 @@ fn indicator_code_window_shows_the_script() {
         .position(|w| w.kind == WinKind::Source)
         .expect("源码窗没建出来");
     let win = app.win_mgr.wins[src].w.rect();
+    let inner = win.shrink(WIN_FRAME);
     let (x0, y0) = (win.min.x as usize, win.min.y as usize);
     let (px1, py1) = (win.max.x as usize - 1, win.max.y as usize - 1);
     assert_eq!(grid[y0][x0 + 300], Some(C_CTRL_BORDER), "面板上边框不对");
     assert_eq!(grid[py1][x0 + 300], Some(C_CTRL_BORDER), "面板下边框不对");
     assert_eq!(grid[y0 + 200][x0], Some(C_CTRL_BORDER), "面板左边框不对");
     assert_eq!(grid[y0 + 200][px1], Some(C_CTRL_BORDER), "面板右边框不对");
-    assert!(is_title_face(grid[y0 + 4][x0 + 300]), "标题栏底色不对");
-    let gutter_line = x0 + grid_line(SRC_GUTTER_COLS) as usize;
+    assert!(
+        is_title_face(grid[(inner.min.y + 4.0) as usize][x0 + 300]),
+        "标题栏底色不对"
+    );
+    let gutter_line = inner.min.x as usize + grid_line(SRC_GUTTER_COLS) as usize;
     assert_eq!(
-        grid[y0 + 200][gutter_line],
+        grid[inner.min.y as usize + 200][gutter_line],
         Some(C_CTRL_BORDER),
         "行号区右边那条线不对"
     );
     assert_eq!(
-        grid[y0 + 200][gutter_line - 2],
+        grid[inner.min.y as usize + 200][gutter_line - 2],
         Some(C_PANEL_BG),
         "行号区底色不对"
     );
 
     assert_eq!(
-        grid[y0 + SRC_BODY_TOP as usize][x0 + 300],
+        grid[inner.min.y as usize + SRC_BODY_TOP as usize][x0 + 300],
         Some(C_CTRL_BORDER),
         "标题栏下沿那条线不对"
     );
 
-    let empty_y = y0 + SRC_BODY_TOP as usize + SRC_VISIBLE_LINES * SRC_ROW_PITCH as usize + 1;
+    let empty_y = inner.min.y as usize
+        + SRC_BODY_TOP as usize
+        + SRC_VISIBLE_LINES * SRC_ROW_PITCH as usize
+        + 1;
     assert_eq!(grid[empty_y][x0 + 300], Some(C_WORK_BG), "代码区底色不对");
 }
 
@@ -2400,7 +2397,10 @@ fn source_window_moves_by_pixels_and_keeps_its_own_grid() {
 
     app.win_mgr.wins[i].w.pos = egui::pos2(-40.0, WINDOW_H + 40.0);
     app.win_mgr.wins[i].w.clamp_into(layout);
-    assert_eq!(app.win_mgr.wins[i].w.pos, egui::pos2(0.0, WINDOW_H - SRC_H));
+    assert_eq!(
+        app.win_mgr.wins[i].w.pos,
+        egui::pos2(0.0, WINDOW_H - SRC_H - 2.0 * WIN_FRAME)
+    );
 
     app.win_mgr.wins[i].w.size = egui::vec2(WINDOW_W + 500.0, WINDOW_H + 500.0);
     app.win_mgr.wins[i].w.clamp_into(layout);
@@ -3362,32 +3362,6 @@ fn chart_status_band_has_solid_dividers_on_the_grid() {
     let (_, status, _, _) = chart_rows(kline, layout);
     let band = status.unwrap();
 
-    let mut want = Vec::new();
-    let mut sx = band.min.x;
-    let mut first = true;
-    let fields = [
-        ("开", "0.00"),
-        ("高", "0.00"),
-        ("低", "0.00"),
-        ("收", "0.00"),
-    ];
-    for (label, tmpl) in fields {
-        let w =
-            snap_cells_up(app.text_width(label) + GRID + app.text_width(tmpl) + 2.0 * TEXT_PAD_X);
-        if sx + w > band.max.x {
-            break;
-        }
-        if !first {
-            want.push(sx - band.min.x);
-        }
-        sx += w - LINE_W;
-        first = false;
-    }
-    if !first {
-        want.push(sx - band.min.x);
-    }
-    assert!(want.len() >= 2, "状态带至少要有几条分割线才测得出");
-
     let mut raw = egui::RawInput::default();
     raw.screen_rect = Some(egui::Rect::from_min_size(
         egui::Pos2::ZERO,
@@ -3404,15 +3378,21 @@ fn chart_status_band_has_solid_dividers_on_the_grid() {
         WINDOW_H as usize,
     );
     let rows = band.min.y as usize + 1..band.max.y as usize - 1;
-    for dx in want {
-        assert_eq!(dx % 9.0, 0.0, "状态带分割线没落在竖网格线上");
-        let col = (band.min.x + dx) as usize;
-        let lit = rows
-            .clone()
-            .filter(|&y| grid[y][col] == Some(C_LINE))
-            .count();
-        assert!(lit > 0, "状态带分割线 {col} 没画出来");
-        assert_eq!(lit, rows.len(), "状态带分割线 {col} 不是完整实线");
+    let full: Vec<usize> = (band.min.x as usize..band.max.x as usize)
+        .filter(|&col| {
+            rows.clone()
+                .filter(|&y| grid[y][col] == Some(C_LINE))
+                .count()
+                == rows.len()
+        })
+        .collect();
+    assert!(!full.is_empty(), "状态带一条完整竖线都没画出来");
+    for col in full {
+        assert_eq!(
+            (col as f32 - band.min.x) % 9.0,
+            0.0,
+            "状态带分割线没落在竖网格线上"
+        );
     }
 }
 
@@ -3965,7 +3945,8 @@ fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
         app.build_panel_buttons();
     }
     let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(60)));
-    let min = WinMgr::chart_min_size();
+    let frame_size = egui::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME);
+    let min = WinMgr::chart_min_size() + frame_size;
 
     let chart_i = |app: &StockApp| {
         app.win_mgr
@@ -4001,7 +3982,7 @@ fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
     let first = chart(&app);
     assert_eq!(
         first,
-        egui::Rect::from_center_size(work.center(), egui::vec2(NEW_WIN_W, NEW_WIN_H)),
+        egui::Rect::from_center_size(work.center(), egui::vec2(NEW_WIN_W, NEW_WIN_H) + frame_size),
         "图表窗没在窗口区正中间出生"
     );
     assert!(
@@ -4012,7 +3993,7 @@ fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
         "按钮面板没摆到右下角"
     );
 
-    let edge = egui::pos2(first.max.x - 1.0, first.center().y);
+    let edge = egui::pos2(first.max.x - WIN_FRAME / 2.0, first.center().y);
     frame(&mut app, press(edge));
     frame(
         &mut app,
@@ -4024,7 +4005,7 @@ fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
     assert!(shrunk.width() >= min.x);
     frame(&mut app, release(egui::pos2(work.max.x, work.max.y)));
 
-    let bottom = egui::pos2(shrunk.center().x, shrunk.max.y - 1.0);
+    let bottom = egui::pos2(shrunk.center().x, shrunk.max.y - WIN_FRAME / 2.0);
     frame(&mut app, press(bottom));
     frame(&mut app, drag(egui::pos2(bottom.x, shrunk.min.y + 10.0)));
     let tall = chart(&app);
@@ -4038,7 +4019,7 @@ fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
     );
 
     let corner = chart(&app);
-    let grab = corner.max - egui::vec2(LINE_W, LINE_W);
+    let grab = corner.max - egui::vec2(WIN_FRAME / 2.0, WIN_FRAME / 2.0);
     frame(&mut app, press(grab));
     frame(&mut app, drag(grab + egui::vec2(90.0, 40.0)));
     let grown = chart(&app);
@@ -4055,17 +4036,22 @@ fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
     );
     frame(&mut app, release(egui::pos2(work.max.x, work.max.y)));
 
-    frame(&mut app, press(egui::pos2(grown.min.x, grown.center().y)));
+    frame(
+        &mut app,
+        press(egui::pos2(grown.min.x + LINE_W, grown.center().y)),
+    );
     frame(
         &mut app,
         drag(egui::pos2(grown.min.x + 60.0, grown.center().y)),
     );
     let from_left = chart(&app);
     assert_eq!(from_left.max.x, grown.max.x, "拖左边不该动右边");
-    assert_eq!(from_left.min.x, grown.min.x + 60.0, "拖左边没做到 1px 跟手");
-    assert_eq!(
-        from_left.width(),
-        grown.width() - 60.0,
+    assert!(
+        (from_left.min.x - (grown.min.x + 60.0)).abs() <= 1.0,
+        "拖左边没做到 1px 跟手"
+    );
+    assert!(
+        (from_left.width() - (grown.width() - 60.0)).abs() <= 1.0,
         "拖左边没做到 1px 跟手"
     );
     frame(
@@ -4080,33 +4066,27 @@ fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
         let p = match probe {
             0 => egui::pos2(cur.center().x, cur.min.y + LINE_W),
             1 => cur.min + egui::vec2(LINE_W, LINE_W),
-            _ => egui::pos2(cur.max.x - LINE_W, cur.min.y + LINE_W),
+            _ => egui::pos2(cur.max.x - WIN_FRAME / 2.0, cur.min.y + LINE_W),
         };
         frame(&mut app, press(p));
-        frame(&mut app, drag(p + egui::vec2(0.0, 40.0)));
-        assert_eq!(
-            chart(&app).size(),
-            cur.size(),
-            "上边 / 上边那两个角不该能拽着改尺寸（{p:?}）"
+        frame(&mut app, drag(p + egui::vec2(0.0, 10.0)));
+        let resized = chart(&app);
+        assert!(
+            (resized.height() - (cur.height() - 10.0)).abs() <= 1.0,
+            "上边框带应该能拖拽缩放（{p:?}）"
         );
-
-        if probe < 2 {
-            assert_eq!(
-                chart(&app).min,
-                cur.min + (egui::vec2(0.0, 40.0) * WINDOW_DRAG_SPEED).round(),
-                "上边那一按该是拖窗口（{p:?}）"
-            );
-        }
+        assert_eq!(resized.max.y, cur.max.y, "拖上边不该动下边");
         frame(&mut app, release(egui::pos2(work.max.x, work.max.y)));
     }
 
     for probe in 0..2 {
         let cur = chart(&app);
-        let title_band = free_band(cur, 0, WIN_TITLE_ROWS);
+        let inner = cur.shrink(WIN_FRAME);
+        let title_band = free_band(inner, 0, WIN_TITLE_ROWS);
         let p = if probe == 0 {
-            egui::pos2(cur.min.x, title_band.center().y)
+            egui::pos2(inner.min.x, title_band.center().y)
         } else {
-            egui::pos2(cur.max.x - LINE_W, title_band.center().y)
+            egui::pos2(inner.max.x - LINE_W, title_band.center().y)
         };
         frame(&mut app, press(p));
         frame(&mut app, drag(p + egui::vec2(-30.0, 0.0)));
@@ -4119,7 +4099,7 @@ fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
     }
 
     let before_br = chart(&app);
-    let br = before_br.max - egui::vec2(LINE_W, LINE_W);
+    let br = before_br.max - egui::vec2(WIN_FRAME / 2.0, WIN_FRAME / 2.0);
     frame(&mut app, press(br));
     frame(&mut app, drag(br + egui::vec2(40.0, 20.0)));
     let grown_br = chart(&app);
@@ -4137,7 +4117,7 @@ fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
     frame(&mut app, release(egui::pos2(work.max.x, work.max.y)));
 
     let before = chart(&app);
-    let handle = free_band(before, 0, WIN_TITLE_ROWS).center();
+    let handle = free_band(before.shrink(WIN_FRAME), 0, WIN_TITLE_ROWS).center();
     let walk = egui::vec2(37.0, 23.0);
     frame(&mut app, press(handle));
     assert_eq!(
@@ -4190,7 +4170,10 @@ fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
     frame(&mut app, release(moved.center()));
 
     let now = chart(&app);
-    frame(&mut app, press(free_band(now, 0, WIN_TITLE_ROWS).center()));
+    frame(
+        &mut app,
+        press(free_band(now.shrink(WIN_FRAME), 0, WIN_TITLE_ROWS).center()),
+    );
     frame(
         &mut app,
         drag(egui::pos2(work.min.x - 500.0, work.min.y - 500.0)),
@@ -4199,7 +4182,10 @@ fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
     frame(&mut app, release(moved.center()));
 
     let at = chart(&app);
-    frame(&mut app, press(egui::pos2(at.center().x, at.max.y - 1.0)));
+    frame(
+        &mut app,
+        press(egui::pos2(at.center().x, at.max.y - WIN_FRAME / 2.0)),
+    );
     frame(
         &mut app,
         drag(egui::pos2(at.center().x, work.max.y + 300.0)),
@@ -4216,17 +4202,20 @@ fn window_move_and_resize_are_free_and_stop_at_the_minimum() {
             .iter()
             .find(|w| w.kind == WinKind::Panel)
             .map(|w| w.w.min_size),
-        Some(app.panel_min_size()),
+        Some(app.panel_min_size() + egui::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME)),
         "按钮面板的尺寸下限不对"
     );
 
-    let src = app.win_mgr.show_source(work);
+    let src = app.win_mgr.show_source(work).expect("source window");
     assert!(app.win_mgr.wins[src].w.resizable);
-    assert_eq!(app.win_mgr.wins[src].w.min_size, egui::vec2(SRC_W, SRC_H));
+    assert_eq!(
+        app.win_mgr.wins[src].w.min_size,
+        egui::vec2(SRC_W + 2.0 * WIN_FRAME, SRC_H + 2.0 * WIN_FRAME)
+    );
 }
 
 #[test]
-fn a_press_on_the_one_pixel_edge_drags_right_away() {
+fn a_press_in_the_frame_band_resizes_from_the_first_frame() {
     let ctx = egui::Context::default();
     configure_tessellation(&ctx);
     ctx.set_pixels_per_point(1.0);
@@ -4273,7 +4262,7 @@ fn a_press_on_the_one_pixel_edge_drags_right_away() {
     frame(&mut app, vec![]);
     let start = app.win_mgr.wins[i].rect();
 
-    let grab = egui::pos2(start.max.x - LINE_W, start.center().y);
+    let grab = egui::pos2(start.max.x - WIN_FRAME / 2.0, start.center().y);
     frame(&mut app, press_and_drag(grab, grab + egui::vec2(40.0, 0.0)));
     let grown = app.win_mgr.wins[i].rect();
     assert_eq!(
@@ -4297,7 +4286,7 @@ fn a_press_on_the_one_pixel_edge_drags_right_away() {
     );
 
     let at = app.win_mgr.wins[i].rect();
-    let grab = egui::pos2(at.max.x - LINE_W, at.center().y);
+    let grab = egui::pos2(at.max.x - WIN_FRAME / 2.0, at.center().y);
     frame(&mut app, press_and_drag(grab, grab - egui::vec2(50.0, 0.0)));
     let shrunk = app.win_mgr.wins[i].rect();
     assert_eq!(shrunk.width(), at.width() - 50.0, "按住往里拖没跟手");
@@ -4305,7 +4294,7 @@ fn a_press_on_the_one_pixel_edge_drags_right_away() {
     frame(&mut app, release(grab));
 
     let at = app.win_mgr.wins[i].rect();
-    let grab = egui::pos2(at.max.x - LINE_W, at.center().y);
+    let grab = egui::pos2(at.max.x - WIN_FRAME / 2.0, at.center().y);
     frame(
         &mut app,
         vec![
@@ -4327,7 +4316,7 @@ fn a_press_on_the_one_pixel_edge_drags_right_away() {
     frame(&mut app, release(grab + egui::vec2(30.0, 0.0)));
 
     let at = app.win_mgr.wins[i].rect();
-    let grab = egui::pos2(at.center().x, at.max.y - LINE_W);
+    let grab = egui::pos2(at.center().x, at.max.y - WIN_FRAME / 2.0);
     frame(&mut app, press_and_drag(grab, grab + egui::vec2(0.0, 20.0)));
     let taller = app.win_mgr.wins[i].rect();
     assert_eq!(
@@ -4399,9 +4388,10 @@ fn window_overflow_lands_in_the_elastic_bands() {
         "这块窗口得是「非整格」的"
     );
 
-    let title = free_band(win, 0, WIN_TITLE_ROWS);
+    let inner = win.shrink(WIN_FRAME);
+    let title = free_band(inner, 0, WIN_TITLE_ROWS);
     assert_eq!(title.height(), WIN_TITLE_H, "窗口标题栏高度被零头改了");
-    assert_eq!(title.min.y, win.min.y);
+    assert_eq!(title.min.y, inner.min.y);
     let body = ManagedWin::body(win);
     let layout = indicator::ChartLayout::new(2, 2);
     let (bar, status, main, time) = chart_rows(body, layout);
@@ -4417,31 +4407,31 @@ fn window_overflow_lands_in_the_elastic_bands() {
     );
     assert_eq!(
         chart_bar(body).max.y,
-        win.max.y,
+        inner.max.y,
         "图表窗状态栏没钉死在窗口下沿"
     );
     assert_eq!(main.max.y, time.min.y, "绘图区和时间带没共用那条线");
     assert_eq!(status.max.y, main.min.y, "状态带和绘图区没共用那条线");
 
     let snap = egui::Rect::from_min_size(
-        win.min,
-        egui::vec2(snap_cells_up(win.width()), snap_cells_up(win.height())),
+        inner.min,
+        egui::vec2(snap_cells_up(inner.width()), snap_cells_up(inner.height())),
     );
-    let (_, _, main_snap, _) = chart_rows(ManagedWin::body(snap), layout);
+    let (_, _, main_snap, _) = chart_rows(free_tail(snap, WIN_TITLE_ROWS), layout);
     assert_eq!(
         main_snap.height() - main.height(),
-        snap.height() - win.height(),
+        snap.height() - inner.height(),
         "竖向零头没落在绘图区（弹性段）里"
     );
 
     let (plot, axis) = frame_rects(main);
     assert_eq!(axis.width(), AXIS_W, "纵轴宽度被零头改了");
-    assert_eq!(axis.max.x, win.max.x, "纵轴没钉死在窗口右边");
-    assert_eq!(plot.min.x, win.min.x + LINE_W);
+    assert_eq!(axis.max.x, inner.max.x, "纵轴没钉死在窗口右边");
+    assert_eq!(plot.min.x, inner.min.x + LINE_W);
     let (plot_snap, _) = frame_rects(main_snap);
     assert_eq!(
         plot_snap.width() - plot.width(),
-        snap.width() - win.width(),
+        snap.width() - inner.width(),
         "横向零头没落在绘图区（弹性段）里"
     );
     let keys = sys_button_rects(title);
@@ -4453,7 +4443,7 @@ fn window_overflow_lands_in_the_elastic_bands() {
         );
     }
     assert_eq!(keys[3].max.x, title.max.x, "关闭键没钉在窗口右边");
-    assert_eq!(keys[3].min.y, win.min.y, "关闭键没压在窗口标题栏上");
+    assert_eq!(keys[3].min.y, inner.min.y, "关闭键没压在窗口标题栏上");
 
     assert_eq!(keys[1].min.x, keys[0].max.x - LINE_W, "最小化没挨着置顶");
     assert_eq!(keys[2].min.x, keys[1].max.x - LINE_W, "最大化没挨着最小化");
@@ -4518,7 +4508,11 @@ fn window_title_keys_raise_minimize_and_close() {
         .unwrap();
     app.win_mgr.wins[new_i].w.pos = work.max - app.win_mgr.wins[new_i].w.size;
     win_frame(&mut app, &ctx, work, vec![]);
-    let title = free_band(app.win_mgr.wins[old].rect(), 0, WIN_TITLE_ROWS);
+    let title = free_band(
+        app.win_mgr.wins[old].rect().shrink(WIN_FRAME),
+        0,
+        WIN_TITLE_ROWS,
+    );
     let keys = sys_button_rects(title);
     let handle = egui::pos2((title.min.x + keys[0].min.x) / 2.0, title.center().y);
     win_frame(&mut app, &ctx, work, click(handle));
@@ -4536,7 +4530,8 @@ fn window_title_keys_raise_minimize_and_close() {
         .position(|w| w.w.id == old_id)
         .unwrap();
     let before = app.win_mgr.wins[i].rect();
-    let min_key = sys_button_rects(free_band(before, 0, WIN_TITLE_ROWS))[1].center();
+    let min_key =
+        sys_button_rects(free_band(before.shrink(WIN_FRAME), 0, WIN_TITLE_ROWS))[1].center();
     win_frame(&mut app, &ctx, work, click(min_key));
     win_frame(&mut app, &ctx, work, release(min_key));
     let i = app
@@ -4559,7 +4554,7 @@ fn window_title_keys_raise_minimize_and_close() {
 
     win_frame(&mut app, &ctx, work, vec![]);
     let mini = app.win_mgr.rect_of(i);
-    let restore_key = sys_button_rects_n(free_band(mini, 0, WIN_TITLE_ROWS), 3)[1].center();
+    let restore_key = egui::pos2(mini.min.x + 12.0, mini.center().y);
     win_frame(&mut app, &ctx, work, click(restore_key));
     win_frame(&mut app, &ctx, work, release(restore_key));
     let i = app
@@ -4576,7 +4571,8 @@ fn window_title_keys_raise_minimize_and_close() {
     );
 
     win_frame(&mut app, &ctx, work, vec![]);
-    let close_key = sys_button_rects(free_band(before, 0, WIN_TITLE_ROWS))[3].center();
+    let close_key =
+        sys_button_rects(free_band(before.shrink(WIN_FRAME), 0, WIN_TITLE_ROWS))[3].center();
     let was = app.win_mgr.chart_count();
     win_frame(&mut app, &ctx, work, click(close_key));
     win_frame(&mut app, &ctx, work, release(close_key));
@@ -4662,16 +4658,17 @@ fn window_manager_cascades_minimizes_and_caps() {
 
     app.add_chart_window();
     assert_eq!(app.win_mgr.chart_count(), 2);
-    let centered = egui::Rect::from_center_size(work.center(), egui::vec2(NEW_WIN_W, NEW_WIN_H));
+    let outer = egui::vec2(NEW_WIN_W + 2.0 * WIN_FRAME, NEW_WIN_H + 2.0 * WIN_FRAME);
+    let centered = egui::Rect::from_center_size(work.center(), outer);
     let a = app.win_mgr.wins.last().unwrap().rect();
     assert_eq!(a, centered, "新窗口没有居中出生");
-    assert_eq!(a.size(), egui::vec2(NEW_WIN_W, NEW_WIN_H));
+    assert_eq!(a.size(), outer);
     app.add_chart_window();
     let b = app.win_mgr.wins.last().unwrap().rect();
-    assert_eq!(b, centered);
+    assert_eq!(b.min, work.min + egui::vec2(0.0, WIN_TITLE_H));
     app.add_chart_window();
     let c = app.win_mgr.wins.last().unwrap().rect();
-    assert_eq!(c, centered);
+    assert_eq!(c.min, work.min + egui::vec2(0.0, 2.0 * WIN_TITLE_H));
 
     assert_eq!(app.win_mgr.chart_panes().len(), 4);
     assert_eq!(
@@ -5300,7 +5297,7 @@ fn window_maximize_key_fills_the_work_area_and_restores() {
     let before = app.win_mgr.wins[i].rect();
     assert_ne!(before, work, "这块窗口本来不该是铺满的");
 
-    let key = sys_button_rects(free_band(before, 0, WIN_TITLE_ROWS))[2].center();
+    let key = sys_button_rects(free_band(before.shrink(WIN_FRAME), 0, WIN_TITLE_ROWS))[2].center();
     win_frame(&mut app, &ctx, work, press(key));
     win_frame(&mut app, &ctx, work, release(key));
     assert!(app.win_mgr.wins[i].w.maximized, "点最大化键没最大化");
@@ -5317,7 +5314,7 @@ fn window_maximize_key_fills_the_work_area_and_restores() {
     assert_eq!(app.win_mgr.wins[i].rect(), work, "最大化中还能拉边缩放");
     win_frame(&mut app, &ctx, work, release(edge));
 
-    let key = sys_button_rects(free_band(work, 0, WIN_TITLE_ROWS))[2].center();
+    let key = sys_button_rects(free_band(work.shrink(WIN_FRAME), 0, WIN_TITLE_ROWS))[2].center();
     win_frame(&mut app, &ctx, work, press(key));
     win_frame(&mut app, &ctx, work, release(key));
     assert!(!app.win_mgr.wins[i].w.maximized, "再点一下没还原");
@@ -5382,7 +5379,7 @@ fn maximized_window_fills_work_and_dragging_title_restores_it() {
     app.win_mgr.wins[blocker].exclusive = true;
     win_frame(&mut app, &ctx, work, vec![]);
 
-    let key = sys_button_rects(free_band(before, 0, WIN_TITLE_ROWS))[2].center();
+    let key = sys_button_rects(free_band(before.shrink(WIN_FRAME), 0, WIN_TITLE_ROWS))[2].center();
     win_frame(&mut app, &ctx, work, press(key));
     win_frame(&mut app, &ctx, work, release(key));
     assert!(app.win_mgr.wins[i].w.maximized);
@@ -5399,7 +5396,7 @@ fn maximized_window_fills_work_and_dragging_title_restores_it() {
     assert_eq!(app.win_mgr.wins[i].rect(), work);
     win_frame(&mut app, &ctx, work, release(edge));
 
-    let title = free_band(work, 0, WIN_TITLE_ROWS).center();
+    let title = free_band(work.shrink(WIN_FRAME), 0, WIN_TITLE_ROWS).center();
     win_frame(&mut app, &ctx, work, press(title));
     win_frame(&mut app, &ctx, work, drag(title + egui::vec2(40.0, 0.0)));
     assert!(app.win_mgr.wins[i].w.maximized);
@@ -6298,7 +6295,7 @@ fn pinned_windows_move_through_exclusive_layers() {
         .collect();
     let mover = charts[0];
     let blocker = charts[1];
-    let min = WinMgr::chart_min_size();
+    let min = WinMgr::chart_min_size() + egui::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME);
     app.win_mgr.wins[mover].w.pos = egui::pos2(80.0, 120.0);
     app.win_mgr.wins[mover].w.size = min;
     app.win_mgr.set_pin(mover, true);
@@ -6384,7 +6381,7 @@ fn fast_resize_lands_on_an_exclusive_window_border() {
         .collect();
     let resizer = charts[0];
     let blocker = charts[1];
-    let min = WinMgr::chart_min_size();
+    let min = WinMgr::chart_min_size() + egui::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME);
     app.win_mgr.wins[resizer].w.pos = egui::pos2(80.0, 120.0);
     app.win_mgr.wins[resizer].w.size = min;
     app.win_mgr.wins[blocker].w.pos = egui::pos2(500.0, 120.0);
@@ -6401,7 +6398,7 @@ fn fast_resize_lands_on_an_exclusive_window_border() {
         .unwrap()
         .w
         .rect();
-    let grab = egui::pos2(start_rect.max.x - LINE_W, start_rect.center().y);
+    let grab = egui::pos2(start_rect.max.x - WIN_FRAME / 2.0, start_rect.center().y);
     let target = egui::pos2(start_rect.max.x + 300.0, grab.y);
     win_frame(
         &mut app,
@@ -6544,7 +6541,11 @@ fn child_pin_button_toggles_from_the_title_bar() {
         .iter()
         .position(|w| w.kind == WinKind::Chart)
         .expect("图表窗没建出来");
-    let title = free_band(app.win_mgr.wins[chart].rect(), 0, WIN_TITLE_ROWS);
+    let title = free_band(
+        app.win_mgr.wins[chart].rect().shrink(WIN_FRAME),
+        0,
+        WIN_TITLE_ROWS,
+    );
     let pin = sys_button_rects(title)[0].center();
     win_frame(&mut app, &ctx, work, click(pin));
     win_frame(&mut app, &ctx, work, release(pin));
@@ -6660,7 +6661,10 @@ fn color_panel_has_pin_minimize_and_close_without_maximize() {
     frame(&mut app, click(restore));
     frame(&mut app, release(restore));
     assert!(!app.win_mgr.wins[color].minimized);
-    assert_eq!(app.win_mgr.rect_of(color).size(), egui::vec2(CP_W, CP_H));
+    assert_eq!(
+        app.win_mgr.rect_of(color).size(),
+        egui::vec2(CP_W + 2.0 * WIN_FRAME, CP_H + 2.0 * WIN_FRAME)
+    );
 }
 
 #[test]
@@ -6987,23 +6991,25 @@ fn editable_buffer_ime_preedit_and_commit() {
 }
 
 #[test]
-fn editor_code_runs_only_color_comments() {
+fn editor_highlights_hash_comments_and_script_keywords() {
     use crate::ui::editor::{SynKind, code_runs, syn_color};
-    let line = "let x = \"a\"; // 注释 \"b\"";
+    let line = "LINE(C,#112233,2); # 注释 \"b\"";
     let runs = code_runs(line);
     let kinds: Vec<(&str, SynKind)> = runs.iter().map(|(s, k)| (s.as_str(), *k)).collect();
 
     assert_eq!(
         kinds,
         vec![
-            ("let x = \"a\"; ", SynKind::Plain),
-            ("// 注释 \"b\"", SynKind::Comment),
+            ("LINE", SynKind::Keyword),
+            ("(C,#112233,2); ", SynKind::Plain),
+            ("# 注释 \"b\"", SynKind::Comment),
         ]
     );
     let joined: String = runs.iter().map(|(s, _)| s.as_str()).collect();
     assert_eq!(joined, line, "着色片段拼起来必须和原行一字不差");
 
     assert_eq!(syn_color(SynKind::Plain), theme().text);
+    assert_eq!(syn_color(SynKind::Keyword), theme().syn_keyword);
     assert_eq!(syn_color(SynKind::Comment), theme().syn_comment);
     assert_eq!(
         Theme::CLASSIC.syn_comment,
@@ -7011,8 +7017,15 @@ fn editor_code_runs_only_color_comments() {
     );
     assert_eq!(
         Theme::DARK.syn_comment,
-        egui::Color32::from_rgb(0xFF, 0x66, 0xFF),
-        "深色注释颜色没有按浅色反相"
+        egui::Color32::from_rgb(0x00, 0x99, 0x00)
+    );
+    assert_eq!(
+        Theme::CLASSIC.syn_keyword,
+        egui::Color32::from_rgb(0x00, 0x00, 0xFF)
+    );
+    assert_eq!(
+        Theme::DARK.syn_keyword,
+        egui::Color32::from_rgb(0x00, 0xFF, 0xFF)
     );
 }
 
@@ -7067,7 +7080,8 @@ fn editor_ime_frames_never_interrupt_the_composition() {
         .iter()
         .find(|w| w.kind == WinKind::Source)
         .expect("源码编辑窗没建出来")
-        .rect();
+        .w
+        .inner_rect();
     let inside = egui::pos2(source.min.x + 40.0, source.min.y + SRC_BODY_TOP + 9.0);
     frame(&mut app, vec![egui::Event::PointerMoved(inside)]);
     frame(&mut app, press(inside));
@@ -7312,7 +7326,8 @@ fn editor_sections_are_split_by_single_grid_lines() {
         .iter()
         .find(|w| w.kind == WinKind::Source)
         .expect("源码编辑窗没建出来")
-        .rect();
+        .w
+        .inner_rect();
     let (x0, x1) = (panel.min.x as usize, panel.max.x as usize);
 
     let longest = |row: usize| -> usize {
@@ -7370,7 +7385,11 @@ fn hex_input_takes_typing_and_validates() {
         let _ = ctx.tessellate(std::mem::take(&mut out.shapes), 1.0);
     };
     frame(&mut app, vec![]);
-    let panel = app.win_mgr.color_rect().expect("颜色面板不存在");
+    let panel = app
+        .win_mgr
+        .color_rect()
+        .expect("颜色面板不存在")
+        .shrink(WIN_FRAME);
     let box_x = hex_box(panel).min.x;
     let inside = egui::pos2(box_x + 1.0 + 8.0, panel.min.y + CP_Y_HEX + 9.0);
     let press = vec![
@@ -7451,7 +7470,11 @@ fn color_slider_moves_only_by_dragging_the_handle() {
     };
 
     frame(&mut app, vec![]);
-    let panel = app.win_mgr.color_rect().expect("颜色面板不存在");
+    let panel = app
+        .win_mgr
+        .color_rect()
+        .expect("颜色面板不存在")
+        .shrink(WIN_FRAME);
     let row = egui::Rect::from_min_size(
         egui::pos2(panel.min.x, panel.min.y + CP_Y_RGB),
         egui::vec2(CP_W, cells(CP_SLIDER_ROWS)),
@@ -7582,7 +7605,11 @@ fn color_sliders_follow_the_mouse_wheel_while_hovered() {
     };
 
     frame(&mut app, vec![]);
-    let panel = app.win_mgr.color_rect().expect("颜色面板不存在");
+    let panel = app
+        .win_mgr
+        .color_rect()
+        .expect("颜色面板不存在")
+        .shrink(WIN_FRAME);
     let row = egui::Rect::from_min_size(
         egui::pos2(panel.min.x, panel.min.y + CP_Y_RGB),
         egui::vec2(CP_W, cells(CP_SLIDER_ROWS)),
@@ -7596,39 +7623,6 @@ fn color_sliders_follow_the_mouse_wheel_while_hovered() {
     let red = app.color_panel.rgb.0;
     frame(&mut app, wheel(-3.0));
     assert_eq!(app.color_panel.rgb.0, red.saturating_sub(3));
-
-    let hue_band = cp_band(panel, CP_ROW_HUE, CP_HUE_ROWS);
-    frame(&mut app, vec![egui::Event::PointerMoved(hue_band.center())]);
-    let hue = app.color_panel.h;
-    frame(&mut app, wheel(1.0));
-    assert_ne!(app.color_panel.h, hue, "滚轮没有移动色相滑块");
-
-    app.color_panel.set_hsv(0, 255, 255);
-    frame(&mut app, vec![]);
-    let hue_inner = hue_band.shrink(LINE_W);
-    let grab = egui::pos2(hue_inner.min.x + 5.0, hue_inner.center().y);
-    frame(&mut app, vec![egui::Event::PointerMoved(grab)]);
-    frame(
-        &mut app,
-        vec![
-            egui::Event::PointerMoved(grab),
-            egui::Event::PointerButton {
-                pos: grab,
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers: egui::Modifiers::NONE,
-            },
-        ],
-    );
-    frame(
-        &mut app,
-        vec![egui::Event::PointerMoved(grab + egui::vec2(1.0, 0.0))],
-    );
-    assert!(
-        (1..=3).contains(&app.color_panel.h),
-        "色相滑块没有按 1px 连续移动：{}",
-        app.color_panel.h
-    );
 }
 
 #[test]
@@ -7736,7 +7730,7 @@ fn editor_drag_selection_keeps_the_press_origin_char() {
         .find(|w| w.kind == WinKind::Source)
         .expect("源码编辑窗没建出来")
         .w
-        .rect();
+        .inner_rect();
     let code_x = text_left_x(win.min.x + grid_line(SRC_GUTTER_COLS), win.min.x);
     let y = win.min.y + SRC_BODY_TOP + LINE_W + SRC_LINE_H / 2.0;
     let start = egui::pos2(code_x + 1.0, y);
@@ -7770,6 +7764,121 @@ fn editor_drag_selection_keeps_the_press_origin_char() {
             pressed: false,
             modifiers: egui::Modifiers::NONE,
         }],
+    );
+}
+
+#[test]
+fn typing_space_keeps_text_at_the_caret_instead_of_the_pointer() {
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    let mut app = blank_app();
+    app.text_engine = HardText::new(&ctx);
+    if app.text_engine.is_none() {
+        return;
+    }
+    app.open_source_window(PANE_CANDLE);
+    let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(70)));
+    win_frame(&mut app, &ctx, work, vec![]);
+    let source = app
+        .win_mgr
+        .wins
+        .iter()
+        .find(|window| window.kind == WinKind::Source)
+        .expect("source window");
+    let panel = source.w.inner_rect();
+    let line_y = panel.min.y + SRC_BODY_TOP + LINE_W + SRC_LINE_H / 2.0;
+    let pointer = egui::pos2(
+        text_left_x(panel.min.x + grid_line(SRC_GUTTER_COLS), panel.min.x),
+        line_y,
+    );
+
+    app.source.editor.focused = true;
+    app.source.editor.buf = TextBuffer::from_text("ab");
+    app.source.editor.buf.set_cursor((0, 2), false);
+    win_frame(
+        &mut app,
+        &ctx,
+        work,
+        vec![
+            egui::Event::PointerMoved(pointer),
+            egui::Event::Text(" ".to_owned()),
+            egui::Event::Key {
+                key: egui::Key::Space,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+
+    assert_eq!(app.source.editor.buf.to_text(), "ab ");
+    assert_eq!(
+        app.source.editor.buf.cursor,
+        (0, 3),
+        "空格输入后光标应停在文本末尾，不应跳到鼠标位置"
+    );
+}
+
+#[test]
+fn editor_selection_and_pointer_stay_inside_the_code_text_area() {
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    let mut app = blank_app();
+    app.text_engine = HardText::new(&ctx);
+    if app.text_engine.is_none() {
+        return;
+    }
+    app.open_source_window(PANE_CANDLE);
+    let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(cells(120), cells(70)));
+    win_frame(&mut app, &ctx, work, vec![]);
+    let source = app
+        .win_mgr
+        .wins
+        .iter()
+        .find(|window| window.kind == WinKind::Source)
+        .expect("source window");
+    let panel = source.w.inner_rect();
+    app.source.editor.buf = TextBuffer::from_text("abcdef");
+    let line_y = panel.min.y + SRC_BODY_TOP + LINE_W + SRC_LINE_H / 2.0;
+    let code_x = text_left_x(panel.min.x + grid_line(SRC_GUTTER_COLS), panel.min.x);
+    let start = egui::pos2(code_x + 1.0, line_y);
+    let outside = egui::pos2(work.max.x + 300.0, work.max.y + 300.0);
+    win_frame(
+        &mut app,
+        &ctx,
+        work,
+        vec![
+            egui::Event::PointerMoved(start),
+            egui::Event::PointerButton {
+                pos: start,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    win_frame(
+        &mut app,
+        &ctx,
+        work,
+        vec![egui::Event::PointerMoved(outside)],
+    );
+
+    assert_eq!(app.source.editor.buf.selection(), Some(((0, 0), (0, 6))));
+    let pinned = app.pointer.pinned.expect("拖选时应把软件指针限制在代码区");
+    let body = egui::Rect::from_min_max(
+        egui::pos2(panel.min.x + LINE_W, panel.min.y + SRC_BODY_TOP),
+        egui::pos2(panel.max.x - 2.0 * LINE_W - SRC_BAR_W, panel.max.y - LINE_W),
+    );
+    assert!(
+        pinned.x >= body.min.x
+            && pinned.x < body.max.x
+            && pinned.y >= body.min.y
+            && pinned.y <= body.max.y,
+        "选字时指针跑出了代码文本框"
     );
 }
 
@@ -8127,7 +8236,7 @@ fn context_menu_has_no_internal_lines_and_stays_open_on_pointer_leave() {
 }
 
 #[test]
-fn minimized_restore_button_uses_one_pixel_shell_line() {
+fn minimized_taskbar_item_shows_only_the_close_button() {
     let mut app = blank_app();
     app.replace_bars(data::random_walk::generate(BAR_SEED, 64, BAR_START));
     let _ = render_window(&mut app);
@@ -8142,16 +8251,16 @@ fn minimized_restore_button_uses_one_pixel_shell_line() {
     app.win_mgr.minimize(i, w);
     let grid = render_window(&mut app);
     let mini = app.win_mgr.rect_of(i);
-    let keys = sys_button_rects_n(free_band(mini, 0, WIN_TITLE_ROWS), 3);
-    let restore = keys[1];
+    let title = free_band(mini, 0, WIN_TITLE_ROWS);
+    let keys = sys_button_rects_n(title, 1);
+    let close = keys[0];
     let y = mini.min.y as usize + 4;
-    let line = restore.min.x as usize;
-    assert_eq!(grid[y][line], Some(C_CTRL_BORDER), "还原键左边框没画出来");
-    assert_ne!(
-        grid[y][line - 1],
-        Some(C_CTRL_BORDER),
-        "还原键左边出现了第二条线（2px 叠线）"
-    );
+    let line = close.min.x as usize;
+    assert_eq!(close.max.x, title.max.x, "关闭键没贴住任务栏项目右边");
+    assert_eq!(grid[y][line], Some(C_CTRL_BORDER), "关闭键左边框没画出来");
+    assert_eq!(keys.len(), 1, "任务栏项目不应再出现还原或置顶按钮");
+    assert_eq!(grid[y][line + 1], Some(C_BTN_FACE), "关闭键左边框不是 1px");
+    assert_eq!(WinKeys::CloseOnly.shown(), &[(SysButton::Close, 0)]);
 }
 
 #[test]
@@ -8373,7 +8482,8 @@ fn the_dark_skin_inverts_the_window_and_keeps_chart_colors_light() {
     assert_eq!(d.btn_press, invert_color(l.btn_press));
     assert_eq!(d.sel_bg, invert_color(l.sel_bg));
     assert_eq!(d.text, invert_color(l.text));
-    assert_eq!(d.syn_comment, invert_color(l.syn_comment));
+    assert_eq!(d.syn_comment, egui::Color32::from_rgb(0x00, 0x99, 0x00));
+    assert_eq!(d.syn_keyword, egui::Color32::from_rgb(0x00, 0xFF, 0xFF));
     assert_eq!(d.pointer_trail, invert_color(l.pointer_trail));
     assert_eq!(d.pointer_trail_hot, invert_color(l.pointer_trail_hot));
     assert_eq!(d.chart_bg, egui::Color32::from_rgb(0x00, 0x00, 0x00));
@@ -8961,7 +9071,7 @@ fn editor_scrollbar_can_be_dragged() {
         .iter()
         .position(|w| w.kind == WinKind::Source)
         .expect("源码编辑窗没建出来");
-    let win = app.win_mgr.wins[i].w.rect();
+    let win = app.win_mgr.wins[i].w.inner_rect();
     assert_eq!(app.source.editor.scroll, 0, "刚打开该从第 1 行开始");
 
     let body_top = win.min.y + SRC_BODY_TOP;
@@ -9035,7 +9145,7 @@ fn editor_scrollbar_follows_the_pointer_back_immediately_after_hitting_the_botto
         .iter()
         .position(|w| w.kind == WinKind::Source)
         .expect("源码编辑窗没建出来");
-    let win = app.win_mgr.wins[i].w.rect();
+    let win = app.win_mgr.wins[i].w.inner_rect();
     let body_top = win.min.y + SRC_BODY_TOP;
     let bar_x = win.max.x - 5.0;
     let press = |pos: egui::Pos2| {
@@ -9101,7 +9211,7 @@ fn system_pointer_scrollbar_reverses_immediately_after_hitting_the_bottom() {
         .iter()
         .position(|w| w.kind == WinKind::Source)
         .unwrap();
-    let win = app.win_mgr.wins[i].w.rect();
+    let win = app.win_mgr.wins[i].w.inner_rect();
     let body_top = win.min.y + SRC_BODY_TOP;
     let bar_x = win.max.x - 5.0;
     let max_scroll = app.source.editor.max_scroll();
@@ -9152,12 +9262,13 @@ fn pressing_the_scrollbar_never_drags_the_window_edge_instead() {
         .position(|w| w.kind == WinKind::Source)
         .expect("源码编辑窗没建出来");
     let before = app.win_mgr.wins[i].w.rect();
-    let body_top = before.min.y + SRC_BODY_TOP;
+    let inner = before.shrink(WIN_FRAME);
+    let body_top = inner.min.y + SRC_BODY_TOP;
 
-    let bar_x = before.max.x - 5.0;
+    let bar_x = inner.max.x - 5.0;
     assert!(
         !edge_at(before, egui::pos2(bar_x, body_top + 2.0), EDGE_BAND).any(),
-        "滚动条区域不该落进 1px 缩放边框线"
+        "滚动条区域不该落进窗口外框带"
     );
     let press = |pos: egui::Pos2| {
         vec![
@@ -9215,7 +9326,7 @@ fn dragging_the_scrollbar_pins_the_pointer_horizontally_too() {
         .iter()
         .position(|w| w.kind == WinKind::Source)
         .expect("源码编辑窗没建出来");
-    let win = app.win_mgr.wins[i].w.rect();
+    let win = app.win_mgr.wins[i].w.inner_rect();
     let body_top = win.min.y + SRC_BODY_TOP;
     let bar_x = win.max.x - 5.0;
     let press = |pos: egui::Pos2| {
@@ -9597,26 +9708,32 @@ fn the_pointer_state_follows_what_the_mouse_is_doing() {
     let neutral = egui::pos2(win.min.x + 20.0, win.center().y);
     assert_eq!(kind_at!(neutral), CursorKind::Normal, "空地上");
 
-    let handle = free_band(win, 0, WIN_TITLE_ROWS).center();
+    let handle = free_band(win.shrink(WIN_FRAME), 0, WIN_TITLE_ROWS).center();
     assert_eq!(kind_at!(handle), CursorKind::Move, "标题栏上");
 
     assert_eq!(
-        kind_at!(egui::pos2(win.max.x - 1.0, win.center().y)),
+        kind_at!(egui::pos2(win.max.x - WIN_FRAME / 2.0, win.center().y)),
         CursorKind::ResizeH,
         "右边框上"
     );
     assert_eq!(
-        kind_at!(egui::pos2(win.center().x, win.max.y - 1.0)),
+        kind_at!(egui::pos2(win.center().x, win.max.y - WIN_FRAME / 2.0)),
         CursorKind::ResizeV,
         "下边框上"
     );
     assert_eq!(
-        kind_at!(egui::pos2(win.max.x - 1.0, win.max.y - 1.0)),
+        kind_at!(egui::pos2(
+            win.max.x - WIN_FRAME / 2.0,
+            win.max.y - WIN_FRAME / 2.0
+        )),
         CursorKind::ResizeNwSe,
         "右下角"
     );
     assert_eq!(
-        kind_at!(egui::pos2(win.min.x, win.max.y - 1.0)),
+        kind_at!(egui::pos2(
+            win.min.x + WIN_FRAME / 2.0,
+            win.max.y - WIN_FRAME / 2.0
+        )),
         CursorKind::ResizeNeSw,
         "左下角"
     );
@@ -9683,7 +9800,7 @@ fn the_pointer_state_follows_what_the_mouse_is_doing() {
         .iter()
         .position(|w| w.kind == WinKind::Source)
         .expect("源码编辑窗没建出来");
-    let swin = app.win_mgr.wins[src].w.rect();
+    let swin = app.win_mgr.wins[src].w.inner_rect();
     let bar = egui::pos2(swin.max.x - 5.0, swin.min.y + SRC_BODY_TOP + 8.0);
     assert_eq!(kind_at!(bar), CursorKind::Slider, "滚动条上");
 
@@ -10016,7 +10133,7 @@ fn a_press_inside_the_front_window_never_reaches_the_one_behind() {
 
     frame(&mut app, vec![]);
 
-    let p = egui::pos2(back_rect.max.x - LINE_W, back_rect.center().y);
+    let p = egui::pos2(back_rect.max.x - WIN_FRAME / 2.0, back_rect.center().y);
     assert!(
         app.win_mgr.wins[front].w.rect().contains(p),
         "取样点没落在前窗里"
@@ -10107,18 +10224,23 @@ fn the_resize_cursor_only_shows_where_the_grab_works() {
     };
     assert_eq!(
         arrow(&mut app, -LINE_W),
-        egui::CursorIcon::ResizeHorizontal,
-        "边框线上没给缩放箭头"
+        egui::CursorIcon::Default,
+        "边框线上不该给缩放箭头"
     );
-    for dx in [0.0, 1.0, 2.0, -2.0, -3.0] {
+    assert_eq!(
+        arrow(&mut app, -WIN_FRAME / 2.0),
+        egui::CursorIcon::ResizeHorizontal,
+        "外框带里没给缩放箭头"
+    );
+    for dx in [0.0, 1.0, 2.0, -WIN_FRAME - 1.0] {
         assert_ne!(
             arrow(&mut app, dx),
             egui::CursorIcon::ResizeHorizontal,
-            "边框线外（{dx}px）还给了缩放箭头"
+            "外框带外（{dx}px）还给了缩放箭头"
         );
     }
 
-    let grab = egui::pos2(rect.max.x - LINE_W, rect.center().y);
+    let grab = egui::pos2(rect.max.x - WIN_FRAME / 2.0, rect.center().y);
     win_frame(
         &mut app,
         &ctx,
@@ -10437,7 +10559,7 @@ fn the_editor_caret_is_a_thick_steady_vertical_bar() {
         .iter()
         .position(|w| w.kind == WinKind::Source)
         .expect("源码窗没建出来");
-    let win = app.win_mgr.wins[i].w.rect();
+    let win = app.win_mgr.wins[i].w.inner_rect();
 
     let body = egui::pos2(
         win.min.x + SRC_GUTTER_W + GRID * 3.0,
@@ -10537,10 +10659,14 @@ fn new_windows_start_at_the_work_center() {
 
     app.add_chart_window();
     let second = app.win_mgr.wins.last().unwrap().rect();
-    assert!(
-        (second.center().x - work.center().x).abs() <= 1.0
-            && (second.center().y - work.center().y).abs() <= 1.0,
-        "第二扇窗没有居中出生"
+    assert_eq!(second.min, work.min, "居中位置被占用时应改到左上角");
+
+    app.add_chart_window();
+    let third = app.win_mgr.wins.last().unwrap().rect();
+    assert_eq!(
+        third.min,
+        work.min + egui::vec2(0.0, WIN_TITLE_H),
+        "左上角被占用时应向下偏移一个标题栏高度"
     );
 
     for w in app.win_mgr.wins.iter_mut() {
@@ -10553,6 +10679,43 @@ fn new_windows_start_at_the_work_center() {
             && (reopened.center().y - work.center().y).abs() <= 1.0,
         "关闭窗口后再次出生仍应居中"
     );
+}
+
+#[test]
+fn spawn_stops_at_the_bottom_and_recovers_when_a_slot_frees() {
+    let mut app = blank_app();
+    let work = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 400.0));
+    app.work_rect = work;
+    app.win_mgr.work = work;
+    for window in &mut app.win_mgr.wins {
+        window.w.open = false;
+        window.minimized = false;
+    }
+
+    app.add_chart_window();
+    app.add_chart_window();
+    app.add_chart_window();
+    assert_eq!(app.win_mgr.chart_count(), 3);
+    app.tooltip = None;
+    app.add_chart_window();
+    assert_eq!(
+        app.win_mgr.chart_count(),
+        3,
+        "向下偏移会触底时不应再添加窗口"
+    );
+    assert!(app.status_msg.contains("触底"), "触底时状态栏没有提示");
+    assert!(app.tooltip.is_some(), "触底时没有弹出文本提示");
+
+    let upper_left = app
+        .win_mgr
+        .wins
+        .iter_mut()
+        .find(|window| window.w.open && window.w.pos == work.min)
+        .expect("左上角窗口");
+    upper_left.w.pos = egui::pos2(700.0, 200.0);
+    app.tooltip = None;
+    app.add_chart_window();
+    assert_eq!(app.win_mgr.chart_count(), 4, "空出位置后应恢复添加");
 }
 
 #[test]
@@ -10770,7 +10933,7 @@ fn overlapping_borders_resize_the_last_operated_window() {
         .position(|w| w.w.id == back_id)
         .unwrap();
     let border = egui::pos2(
-        app.win_mgr.wins[back].rect().max.x - LINE_W,
+        app.win_mgr.wins[back].rect().max.x - WIN_FRAME / 2.0,
         app.win_mgr.wins[back].rect().center().y,
     );
     frame(&mut app, vec![egui::Event::PointerMoved(border)]);

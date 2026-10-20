@@ -44,6 +44,7 @@ pub(crate) const C_BTN_PRESS: egui::Color32 = egui::Color32::from_rgb(0xAA, 0xAA
 pub(crate) const C_SEL_BG: egui::Color32 = egui::Color32::from_rgb(0xDD, 0xDD, 0xDD);
 
 pub(crate) const C_SYN_COMMENT: egui::Color32 = egui::Color32::from_rgb(0x00, 0x99, 0x00);
+pub(crate) const C_SYN_KEYWORD: egui::Color32 = egui::Color32::from_rgb(0x00, 0x00, 0xFF);
 
 pub(crate) const C_POINTER_TRAIL: egui::Color32 = egui::Color32::from_rgb(0x00, 0xCC, 0xCC);
 pub(crate) const C_POINTER_TRAIL_HOT: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0xFF);
@@ -133,6 +134,8 @@ pub(crate) struct Theme {
 
     pub(crate) syn_comment: egui::Color32,
 
+    pub(crate) syn_keyword: egui::Color32,
+
     pub(crate) chart_bg: egui::Color32,
 
     pub(crate) axis_bg: egui::Color32,
@@ -206,6 +209,7 @@ impl Theme {
         text: C_TEXT,
         text_white: C_TEXT_WHITE,
         syn_comment: C_SYN_COMMENT,
+        syn_keyword: C_SYN_KEYWORD,
         chart_bg: C_CHART_BG,
         axis_bg: C_AXIS_BG,
         tick: C_TICK,
@@ -262,7 +266,8 @@ impl Theme {
         t.btn_press = invert_color(l.btn_press);
         t.sel_bg = invert_color(l.sel_bg);
         t.text = invert_color(l.text);
-        t.syn_comment = invert_color(l.syn_comment);
+        t.syn_comment = C_SYN_COMMENT;
+        t.syn_keyword = egui::Color32::from_rgb(0x00, 0xFF, 0xFF);
         t.pointer_trail = invert_color(l.pointer_trail);
         t.pointer_trail_hot = invert_color(l.pointer_trail_hot);
         t.chart_bg = egui::Color32::from_rgb(0x00, 0x00, 0x00);
@@ -358,6 +363,7 @@ impl Theme {
             text: colors.window.text.0,
             text_white: colors.window.text_white.0,
             syn_comment: colors.window.syn_comment.0,
+            syn_keyword: colors.window.syn_keyword.0,
             chart_bg: colors.chart.chart_bg.0,
             axis_bg: colors.chart.axis_bg.0,
             tick: colors.chart.tick.0,
@@ -408,7 +414,7 @@ impl Theme {
         })
     }
 
-    pub(crate) const fn colors(&self) -> [egui::Color32; 62] {
+    pub(crate) const fn colors(&self) -> [egui::Color32; 63] {
         [
             self.title_bg,
             self.title_fill,
@@ -431,6 +437,7 @@ impl Theme {
             self.text,
             self.text_white,
             self.syn_comment,
+            self.syn_keyword,
             self.chart_bg,
             self.axis_bg,
             self.tick,
@@ -527,6 +534,7 @@ struct WindowColors {
     text: HexColor,
     text_white: HexColor,
     syn_comment: HexColor,
+    syn_keyword: HexColor,
     tooltip_bg: HexColor,
 }
 
