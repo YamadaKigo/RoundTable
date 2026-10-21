@@ -608,6 +608,7 @@ impl TextEditor {
         if self.focused {
             let outside_click = ui.ctx().input(|i| {
                 i.pointer.primary_clicked()
+                    && !self.selecting
                     && i.pointer.interact_pos().is_some_and(|p| !panel.contains(p))
             });
             if outside_click {
@@ -623,7 +624,11 @@ impl TextEditor {
         let focused = self.focused;
 
         let (pointer_pos, press_pos, primary_clicked) = ui.input(|i| {
-            let pointer_pos = i.pointer.interact_pos().or_else(|| i.pointer.latest_pos());
+            let pointer_pos = app
+                .pointer
+                .live
+                .or_else(|| i.pointer.interact_pos())
+                .or_else(|| i.pointer.latest_pos());
             (
                 pointer_pos,
                 i.pointer.press_origin(),
@@ -845,8 +850,9 @@ impl TextEditor {
 
         if self.selecting
             && ui.input(|i| i.pointer.primary_down())
-            && let Some(p) =
+            && let Some(p) = app.pointer.live.or_else(|| {
                 ui.input(|i| i.pointer.interact_pos().or_else(|| i.pointer.latest_pos()))
+            })
         {
             app.pointer.pinned = Some(clamp_to_text(p));
         }

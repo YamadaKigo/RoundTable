@@ -37,6 +37,10 @@ mod fallback {
         None
     }
 
+    pub(crate) fn enter_fullscreen(_hwnd: isize) -> bool {
+        false
+    }
+
     pub(crate) fn work_area() -> Option<(i32, i32, i32, i32)> {
         None
     }

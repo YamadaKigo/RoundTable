@@ -7,10 +7,9 @@ use eframe::egui;
 
 impl StockApp {
     pub(crate) fn pane_menu_count(&self) -> usize {
-        if self.pane_menu_tab == 0 {
-            1
-        } else {
-            indicator::builtin_names().len()
+        match self.pane_menu_tab {
+            0 | 1 => 1,
+            _ => indicator::builtin_names().len(),
         }
     }
 
@@ -59,12 +58,12 @@ impl StockApp {
             rect: panel,
             rows: count,
         };
-        let round_table = self.pane_menu_tab == 0;
+        let tab = self.pane_menu_tab;
         let clicked = menu.ui_rows(self, ui, &painter, |app, painter, j, row| {
-            let label = if round_table {
-                "组建圆桌"
-            } else {
-                names[j]
+            let label = match tab {
+                0 => "组建圆桌",
+                1 => "修改图表代码",
+                _ => names[j],
             };
             app.text(
                 painter,
@@ -76,8 +75,10 @@ impl StockApp {
         });
 
         if let Some(index) = clicked {
-            if !round_table {
-                self.set_pane_indicator(pane, index);
+            match tab {
+                1 => self.request_win(WinCmd::OpenSource(pane)),
+                2 => self.set_pane_indicator(pane, index),
+                _ => {}
             }
             self.pane_menu = None;
             return;

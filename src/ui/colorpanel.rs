@@ -573,6 +573,7 @@ impl StockApp {
                 ColorTarget::Up => self.up_color = rgb,
                 ColorTarget::Down => self.down_color = rgb,
             }
+            self.mark_panes_dirty();
             self.chart_follows_theme = false;
             cp.close_session();
             self.status_msg = format!(

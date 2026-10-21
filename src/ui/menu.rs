@@ -88,13 +88,7 @@ const ANALYZE_ITEMS: &[MenuNode] = &[
 
 const LAYOUT_ITEMS: &[MenuNode] = &[MenuNode::act("控制面板"), MenuNode::act("新增图表")];
 const TOOL_ITEMS: &[MenuNode] = &[
-    MenuNode::sub(
-        "设置",
-        &[
-            MenuNode::act("界面"),
-            MenuNode::sub("配色", &[MenuNode::act("浅色"), MenuNode::act("深色")]),
-        ],
-    ),
+    MenuNode::sub("设置", &[MenuNode::act("界面")]),
     MenuNode::act("日志"),
 ];
 const HELP_ITEMS: &[MenuNode] = &[
@@ -288,8 +282,9 @@ impl MenuPanel {
         painter.rect_filled(
             self.frame_rect(),
             egui::CornerRadius::ZERO,
-            theme().menu_popup_bg,
+            theme().menu_popup_frame_bg,
         );
+        painter.rect_filled(self.rect, egui::CornerRadius::ZERO, theme().menu_popup_bg);
     }
 
     pub(crate) fn paint_row_hover(&self, painter: &egui::Painter, row: egui::Rect) {
@@ -343,20 +338,13 @@ impl MenuPanel {
 
 #[derive(Clone, Copy)]
 pub(crate) struct MenuBarStyle {
-    pub(crate) hover_switch: bool,
     pane: bool,
 }
 
 impl MenuBarStyle {
-    pub(crate) const CLASSIC: Self = Self {
-        hover_switch: true,
-        pane: false,
-    };
+    pub(crate) const CLASSIC: Self = Self { pane: false };
 
-    pub(crate) const PANE_BAR: Self = Self {
-        hover_switch: false,
-        pane: true,
-    };
+    pub(crate) const PANE_BAR: Self = Self { pane: true };
 
     fn colors(
         self,
@@ -389,8 +377,6 @@ impl MenuBarStyle {
 
 pub(crate) struct MenuBarOut {
     pub(crate) rects: Vec<egui::Rect>,
-
-    pub(crate) clicked: Option<usize>,
 
     pub(crate) open: Option<usize>,
 }
@@ -442,14 +428,12 @@ impl<'a> MenuBar<'a> {
         painter.rect_filled(self.bar, egui::CornerRadius::ZERO, bg);
 
         let mut hovered = vec![false; self.titles.len()];
-        let mut clicked = None;
         for (i, rect) in rects.iter().enumerate() {
             let resp = interact_rect(ui, menu_hit_rect(*rect), egui::Sense::click());
             hovered[i] = resp.hovered();
             if resp.clicked() {
-                clicked = Some(i);
                 open = if open == Some(i) { None } else { Some(i) };
-            } else if self.style.hover_switch && hovered[i] && open.is_some_and(|cur| cur != i) {
+            } else if hovered[i] && open.is_some_and(|cur| cur != i) {
                 open = Some(i);
             }
         }
@@ -486,11 +470,7 @@ impl<'a> MenuBar<'a> {
             border,
         );
 
-        MenuBarOut {
-            rects,
-            clicked,
-            open,
-        }
+        MenuBarOut { rects, open }
     }
 
     fn paint_hover(

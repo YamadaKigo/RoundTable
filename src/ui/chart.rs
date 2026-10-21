@@ -503,7 +503,9 @@ impl StockApp {
 
     pub(crate) fn ui_chart(&mut self, ui: &mut egui::Ui, pane: usize, area: egui::Rect) {
         let painter = ui.painter().clone();
-        self.sync_pane_palette();
+        if self.panes[pane].dirty {
+            self.sync_pane_palette();
+        }
         self.ensure_pane_computed(pane);
         let layout = self.panes[pane].chart_layout();
         let (title, status, main, time) = chart_rows(area, layout);
@@ -618,8 +620,9 @@ impl StockApp {
             )
         };
 
-        self.replay_cmds(&painter, &geom, &axis_cmds);
-        self.replay_cmds(&painter, &geom, &data);
+        let mut run = Vec::new();
+        self.replay_cmds(&painter, &geom, &axis_cmds, &mut run);
+        self.replay_cmds(&painter, &geom, &data, &mut run);
         if show_axis {
             vline_hard(
                 &painter,
@@ -629,13 +632,19 @@ impl StockApp {
                 theme().chart_line,
             );
         }
-        self.replay_cmds(&painter, &geom, &time_cmds);
-        self.replay_cmds(&painter, &geom, &status_cmds);
-        self.replay_cmds(&painter, &geom, &overlay_cmds);
+        self.replay_cmds(&painter, &geom, &time_cmds, &mut run);
+        self.replay_cmds(&painter, &geom, &status_cmds, &mut run);
+        self.replay_cmds(&painter, &geom, &overlay_cmds, &mut run);
         self.panes[pane].cmds = data;
     }
 
-    fn replay_cmds(&mut self, painter: &egui::Painter, geom: &ChartGeom, cmds: &[DrawCmd]) {
+    fn replay_cmds(
+        &mut self,
+        painter: &egui::Painter,
+        geom: &ChartGeom,
+        cmds: &[DrawCmd],
+        run: &mut Vec<(f32, f32)>,
+    ) {
         let map = &geom.map;
 
         let mut sx = geom.status.map_or(0.0, |r| r.min.x);
@@ -828,7 +837,7 @@ impl StockApp {
                 }
                 DrawCmd::Polyline { pts, color, w } | DrawCmd::Overlay { pts, color, w } => {
                     debug_assert!(*w >= 1, "折线宽度至少 1px");
-                    let mut run: Vec<(f32, f32)> = Vec::new();
+                    run.clear();
                     for (i, p) in pts {
                         if map.visible(*i) {
                             run.push((map.line_x(*i), map.y(*p)));
@@ -1127,7 +1136,7 @@ impl StockApp {
         );
     }
 
-    pub(crate) const PANE_TABS: [&'static str; 3] = ["圆桌", "切换", "代码"];
+    pub(crate) const PANE_TABS: [&'static str; 3] = ["圆桌", "设置", "切换"];
 
     #[allow(dead_code)]
     pub(crate) fn pane_button_rects(title: egui::Rect, widths: &[f32]) -> Vec<egui::Rect> {
@@ -1155,20 +1164,11 @@ impl StockApp {
             MenuBarStyle::PANE_BAR,
         );
 
-        match out.clicked {
-            Some(tab @ (0 | 1)) => {
-                self.pane_menu = if self.pane_menu == Some(pane) && self.pane_menu_tab == tab {
-                    None
-                } else {
-                    Some(pane)
-                };
-                self.pane_menu_tab = tab;
-            }
-            Some(2) => {
-                self.request_win(WinCmd::OpenSource(pane));
-                self.pane_menu = None;
-            }
-            _ => {}
+        if let Some(tab @ 0..=2) = out.open {
+            self.pane_menu = Some(pane);
+            self.pane_menu_tab = tab;
+        } else if self.pane_menu == Some(pane) {
+            self.pane_menu = None;
         }
 
         if self.pane_menu == Some(pane) {

@@ -23,7 +23,8 @@
         "border": "#999999",
         "separator": "#999999",
         "popup": {
-          "background": "#DDDDDD",
+          "background": "#CCCCCC",
+          "frame_background": "#FFFFFF",
           "text": "#000000",
           "hover": "#AAAAAA",
           "border": "#999999",

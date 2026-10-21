@@ -336,7 +336,6 @@ impl DebugConsole {
                 self.log("status          输出运行状态快照");
                 self.log("pointer         输出鼠标位置和速度");
                 self.log("trail on|off    开关鼠标轨迹叠层");
-                self.log("theme           切换到下一套主题");
                 self.log("data            行情数量和视图状态");
                 self.log("windows         列出当前打开的窗口");
                 self.log("regen           重新生成一段行情");
@@ -368,10 +367,6 @@ impl DebugConsole {
                     "trail={}",
                     if app.pointer.show_trail { "on" } else { "off" }
                 ));
-            }
-            "theme" => {
-                app.switch_theme();
-                self.log(format!("theme={}", theme().name()));
             }
             "data" => {
                 let view = app.active_chart_pane().map(|pane| &app.panes[pane].view);

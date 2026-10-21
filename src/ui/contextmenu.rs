@@ -15,7 +15,6 @@ pub(crate) enum ContextAction {
     DemoTwo,
     AddChart,
     OpenConsole,
-    SwitchTheme,
     Cut,
     Copy,
     Paste,
@@ -73,7 +72,6 @@ const MAIN_DEMO_ITEMS: &[MenuNode] = &[MenuNode::act("演示按钮一"), MenuNod
 const MAIN_ITEMS: &[MenuNode] = &[
     MenuNode::act("新增图表"),
     MenuNode::act("打开调试控制台"),
-    MenuNode::act("切换主题"),
     MenuNode::sub("演示项", MAIN_DEMO_ITEMS),
 ];
 
@@ -96,7 +94,6 @@ fn action_of(label: &str) -> Option<ContextAction> {
     Some(match label {
         "新增图表" => ContextAction::AddChart,
         "打开调试控制台" => ContextAction::OpenConsole,
-        "切换主题" => ContextAction::SwitchTheme,
         "演示按钮一" => ContextAction::DemoOne,
         "演示按钮二" => ContextAction::DemoTwo,
         "剪切" => ContextAction::Cut,

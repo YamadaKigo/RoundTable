@@ -322,8 +322,12 @@ impl Win {
         }
     }
 
-    pub(crate) fn set_move_guards(&mut self, guards: Vec<(u64, egui::Rect, bool)>) {
-        self.move_guards = guards;
+    pub(crate) fn set_move_guards(
+        &mut self,
+        guards: impl IntoIterator<Item = (u64, egui::Rect, bool)>,
+    ) {
+        self.move_guards.clear();
+        self.move_guards.extend(guards);
     }
 
     pub(crate) fn rect(&self) -> egui::Rect {
@@ -522,7 +526,6 @@ impl Win {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
         }
         let primary_pressed = ui.input(|i| i.pointer.primary_pressed());
-        let primary_clicked = ui.input(|i| i.pointer.primary_clicked());
         let double_clicked = ui.input(|i| {
             i.pointer
                 .button_double_clicked(egui::PointerButton::Primary)
@@ -531,7 +534,7 @@ impl Win {
         let mut maximize = false;
         if enabled && active && in_handle {
             if self.maximized {
-                restore_maximized = primary_clicked;
+                restore_maximized = double_clicked;
             } else {
                 if double_clicked {
                     maximize = true;
@@ -578,7 +581,7 @@ impl Win {
 
         let pointer = app
             .pointer
-            .live
+            .motion_live
             .or_else(|| ui.input(|i| i.pointer.latest_pos()));
         if let Some(grab) = self.drag {
             let step = match (pointer, self.drag_pin) {

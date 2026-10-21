@@ -55,8 +55,6 @@ pub(crate) struct ManagedWin {
     pub(crate) pinned: bool,
     pub(crate) exclusive: bool,
 
-    pin_seq: u64,
-
     mini_seq: u64,
 
     mini_w: f32,
@@ -117,9 +115,11 @@ pub(crate) struct WinMgr {
     placed: bool,
     next_id: u64,
     next_mini: u64,
-    next_pin: u64,
     focused_id: Option<u64>,
     pending_placement: Vec<u64>,
+    move_guard_live: Vec<(u64, egui::Rect, bool)>,
+    move_guard_scratch: Vec<(u64, egui::Rect, bool)>,
+    draw_scratch: Vec<usize>,
     #[cfg(test)]
     focused_pane_override: Option<usize>,
 }
@@ -140,9 +140,11 @@ impl WinMgr {
             placed: false,
             next_id: 1,
             next_mini: 0,
-            next_pin: 0,
             focused_id: None,
             pending_placement: Vec::new(),
+            move_guard_live: Vec::new(),
+            move_guard_scratch: Vec::new(),
+            draw_scratch: Vec::new(),
             #[cfg(test)]
             focused_pane_override: None,
         }
@@ -208,7 +210,6 @@ impl WinMgr {
             pane,
             pinned: false,
             exclusive: false,
-            pin_seq: 0,
             mini_seq: 0,
             mini_w: MINI_W,
             w,
@@ -468,6 +469,7 @@ impl WinMgr {
             return;
         }
         let w = self.wins.remove(i);
+        self.focused_id = Some(w.w.id);
         self.wins.push(w);
     }
 
@@ -501,28 +503,36 @@ impl WinMgr {
     }
 
     fn update_move_guards(&mut self) {
-        let live: Vec<(u64, egui::Rect, bool)> = self
-            .wins
-            .iter()
-            .filter(|w| w.w.open && !w.minimized && !w.w.maximized && !w.pinned)
-            .map(|w| (w.w.id, w.w.rect(), w.exclusive))
-            .collect();
+        self.move_guard_live.clear();
+        self.move_guard_live.extend(
+            self.wins
+                .iter()
+                .filter(|w| w.w.open && !w.minimized && !w.w.maximized && !w.pinned)
+                .map(|w| (w.w.id, w.w.rect(), w.exclusive)),
+        );
         for i in 0..self.wins.len() {
             let window = &self.wins[i];
-            let guards = if window.minimized || window.w.maximized || window.pinned {
-                Vec::new()
-            } else if window.exclusive {
-                live.iter()
-                    .filter(|(id, _, _)| *id != window.w.id)
-                    .map(|(id, rect, exclusive)| (*id, *rect, *exclusive))
-                    .collect()
-            } else {
-                live.iter()
-                    .filter(|(id, _, exclusive)| *id != window.w.id && *exclusive)
-                    .map(|(id, rect, exclusive)| (*id, *rect, *exclusive))
-                    .collect()
-            };
-            self.wins[i].w.set_move_guards(guards);
+            self.move_guard_scratch.clear();
+            if !(window.minimized || window.w.maximized || window.pinned) {
+                if window.exclusive {
+                    self.move_guard_scratch.extend(
+                        self.move_guard_live
+                            .iter()
+                            .filter(|(id, _, _)| *id != window.w.id)
+                            .map(|(id, rect, exclusive)| (*id, *rect, *exclusive)),
+                    );
+                } else {
+                    self.move_guard_scratch.extend(
+                        self.move_guard_live
+                            .iter()
+                            .filter(|(id, _, exclusive)| *id != window.w.id && *exclusive)
+                            .map(|(id, rect, exclusive)| (*id, *rect, *exclusive)),
+                    );
+                }
+            }
+            self.wins[i]
+                .w
+                .set_move_guards(self.move_guard_scratch.iter().copied());
         }
     }
 
@@ -824,20 +834,23 @@ impl WinMgr {
     }
 
     fn draw_order(&self) -> Vec<usize> {
+        let mut out = Vec::with_capacity(self.wins.len());
+        self.fill_draw_order(&mut out);
+        out
+    }
+
+    fn fill_draw_order(&self, out: &mut Vec<usize>) {
         let live = |w: &ManagedWin, mini: bool| w.w.open && w.minimized == mini;
-        let mut out: Vec<usize> = (0..self.wins.len())
-            .filter(|&i| {
-                live(&self.wins[i], false) && !self.wins[i].pinned && self.wins[i].exclusive
-            })
-            .collect();
+        out.clear();
+        out.extend((0..self.wins.len()).filter(|&i| {
+            live(&self.wins[i], false) && !self.wins[i].pinned && self.wins[i].exclusive
+        }));
         out.extend((0..self.wins.len()).filter(|&i| {
             live(&self.wins[i], false) && !self.wins[i].pinned && !self.wins[i].exclusive
         }));
-        let mut pinned: Vec<usize> = (0..self.wins.len())
-            .filter(|&i| live(&self.wins[i], false) && self.wins[i].pinned)
-            .collect();
-        pinned.sort_by_key(|&i| self.wins[i].pin_seq);
-        out.extend(pinned);
+        out.extend(
+            (0..self.wins.len()).filter(|&i| live(&self.wins[i], false) && self.wins[i].pinned),
+        );
         let mut minimized: Vec<usize> = (0..self.wins.len())
             .filter(|&i| live(&self.wins[i], true))
             .collect();
@@ -848,7 +861,6 @@ impl WinMgr {
             (dragging, self.wins[i].mini_seq)
         });
         out.extend(minimized);
-        out
     }
 
     #[cfg(test)]
@@ -861,12 +873,6 @@ impl WinMgr {
             self.wins[i].exclusive = false;
         }
         self.wins[i].pinned = pinned;
-        if self.wins[i].pinned {
-            self.wins[i].pin_seq = self.next_pin;
-            self.next_pin += 1;
-        } else {
-            self.wins[i].pin_seq = 0;
-        }
         self.wins[i].w.end_sessions();
     }
 
@@ -1151,15 +1157,20 @@ impl WinMgr {
                 }
             }
         }
-        app.debug_windows.windows = self
-            .wins
-            .iter()
-            .filter(|w| w.w.open)
-            .map(|w| (w.title.clone(), w.minimized, w.rect()))
-            .collect();
+        let console_open = self.console_open();
+        app.debug_windows.window_count = self.wins.iter().filter(|w| w.w.open).count();
+        app.debug_windows.windows.clear();
+        if console_open {
+            app.debug_windows.windows.extend(
+                self.wins
+                    .iter()
+                    .filter(|w| w.w.open)
+                    .map(|w| (w.title.clone(), w.minimized, w.rect())),
+            );
+        }
         app.debug_windows.chart_count = self.chart_count();
         app.debug_windows.source_open = self.source_open();
-        app.debug_windows.console_open = self.console_open();
+        app.debug_windows.console_open = console_open;
 
         for i in 0..self.wins.len() {
             let guard = self.wins[i].edge_guard();
@@ -1228,7 +1239,9 @@ impl WinMgr {
         let panes = app.panes.len();
         self.plots.clear();
         self.plots.resize(panes, egui::Rect::NOTHING);
-        for i in self.draw_order() {
+        let mut order = std::mem::take(&mut self.draw_scratch);
+        self.fill_draw_order(&mut order);
+        for &i in &order {
             if !self.wins[i].w.open || self.wins[i].kind != WinKind::Chart || self.wins[i].minimized
             {
                 continue;
@@ -1240,6 +1253,7 @@ impl WinMgr {
             let (_, _, main, _) = chart_rows(body, layout);
             self.plots[pane] = frame_rects_with_axis(main, app.panes[pane].show_axis()).0;
         }
+        self.draw_scratch = order;
     }
 
     pub(crate) fn draw(
@@ -1252,7 +1266,9 @@ impl WinMgr {
         self.work = work;
         self.taskbar = taskbar;
         let taskbar_drag_released = self.update_taskbar_drag(ui);
-        for i in self.draw_order() {
+        let mut order = std::mem::take(&mut self.draw_scratch);
+        self.fill_draw_order(&mut order);
+        for &i in &order {
             if !self.wins[i].w.open {
                 continue;
             }
@@ -1279,6 +1295,7 @@ impl WinMgr {
                 self.end_win(ui, i, busy);
             });
         }
+        self.draw_scratch = order;
         app.win_silent = false;
         let taskbar_click = ui.input(|input| {
             input
@@ -1353,7 +1370,6 @@ impl WinMgr {
             WinKind::Panel => app.ui_panel(ui, body),
             WinKind::Chart => {
                 let pane = self.wins[i].pane;
-                app.sync_pane_palette();
                 app.ensure_pane_computed(pane);
                 let layout = app.panes[pane].chart_layout();
                 let (_, _, main, _) = chart_rows(body, layout);

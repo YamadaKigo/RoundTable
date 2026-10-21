@@ -11,24 +11,28 @@ pub(crate) fn ensure_pane_computed(world: &mut ChartWorld, pane: usize) {
     if !world.panes[pane].dirty {
         return;
     }
-    let script = world.panes[pane].script.clone();
-    let cmds = if let Some(script) = script {
-        match script.render(&world.bars, &world.panes_palette) {
-            Ok(render) => {
-                world.panes[pane].script_render = Some(render.clone());
-                render.cmds
-            }
-            Err(error) => {
-                world.panes[pane].script_error = Some(error);
-                Vec::new()
-            }
+    let rendered = world.panes[pane]
+        .script
+        .as_ref()
+        .map(|script| script.render(&world.bars, &world.panes_palette));
+    let pane = &mut world.panes[pane];
+    match rendered {
+        Some(Ok(mut render)) => {
+            pane.cmds = std::mem::take(&mut render.cmds);
+            pane.script_render = Some(render);
+            pane.script_error = None;
         }
-    } else {
-        world.panes[pane].script_render = None;
-        Vec::new()
-    };
-    world.panes[pane].cmds = cmds;
-    world.panes[pane].dirty = false;
+        Some(Err(error)) => {
+            pane.cmds.clear();
+            pane.script_error = Some(error);
+        }
+        None => {
+            pane.cmds.clear();
+            pane.script_render = None;
+            pane.script_error = None;
+        }
+    }
+    pane.dirty = false;
 }
 
 pub(crate) fn regenerate_market(world: &mut ChartWorld) {

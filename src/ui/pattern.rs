@@ -25,27 +25,26 @@ pub(crate) fn paint_fill(
     let x1 = rect.max.x.round() as i32;
     let y0 = rect.min.y.round() as i32;
     let y1 = rect.max.y.round() as i32;
+    let mut mesh = egui::Mesh::default();
     match pattern {
         FillPattern::Horizontal => {
             for y in (y0..y1).step_by(2) {
-                painter.rect_filled(
+                mesh.add_colored_rect(
                     egui::Rect::from_min_size(
                         egui::pos2(rect.min.x, y as f32),
                         egui::vec2(rect.width(), LINE_W),
                     ),
-                    egui::CornerRadius::ZERO,
                     color,
                 );
             }
         }
         FillPattern::Vertical => {
             for x in (x0..x1).step_by(2) {
-                painter.rect_filled(
+                mesh.add_colored_rect(
                     egui::Rect::from_min_size(
                         egui::pos2(x as f32, rect.min.y),
                         egui::vec2(LINE_W, rect.height()),
                     ),
-                    egui::CornerRadius::ZERO,
                     color,
                 );
             }
@@ -53,17 +52,19 @@ pub(crate) fn paint_fill(
         FillPattern::Dot => {
             for y in (y0..y1).step_by(2) {
                 for x in (x0..x1).step_by(2) {
-                    painter.rect_filled(
+                    mesh.add_colored_rect(
                         egui::Rect::from_min_size(
                             egui::pos2(x as f32, y as f32),
                             egui::vec2(LINE_W, LINE_W),
                         ),
-                        egui::CornerRadius::ZERO,
                         color,
                     );
                 }
             }
         }
+    }
+    if !mesh.is_empty() {
+        painter.add(egui::Shape::mesh(mesh));
     }
 }
 

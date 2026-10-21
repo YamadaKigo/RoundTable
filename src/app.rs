@@ -52,6 +52,7 @@ pub(crate) use crate::ecs::{ChartWorld, Crosshair, Pane};
 #[derive(Clone, Default)]
 pub(crate) struct DebugWindowSnapshot {
     pub(crate) windows: Vec<(String, bool, egui::Rect)>,
+    pub(crate) window_count: usize,
     pub(crate) chart_count: usize,
     pub(crate) source_open: bool,
     pub(crate) console_open: bool,
@@ -128,6 +129,7 @@ impl StockApp {
         self.panes_palette = want;
     }
 
+    #[cfg(test)]
     pub(crate) fn switch_theme(&mut self) {
         let next_id = match theme().id {
             ThemeId::Classic => ThemeId::Dark,
@@ -154,7 +156,6 @@ impl StockApp {
         match action {
             ContextAction::AddChart => self.add_chart_window(),
             ContextAction::OpenConsole => self.open_console_window(),
-            ContextAction::SwitchTheme => self.switch_theme(),
             ContextAction::DemoOne => self.status_msg = "右键菜单：演示按钮一".to_owned(),
             ContextAction::DemoTwo => self.status_msg = "右键菜单：演示按钮二".to_owned(),
             ContextAction::Cut
@@ -393,8 +394,9 @@ impl StockApp {
             .ok()
             .map(|h| native_window_id(h.as_raw()))
             .unwrap_or(0);
-        clear_window_frame(hwnd);
         let client_cover_ready = install_client_cover(hwnd);
+        enter_fullscreen(hwnd);
+        clear_window_frame(hwnd);
         let palette = indicator::Palette::default();
         let chart_world = ChartWorld::new(Self::build_panes(palette), palette);
 
@@ -712,6 +714,7 @@ impl StockApp {
 
     fn advance_software_pointer(&mut self, ctx: &egui::Context, layout: egui::Rect) {
         let now = ctx.input(|i| i.time);
+        let locked = self.pointer.pinned_if_down(ctx);
 
         if self.pointer.system {
             let screen = (self.hwnd != 0)
@@ -721,21 +724,14 @@ impl StockApp {
                 .or_else(|| ctx.input(|i| i.pointer.latest_pos()))
                 .unwrap_or(layout.center());
             self.pointer.sync(screen, now);
-            self.pointer.live = Some(match client_origin(self.hwnd) {
+            let live = match client_origin(self.hwnd) {
                 Some((ox, oy)) => egui::pos2(screen.x - ox as f32, screen.y - oy as f32),
                 None => screen,
-            });
+            };
+            self.pointer.live = Some(live);
+            self.pointer.motion_live = Some(live);
             return;
         }
-        let mut deltas = Vec::new();
-        ctx.input(|i| {
-            for event in &i.events {
-                if let egui::Event::MouseMoved(delta) = event {
-                    deltas.push(*delta);
-                }
-            }
-        });
-
         let screen_bounds = screen_area()
             .map(|(x, y, w, h)| {
                 egui::Rect::from_min_max(
@@ -761,8 +757,10 @@ impl StockApp {
             }
         }
 
-        let moving = !deltas.is_empty();
-        let at = if deltas.is_empty() {
+        let (moving, at) = self
+            .pointer
+            .advance_events(ctx, now, screen_bounds, locked.is_some());
+        let at = if !moving {
             if self.hwnd == 0 {
                 if let Some(p) = ctx.input(|i| i.pointer.latest_pos()) {
                     self.pointer.sync(p, now);
@@ -770,7 +768,7 @@ impl StockApp {
             }
             self.pointer.position()
         } else {
-            self.pointer.advance(&deltas, now, screen_bounds)
+            at
         };
 
         if moving {
@@ -782,13 +780,21 @@ impl StockApp {
         } else {
             at
         };
-        if self.hwnd != 0 {
-            set_cursor_pos(shown.x as i32, shown.y as i32);
-        }
-        self.pointer.live = Some(match client_origin(self.hwnd) {
+        let origin = client_origin(self.hwnd);
+        self.pointer.motion_live = Some(match origin {
             Some((ox, oy)) => egui::pos2(shown.x - ox as f32, shown.y - oy as f32),
             None => shown,
         });
+        let shown = locked
+            .and_then(|pin| origin.map(|(ox, oy)| egui::pos2(ox as f32 + pin.x, oy as f32 + pin.y)))
+            .unwrap_or(shown);
+        if self.hwnd != 0
+            && self.pointer.native_cursor_needs_move(shown)
+            && set_cursor_pos(shown.x as i32, shown.y as i32)
+        {
+            self.pointer.mark_native_cursor(shown);
+        }
+        self.pointer.live = self.pointer.motion_live;
     }
 
     pub(crate) fn apply_cursor(&mut self, ctx: &egui::Context) {
@@ -809,7 +815,11 @@ impl StockApp {
             if let Some((ox, oy)) = client_origin(self.hwnd) {
                 let screen = egui::pos2(ox as f32 + pin.x, oy as f32 + pin.y);
                 self.pointer.pin(screen, now);
-                set_cursor_pos(screen.x.round() as i32, screen.y.round() as i32);
+                if self.pointer.native_cursor_needs_move(screen)
+                    && set_cursor_pos(screen.x.round() as i32, screen.y.round() as i32)
+                {
+                    self.pointer.mark_native_cursor(screen);
+                }
             }
         }
 
@@ -890,6 +900,10 @@ impl eframe::App for StockApp {
         theme().title_bg.to_normalized_gamma_f32()
     }
 
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.pointer.lock_events(&mut raw_input.events);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let t0 = Instant::now();
@@ -901,6 +915,8 @@ impl eframe::App for StockApp {
         if self.hwnd == 0 {
             if let Ok(h) = frame.window_handle() {
                 self.hwnd = native_window_id(h.as_raw());
+                enter_fullscreen(self.hwnd);
+                clear_window_frame(self.hwnd);
             }
         }
         if !self.client_cover_ready && install_client_cover(self.hwnd) {
@@ -908,8 +924,6 @@ impl eframe::App for StockApp {
         }
 
         self.draw_frame(ui);
-
-        clear_window_frame(self.hwnd);
 
         self.frame_ms = t0.elapsed().as_secs_f32() * 1000.0;
 
@@ -925,7 +939,7 @@ impl StockApp {
     pub(crate) fn draw_frame(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
 
-        self.pointer.begin_frame();
+        self.pointer.begin_frame(&ctx);
         self.dismiss_popup_menus_on_keyboard(&ctx);
         if ctx.input(|i| i.pointer.secondary_pressed()) {
             self.menu = MenuState::default();
@@ -955,7 +969,7 @@ impl StockApp {
 
         self.paint_skeleton(&ui.painter().clone(), layout, areas);
         self.ui_titlebar(ui, areas[0]);
-        let menubar_state = self.menu.clone();
+        let menubar_state = std::mem::take(&mut self.menu);
         let (open_anchor, menubar_state) =
             ui_menu_bar(self, ui, areas[1], &TOP_TABS, menubar_state);
         self.menu = menubar_state;
@@ -965,7 +979,7 @@ impl StockApp {
         mgr.plan(self, ui, areas[2], areas[3]);
         self.win_mgr = mgr;
 
-        let plots = self.win_mgr.plots.clone();
+        let plots = std::mem::take(&mut self.win_mgr.plots);
 
         self.chart_interact(ui, &plots, &[]);
 
@@ -975,6 +989,7 @@ impl StockApp {
             }
         }
         self.update_crosshair(ui, &plots);
+        self.win_mgr.plots = plots;
 
         let mut mgr = self.win_mgr.take();
         mgr.draw(self, ui, areas[2], areas[3]);
@@ -1018,7 +1033,7 @@ impl StockApp {
 
         if let Some((idx, anchor)) = open_anchor {
             let items = TOP_TABS[idx].items;
-            let mut state = self.menu.clone();
+            let mut state = std::mem::take(&mut self.menu);
 
             if let Some(label) =
                 ui_menu_popup(self, ui, anchor, items, &mut state, content, &[areas[1]])

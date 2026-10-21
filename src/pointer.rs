@@ -38,6 +38,24 @@ impl Default for PointerFeel {
     }
 }
 
+impl PointerFeel {
+    pub(crate) fn from_system(speed: i32, mouse: [i32; 3]) -> Self {
+        const SPEED: [f32; 20] = [
+            0.03125, 0.0625, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0, 1.25, 1.5, 1.75,
+            2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5,
+        ];
+        let speed_index = (speed - 1).clamp(0, 19) as usize;
+        let start = mouse[0].max(1) as f32 * 120.0;
+        let full = mouse[1].max(mouse[0].max(1) + 1) as f32 * 120.0;
+        Self {
+            base_speed: SPEED[speed_index],
+            acceleration: if mouse[2] != 0 { 1.0 } else { 0.0 },
+            accel_start: start,
+            accel_full: full.max(start + 1.0),
+        }
+    }
+}
+
 pub(crate) struct PointerMotion {
     position: egui::Pos2,
 
@@ -48,6 +66,9 @@ pub(crate) struct PointerMotion {
     initialized: bool,
     feel: PointerFeel,
     trajectory: VecDeque<PointerSample>,
+    record_trail: bool,
+    raw_deltas: Vec<egui::Vec2>,
+    native_cursor: Option<egui::Pos2>,
 }
 
 pub(crate) struct PointerManager {
@@ -59,6 +80,7 @@ pub(crate) struct PointerManager {
     pub(crate) text_hover: bool,
     pub(crate) wheel_until: f64,
     pub(crate) live: Option<egui::Pos2>,
+    pub(crate) motion_live: Option<egui::Pos2>,
     pub(crate) pinned: Option<egui::Pos2>,
 }
 
@@ -73,12 +95,16 @@ impl PointerManager {
             text_hover: false,
             wheel_until: 0.0,
             live: None,
+            motion_live: None,
             pinned: None,
         }
     }
 
-    pub(crate) fn begin_frame(&mut self) {
-        self.pinned = None;
+    pub(crate) fn begin_frame(&mut self, ctx: &egui::Context) {
+        self.motion.set_record_trail(self.show_trail);
+        if !ctx.input(|i| i.pointer.primary_down()) {
+            self.pinned = None;
+        }
         self.hint = CursorKind::Normal;
         self.forced_hint = None;
         self.text_hover = false;
@@ -96,6 +122,34 @@ impl PointerManager {
     pub(crate) fn pinned_if_down(&self, ctx: &egui::Context) -> Option<egui::Pos2> {
         let pin = self.pinned?;
         ctx.input(|i| i.pointer.primary_down()).then_some(pin)
+    }
+
+    pub(crate) fn lock_events(&mut self, events: &mut [egui::Event]) {
+        let released = events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::PointerButton {
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    ..
+                } | egui::Event::PointerGone
+                    | egui::Event::WindowFocused(false)
+            )
+        });
+        let Some(pin) = self.pinned else {
+            return;
+        };
+        for event in events {
+            match event {
+                egui::Event::PointerMoved(pos) => *pos = pin,
+                egui::Event::PointerButton { pos, .. } => *pos = pin,
+                egui::Event::Touch { pos, .. } => *pos = pin,
+                _ => {}
+            }
+        }
+        if released {
+            self.pinned = None;
+        }
     }
 }
 
@@ -128,7 +182,10 @@ impl PointerMotion {
             last_time: 0.0,
             initialized: false,
             feel,
-            trajectory: VecDeque::with_capacity(TRAJECTORY_CAPACITY),
+            trajectory: VecDeque::new(),
+            record_trail: true,
+            raw_deltas: Vec::new(),
+            native_cursor: None,
         }
     }
 
@@ -155,6 +212,16 @@ impl PointerMotion {
         &self.trajectory
     }
 
+    pub(crate) fn set_record_trail(&mut self, record: bool) {
+        if self.record_trail == record {
+            return;
+        }
+        self.record_trail = record;
+        if !record {
+            self.trajectory.clear();
+        }
+    }
+
     pub(crate) fn reset(&mut self, position: egui::Pos2, time: f64) {
         self.position = position;
         self.velocity = egui::Vec2::ZERO;
@@ -162,14 +229,35 @@ impl PointerMotion {
         self.last_time = time;
         self.initialized = true;
         self.trajectory.clear();
+        self.native_cursor = None;
     }
 
     pub(crate) fn pin(&mut self, position: egui::Pos2, time: f64) {
+        let previous = self.position;
         self.position = position;
         self.velocity = egui::Vec2::ZERO;
         self.acceleration = egui::Vec2::ZERO;
         self.last_time = time;
         self.initialized = true;
+        while self
+            .trajectory
+            .back()
+            .is_some_and(|sample| sample.time >= time)
+        {
+            self.trajectory.pop_back();
+        }
+        if self.record_trail {
+            self.trajectory.push_back(PointerSample {
+                time,
+                position,
+                delta: position - previous,
+                velocity: egui::Vec2::ZERO,
+                acceleration: egui::Vec2::ZERO,
+            });
+            if self.trajectory.len() > TRAJECTORY_CAPACITY {
+                self.trajectory.pop_front();
+            }
+        }
     }
 
     pub(crate) fn sync(&mut self, position: egui::Pos2, time: f64) {
@@ -183,6 +271,62 @@ impl PointerMotion {
         deltas: &[egui::Vec2],
         time: f64,
         bounds: egui::Rect,
+    ) -> egui::Pos2 {
+        self.advance_with_trail(deltas, time, bounds, true)
+    }
+
+    pub(crate) fn advance_locked(
+        &mut self,
+        deltas: &[egui::Vec2],
+        time: f64,
+        bounds: egui::Rect,
+    ) -> egui::Pos2 {
+        self.advance_with_trail(deltas, time, bounds, false)
+    }
+
+    pub(crate) fn advance_events(
+        &mut self,
+        ctx: &egui::Context,
+        time: f64,
+        bounds: egui::Rect,
+        locked: bool,
+    ) -> (bool, egui::Pos2) {
+        self.raw_deltas.clear();
+        ctx.input(|input| {
+            for event in &input.events {
+                if let egui::Event::MouseMoved(delta) = event {
+                    self.raw_deltas.push(*delta);
+                }
+            }
+        });
+        if self.raw_deltas.is_empty() {
+            return (false, self.position);
+        }
+        let deltas = std::mem::take(&mut self.raw_deltas);
+        let at = if locked {
+            self.advance_locked(&deltas, time, bounds)
+        } else {
+            self.advance(&deltas, time, bounds)
+        };
+        self.raw_deltas = deltas;
+        (true, at)
+    }
+
+    pub(crate) fn native_cursor_needs_move(&self, position: egui::Pos2) -> bool {
+        let target = egui::pos2(position.x.round(), position.y.round());
+        self.native_cursor != Some(target)
+    }
+
+    pub(crate) fn mark_native_cursor(&mut self, position: egui::Pos2) {
+        self.native_cursor = Some(egui::pos2(position.x.round(), position.y.round()));
+    }
+
+    fn advance_with_trail(
+        &mut self,
+        deltas: &[egui::Vec2],
+        time: f64,
+        bounds: egui::Rect,
+        record: bool,
     ) -> egui::Pos2 {
         if !self.initialized {
             self.reset(self.position, time);
@@ -242,15 +386,17 @@ impl PointerMotion {
             };
             let at = before + (clamped - before) * f.clamp(0.0, 1.0);
             let back = (n - 1 - i) as f64 / n as f64;
-            self.trajectory.push_back(PointerSample {
-                time: time - dt * back,
-                position: at,
-                delta: *d,
-                velocity: new_velocity,
-                acceleration: self.acceleration,
-            });
-            if self.trajectory.len() > TRAJECTORY_CAPACITY {
-                self.trajectory.pop_front();
+            if record {
+                self.trajectory.push_back(PointerSample {
+                    time: time - dt * back,
+                    position: at,
+                    delta: *d,
+                    velocity: new_velocity,
+                    acceleration: self.acceleration,
+                });
+                if self.trajectory.len() > TRAJECTORY_CAPACITY {
+                    self.trajectory.pop_front();
+                }
             }
         }
         self.last_time = time;
@@ -406,5 +552,66 @@ mod tests {
         let times: Vec<f64> = p.trajectory().iter().map(|s| s.time).collect();
         assert!(times.windows(2).all(|w| w[0] < w[1]), "轨迹时间没有铺开");
         assert_eq!(times.last().copied(), Some(0.016));
+    }
+
+    #[test]
+    fn system_mouse_settings_map_to_speed_and_ballistics() {
+        let neutral = PointerFeel::from_system(10, [6, 10, 0]);
+        let faster = PointerFeel::from_system(12, [6, 10, 0]);
+        let accelerated = PointerFeel::from_system(12, [4, 8, 1]);
+        assert_eq!(neutral.base_speed, 1.0);
+        assert_eq!(neutral.acceleration, 0.0);
+        assert!(faster.base_speed > neutral.base_speed);
+        assert_eq!(accelerated.acceleration, 1.0);
+        assert_eq!(accelerated.accel_start, 480.0);
+        assert_eq!(accelerated.accel_full, 960.0);
+    }
+
+    #[test]
+    fn a_locked_pointer_swallows_absolute_motion_but_keeps_raw_delta() {
+        let mut pointer = PointerManager::new(PointerFeel::default());
+        pointer.pinned = Some(egui::pos2(40.0, 50.0));
+        let mut events = vec![
+            egui::Event::PointerMoved(egui::pos2(400.0, 300.0)),
+            egui::Event::MouseMoved(egui::vec2(9.0, -3.0)),
+        ];
+        pointer.lock_events(&mut events);
+        assert_eq!(events[0], egui::Event::PointerMoved(egui::pos2(40.0, 50.0)));
+        assert_eq!(events[1], egui::Event::MouseMoved(egui::vec2(9.0, -3.0)));
+
+        let mut release = vec![egui::Event::PointerButton {
+            pos: egui::pos2(900.0, 700.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }];
+        pointer.lock_events(&mut release);
+        assert_eq!(
+            release[0],
+            egui::Event::PointerButton {
+                pos: egui::pos2(40.0, 50.0),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }
+        );
+        assert!(pointer.pinned.is_none());
+    }
+
+    #[test]
+    fn locked_motion_does_not_leave_an_overshoot_trail() {
+        let mut pointer = PointerMotion::new(PointerFeel {
+            acceleration: 0.0,
+            ..PointerFeel::default()
+        });
+        pointer.reset(egui::pos2(100.0, 100.0), 0.0);
+        pointer.advance_locked(&[egui::vec2(500.0, 0.0)], 0.016, bounds());
+        assert!(pointer.trajectory().is_empty());
+        pointer.pin(egui::pos2(160.0, 100.0), 0.016);
+        assert_eq!(pointer.trajectory().len(), 1);
+        assert_eq!(
+            pointer.trajectory().back().map(|sample| sample.position),
+            Some(egui::pos2(160.0, 100.0))
+        );
     }
 }

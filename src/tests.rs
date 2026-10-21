@@ -1924,17 +1924,17 @@ fn pane_menu_lists_builtins_and_swaps_the_indicator() {
     let (title, _info, _main, _time) = chart_rows(kline, crate::indicator::ChartLayout::new(2, 2));
     let buttons = StockApp::pane_button_rects(title, &pane_btn_widths());
     app.pane_menu = Some(PANE_CANDLE);
-    app.pane_menu_tab = 1;
-    app.pane_menu_anchor = buttons[1];
+    app.pane_menu_tab = 2;
+    app.pane_menu_anchor = buttons[2];
     let panel = app.pane_menu_rect(names.len(), WINDOW_H).unwrap();
     let frame = panel.expand(grid_line(1));
     assert_eq!(
-        frame.min.x, buttons[1].min.x,
+        frame.min.x, buttons[2].min.x,
         "菜单装饰框没和「切换」按钮对齐"
     );
     assert_eq!(
         frame.min.y,
-        buttons[1].max.y - LINE_W,
+        buttons[2].max.y - LINE_W,
         "菜单装饰框上沿没压在标题栏下沿那条线上"
     );
     assert_eq!(
@@ -1976,7 +1976,7 @@ fn pane_menu_flips_up_when_it_would_overflow_the_window() {
     let names = indicator::builtin_names();
     let h = cells(PANE_MENU_ROW_ROWS * names.len() as i32);
     let w = |s: &str| snap_cells_up(crate::font::text_width(s) as f32 + 2.0 * TEXT_PAD_X);
-    let widths = [w("圆桌"), w("切换"), w("代码")];
+    let widths = [w("圆桌"), w("设置"), w("切换")];
 
     let (title, _, _, _) = chart_rows(kline, crate::indicator::ChartLayout::new(2, 2));
     app.pane_menu_anchor = StockApp::pane_button_rects(title, &widths)[1];
@@ -3019,7 +3019,7 @@ fn every_text_box_keeps_one_cell_of_padding() {
     let min_pad = 2.0 * GRID;
 
     app.build_panel_buttons();
-    assert!(app.panel_buttons.len() >= 10, "面板按钮不该只有这么几个");
+    assert_eq!(app.panel_buttons.len(), PANEL_BTN_COUNT as usize);
     let buttons: Vec<(String, bool, f32)> = app
         .panel_buttons
         .iter()
@@ -3738,7 +3738,7 @@ fn render_window_at(
         let areas = split_areas(layout);
         app.paint_skeleton(&painter, layout, areas);
         app.ui_titlebar(ui, areas[0]);
-        let menubar_state = app.menu.clone();
+        let menubar_state = std::mem::take(&mut app.menu);
         let (_, menubar_state) = ui_menu_bar(app, ui, areas[1], &TOP_TABS, menubar_state);
         app.menu = menubar_state;
 
@@ -3746,7 +3746,7 @@ fn render_window_at(
         let mut mgr = app.win_mgr.take();
         mgr.plan(app, ui, areas[2], areas[3]);
         app.win_mgr = mgr;
-        let plots = app.win_mgr.plots.clone();
+        let plots = std::mem::take(&mut app.win_mgr.plots);
         app.chart_interact(ui, &plots, &[]);
         for (pane, plot) in plots.iter().enumerate() {
             if plot.is_positive() {
@@ -3754,6 +3754,7 @@ fn render_window_at(
             }
         }
         app.update_crosshair(ui, &plots);
+        app.win_mgr.plots = plots;
         let mut mgr = app.win_mgr.take();
         mgr.draw(app, ui, areas[2], areas[3]);
         app.win_mgr = mgr;
@@ -5283,42 +5284,18 @@ fn control_panel_lists_only_the_current_actions() {
 }
 
 #[test]
-fn pointer_mode_button_switches_to_the_native_cursor() {
+fn pointer_mode_control_is_not_exposed() {
     let ctx = egui::Context::default();
     configure_tessellation(&ctx);
     ctx.set_pixels_per_point(1.0);
     let mut app = blank_app();
     app.text_engine = HardText::new(&ctx);
-    app.replace_bars(data::random_walk::generate(BAR_SEED, 64, BAR_START));
     app.build_panel_buttons();
     assert!(
-        app.panel_buttons.iter().any(|b| {
-            b.button.content.label() == "切换鼠标控制" && b.action == PanelAction::TogglePointerMode
-        }),
-        "控制面板缺少「切换鼠标控制」按钮"
+        app.panel_buttons
+            .iter()
+            .all(|b| b.button.content.label() != "切换鼠标控制")
     );
-
-    let at = egui::pos2(420.0, 300.0);
-    let (_, icon, image) =
-        render_pinned_events_in(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
-    assert_eq!(icon, egui::CursorIcon::None, "软件模式应藏掉系统指针");
-    assert!(image.is_none(), "软件模式不该给系统交自定义光标位图");
-
-    app.run_action(PanelAction::TogglePointerMode);
-    assert!(app.pointer.system);
-    assert!(app.status_msg.contains("系统鼠标"));
-    let (_, icon, image) =
-        render_pinned_events_in(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
-    assert_eq!(
-        icon,
-        egui::CursorIcon::Default,
-        "系统模式应让系统指针原样显示"
-    );
-    assert!(image.is_none(), "系统模式不该再交自定义光标位图");
-
-    app.run_action(PanelAction::TogglePointerMode);
-    assert!(!app.pointer.system);
-    assert!(app.status_msg.contains("软件鼠标"));
 }
 
 #[test]
@@ -5757,7 +5734,7 @@ fn window_maximize_key_fills_the_work_area_and_restores() {
 }
 
 #[test]
-fn maximized_window_fills_work_and_dragging_title_restores_it() {
+fn maximized_window_fills_work_and_double_clicking_title_restores_it() {
     let ctx = egui::Context::default();
     configure_tessellation(&ctx);
     ctx.set_pixels_per_point(1.0);
@@ -5835,6 +5812,13 @@ fn maximized_window_fills_work_and_dragging_title_restores_it() {
     assert_eq!(app.win_mgr.wins[i].rect(), work);
     win_frame(&mut app, &ctx, work, release(title));
 
+    let ctx = egui::Context::default();
+    configure_tessellation(&ctx);
+    ctx.set_pixels_per_point(1.0);
+    win_frame(&mut app, &ctx, work, vec![]);
+    win_frame(&mut app, &ctx, work, press(title));
+    win_frame(&mut app, &ctx, work, release(title));
+    assert!(app.win_mgr.wins[i].w.maximized);
     win_frame(&mut app, &ctx, work, press(title));
     win_frame(&mut app, &ctx, work, release(title));
     assert!(!app.win_mgr.wins[i].w.maximized);
@@ -5882,7 +5866,7 @@ fn pane_menus_stay_open_after_the_click() {
     let widths: Vec<f32> = tabs.iter().map(|t| tab_width(&mut app, t)).collect();
     let buttons = StockApp::pane_button_rects(title, &widths);
 
-    let p = buttons[1].center();
+    let p = buttons[2].center();
     win_frame(&mut app, &ctx, work, press(p));
     win_frame(&mut app, &ctx, work, release(p));
     assert_eq!(app.pane_menu, Some(pane), "点「切换」没开出指标面板");
@@ -5901,6 +5885,14 @@ fn pane_menus_stay_open_after_the_click() {
         vec![egui::Event::PointerMoved(panel.center())],
     );
     assert_eq!(app.pane_menu, Some(pane), "指针移进面板就把面板收了");
+    win_frame(
+        &mut app,
+        &ctx,
+        work,
+        vec![egui::Event::PointerMoved(buttons[1].center())],
+    );
+    assert_eq!(app.pane_menu, Some(pane));
+    assert_eq!(app.pane_menu_tab, 1);
 }
 
 #[test]
@@ -5944,7 +5936,7 @@ fn chart_title_menus_start_with_roundtable() {
             modifiers: egui::Modifiers::NONE,
         }]
     };
-    assert_eq!(StockApp::PANE_TABS, ["圆桌", "切换", "代码"]);
+    assert_eq!(StockApp::PANE_TABS, ["圆桌", "设置", "切换"]);
     render_events_in(&ctx, &mut app, click(first));
     render_events_in(&ctx, &mut app, release(first));
     assert_eq!(app.pane_menu, Some(pane));
@@ -5958,6 +5950,21 @@ fn chart_title_menus_start_with_roundtable() {
     render_events_in(&ctx, &mut app, click(item));
     render_events_in(&ctx, &mut app, release(item));
     assert_eq!(app.pane_menu, None);
+
+    app.pane_menu = Some(pane);
+    app.pane_menu_tab = 1;
+    app.pane_menu_anchor = StockApp::pane_button_rects(title, &widths)[1];
+    render_events_in(&ctx, &mut app, vec![]);
+    assert_eq!(app.pane_menu_count(), 1);
+    let rect = app.pane_menu_rect(1, work.max.y).expect("settings menu");
+    let item = egui::pos2(
+        rect.center().x,
+        rect.min.y + PANE_MENU_ROW_ROWS as f32 * PITCH / 2.0,
+    );
+    render_events_in(&ctx, &mut app, click(item));
+    render_events_in(&ctx, &mut app, release(item));
+    assert_eq!(app.pane_menu, None);
+    assert!(app.win_mgr.source_open());
 }
 
 #[test]
@@ -6408,6 +6415,8 @@ fn theme_json_files_parse_and_accept_user_edits() {
     edit["colors"]["chart"]["status"]["divider"] = serde_json::json!("#0A0B0C");
     edit["colors"]["application"]["menu_bar"]["popup"]["frame_border"] =
         serde_json::json!("#0D0E0F");
+    edit["colors"]["application"]["menu_bar"]["popup"]["frame_background"] =
+        serde_json::json!("#131415");
     edit["colors"]["application"]["title_bar"]["button"]["border"] = serde_json::json!("#101112");
     let edited =
         Theme::from_json(&edit.to_string(), ThemeId::Classic).expect("修改后的主题应能解析");
@@ -6433,6 +6442,10 @@ fn theme_json_files_parse_and_accept_user_edits() {
     assert_eq!(
         edited.menu_popup_frame_border,
         egui::Color32::from_rgb(0x0D, 0x0E, 0x0F)
+    );
+    assert_eq!(
+        edited.menu_popup_frame_bg,
+        egui::Color32::from_rgb(0x13, 0x14, 0x15)
     );
     assert_eq!(
         edited.title_button_border,
@@ -6499,7 +6512,7 @@ fn chart_view_state_is_independent_per_pane() {
 }
 
 #[test]
-fn pinned_windows_follow_pin_order_above_regular_windows() {
+fn pinned_windows_follow_focus_order_above_regular_windows() {
     let mut mgr = WinMgr::new();
     let a = mgr.add(
         WinKind::Chart,
@@ -6532,8 +6545,17 @@ fn pinned_windows_follow_pin_order_above_regular_windows() {
         order,
         vec![mgr.wins[b].w.id, mgr.wins[a].w.id, mgr.wins[c].w.id]
     );
+    let a_id = mgr.wins[a].w.id;
+    let c_id = mgr.wins[c].w.id;
+    mgr.activate(a);
+    assert_eq!(mgr.order_ids().last().copied(), Some(a_id));
+    let a = mgr
+        .wins
+        .iter()
+        .position(|window| window.w.id == a_id)
+        .unwrap();
     mgr.toggle_pin(a);
-    assert_eq!(mgr.order_ids().last().copied(), Some(mgr.wins[c].w.id));
+    assert_eq!(mgr.order_ids().last().copied(), Some(c_id));
 }
 
 #[test]
@@ -8550,6 +8572,25 @@ fn editor_selection_and_pointer_stay_inside_the_code_text_area() {
             && pinned.y <= body.max.y,
         "选字时指针跑出了代码文本框"
     );
+    win_frame(
+        &mut app,
+        &ctx,
+        work,
+        vec![egui::Event::PointerButton {
+            pos: outside,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert!(app.source.editor.focused);
+    win_frame(
+        &mut app,
+        &ctx,
+        work,
+        vec![key_event(egui::Key::Delete, false)],
+    );
+    assert_eq!(app.source.editor.buf.to_text(), "");
 }
 
 fn secondary_click(pos: egui::Pos2) -> (Vec<egui::Event>, Vec<egui::Event>) {
@@ -9667,10 +9708,10 @@ fn pane_menus_stay_open_until_a_click_or_key() {
         .iter()
         .map(|t| tab_width(&mut app, t))
         .collect();
-    let switch = StockApp::pane_button_rects(title, &widths)[1];
+    let switch = StockApp::pane_button_rects(title, &widths)[2];
 
     app.pane_menu = Some(pane);
-    app.pane_menu_tab = 1;
+    app.pane_menu_tab = 2;
     render_events_in(
         &ctx,
         &mut app,
@@ -9689,7 +9730,7 @@ fn pane_menus_stay_open_until_a_click_or_key() {
         "鼠标移出图表栏后菜单不该自动收回"
     );
 
-    let outside = plot.center();
+    let outside = egui::pos2(app.work_rect.min.x + 4.0, app.work_rect.max.y - 4.0);
     render_events_in(
         &ctx,
         &mut app,
@@ -11254,7 +11295,7 @@ fn pane_menu_survives_a_second_chart_window() {
         .iter()
         .map(|t| tab_width(&mut app, t))
         .collect();
-    let p = StockApp::pane_button_rects(title, &widths)[1].center();
+    let p = StockApp::pane_button_rects(title, &widths)[2].center();
     frame(
         &mut app,
         vec![
@@ -11316,7 +11357,7 @@ fn pane_menu_survives_a_second_chart_window() {
         .expect("第二块图表窗不见了");
     let body = ManagedWin::body(app.win_mgr.rect_of(other));
     let (title, _, _, _) = chart_rows(body, app.panes[other_pane].indicator.layout());
-    let p2 = StockApp::pane_button_rects(title, &widths)[1].center();
+    let p2 = StockApp::pane_button_rects(title, &widths)[2].center();
     frame(&mut app, vec![egui::Event::PointerMoved(p2)]);
     frame(
         &mut app,

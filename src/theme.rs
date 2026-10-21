@@ -118,6 +118,8 @@ pub(crate) struct Theme {
 
     pub(crate) menu_popup_bg: egui::Color32,
 
+    pub(crate) menu_popup_frame_bg: egui::Color32,
+
     pub(crate) menu_popup_text: egui::Color32,
 
     pub(crate) menu_popup_hover: egui::Color32,
@@ -301,6 +303,7 @@ impl Theme {
         menu_border: C_CTRL_BORDER,
         menu_separator: C_LINE,
         menu_popup_bg: C_MENU_BG,
+        menu_popup_frame_bg: C_MENU_BG,
         menu_popup_text: C_TEXT,
         menu_popup_hover: C_BTN_PRESS,
         menu_popup_border: C_CTRL_BORDER,
@@ -441,6 +444,7 @@ impl Theme {
         t.menu_border = t.ctrl_border;
         t.menu_separator = t.line;
         t.menu_popup_bg = t.menu_bg;
+        t.menu_popup_frame_bg = t.menu_bg;
         t.menu_popup_text = t.menu_text;
         t.menu_popup_hover = t.menu_hover;
         t.menu_popup_border = t.menu_border;
@@ -555,6 +559,7 @@ impl Theme {
             menu_border: colors.application.menu_bar.border.0,
             menu_separator: colors.application.menu_bar.separator.0,
             menu_popup_bg: colors.application.menu_bar.popup.background.0,
+            menu_popup_frame_bg: colors.application.menu_bar.popup.frame_background.0,
             menu_popup_text: colors.application.menu_bar.popup.text.0,
             menu_popup_hover: colors.application.menu_bar.popup.hover.0,
             menu_popup_border: colors.application.menu_bar.popup.border.0,
@@ -664,7 +669,7 @@ impl Theme {
         })
     }
 
-    pub(crate) const fn colors(&self) -> [egui::Color32; 113] {
+    pub(crate) const fn colors(&self) -> [egui::Color32; 114] {
         [
             self.title_bg,
             self.title_text,
@@ -679,6 +684,7 @@ impl Theme {
             self.menu_border,
             self.menu_separator,
             self.menu_popup_bg,
+            self.menu_popup_frame_bg,
             self.menu_popup_text,
             self.menu_popup_hover,
             self.menu_popup_border,
@@ -857,6 +863,7 @@ struct MenuBarColors {
 #[serde(deny_unknown_fields)]
 struct MenuPopupColors {
     background: HexColor,
+    frame_background: HexColor,
     text: HexColor,
     hover: HexColor,
     border: HexColor,

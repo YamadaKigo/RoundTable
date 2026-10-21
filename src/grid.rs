@@ -398,6 +398,8 @@ pub(crate) fn interact_rect(ui: &egui::Ui, rect: egui::Rect, sense: egui::Sense)
 
 pub(crate) fn polyline_hard(painter: &egui::Painter, pts: &[(f32, f32)], color: egui::Color32) {
     let mut mesh = egui::Mesh::default();
+    mesh.vertices.reserve(pts.len().saturating_mul(4));
+    mesh.indices.reserve(pts.len().saturating_mul(6));
 
     let mut fill = |x: f32, y0: f32, y1: f32| {
         let (a, b) = (y0.min(y1).round(), y0.max(y1).round());

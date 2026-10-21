@@ -7,7 +7,7 @@
     "application": {
       "title_bar": {
         "background": "#555555",
-        "pattern": "#666666",
+        "pattern": "#444444",
         "text": "#FFFFFF",
         "button": {
           "background": "#444444",
@@ -24,6 +24,7 @@
         "separator": "#990000",
         "popup": {
           "background": "#444444",
+          "frame_background": "#555555",
           "text": "#FFFFFF",
           "hover": "#666666",
           "border": "#990000",
@@ -48,7 +49,7 @@
     "window": {
       "background": "#333333",
       "panel": {
-        "background": "#333333",
+        "background": "#444444",
         "border": "#990000"
       },
       "border": "#990000",
@@ -58,7 +59,7 @@
     },
     "controls": {
       "button": {
-        "background": "#444444",
+        "background": "#333333",
         "hover": "#666666",
         "pressed": "#666666",
         "text": "#FFFFFF",
@@ -66,7 +67,7 @@
       },
       "border": "#990000",
       "selection": {
-        "background": "#666666"
+        "background": "#444444"
       },
       "text_input": {
         "background": "#333333",

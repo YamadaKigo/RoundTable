@@ -261,6 +261,14 @@ pub(crate) struct Glyph {
     pub(crate) atlas: [usize; 2],
 }
 
+#[derive(Clone, Copy, Default)]
+enum GlyphSlot {
+    #[default]
+    Unknown,
+    Missing,
+    Ready(Glyph),
+}
+
 pub(crate) struct HardText {
     pub(crate) dc_tt: isize,
     pub(crate) font_tt: isize,
@@ -278,6 +286,7 @@ pub(crate) struct HardText {
     pub(crate) next_y: usize,
     pub(crate) shelf_h: usize,
     pub(crate) glyphs: HashMap<char, Option<Glyph>>,
+    ascii_glyphs: [GlyphSlot; 128],
 }
 
 impl HardText {
@@ -416,11 +425,26 @@ impl HardText {
                 next_y: 0,
                 shelf_h: 0,
                 glyphs: HashMap::new(),
+                ascii_glyphs: [GlyphSlot::Unknown; 128],
             })
         }
     }
 
     pub(crate) fn glyph(&mut self, c: char) -> Option<Glyph> {
+        if c.is_ascii() {
+            let slot = c as usize;
+            match self.ascii_glyphs[slot] {
+                GlyphSlot::Ready(glyph) => return Some(glyph),
+                GlyphSlot::Missing => return None,
+                GlyphSlot::Unknown => {}
+            }
+            let glyph = self.rasterize(c);
+            self.ascii_glyphs[slot] = match glyph {
+                Some(glyph) => GlyphSlot::Ready(glyph),
+                None => GlyphSlot::Missing,
+            };
+            return glyph;
+        }
         if let Some(g) = self.glyphs.get(&c) {
             return *g;
         }
@@ -617,6 +641,8 @@ impl HardText {
         let mut pen = x0.round();
 
         let mut mesh = egui::Mesh::with_texture(self.texture.id());
+        mesh.vertices.reserve(s.len().saturating_mul(4));
+        mesh.indices.reserve(s.len().saturating_mul(6));
         for c in s.chars() {
             let step = char_advance(c);
             let x = pen.round();

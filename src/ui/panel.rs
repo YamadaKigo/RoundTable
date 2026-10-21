@@ -18,11 +18,11 @@ pub(crate) const SPLITTER_W: f32 = cells(SPLITTER_COLS);
 
 pub(crate) const PANEL_TITLE: &str = "控制面板";
 
-pub(crate) const PANEL_BTN_COUNT: i32 = 10;
+pub(crate) const PANEL_BTN_COUNT: i32 = 8;
 
 pub(crate) const PANEL_CHILD_ROWS: i32 = WIN_TITLE_ROWS + 1 + (PANEL_BTN_COUNT - 1) * 2 + 2 + 1;
 pub(crate) const PANEL_CHILD_H: f32 = cells(PANEL_CHILD_ROWS);
-const _: () = assert!(PANEL_BTN_COUNT == 10 && PANEL_CHILD_ROWS == 24);
+const _: () = assert!(PANEL_BTN_COUNT == 8 && PANEL_CHILD_ROWS == 20);
 
 pub(crate) const KLINE_ROWS: i32 = 50;
 pub(crate) const VOL_ROWS: i32 = 21;
@@ -72,13 +72,9 @@ pub(crate) enum PanelAction {
 
     OpenDownColor,
 
-    TogglePointerMode,
-
     TogglePointerTrail,
 
     PrintState,
-
-    ToggleTheme,
 
     FollowSystemColors,
 
@@ -304,19 +300,9 @@ impl StockApp {
                 PanelAction::OpenDownColor,
             ),
             (
-                ButtonContent::Text("切换鼠标控制".to_owned()),
-                "在软件鼠标与系统鼠标之间切换；系统鼠标保持系统指针原样",
-                PanelAction::TogglePointerMode,
-            ),
-            (
                 ButtonContent::Text("鼠标轨迹".to_owned()),
                 "开关指针工程调试叠层：最近一段轨迹、速度、加速度和坐标",
                 PanelAction::TogglePointerTrail,
-            ),
-            (
-                ButtonContent::Text("切换主题".to_owned()),
-                "在浅色 / 深色两套皮肤之间切换",
-                PanelAction::ToggleTheme,
             ),
             (
                 ButtonContent::Text("图表配色跟随系统".to_owned()),
@@ -364,15 +350,6 @@ impl StockApp {
 
             PanelAction::OpenUpColor => self.request_win(WinCmd::OpenColor(ColorTarget::Up)),
             PanelAction::OpenDownColor => self.request_win(WinCmd::OpenColor(ColorTarget::Down)),
-            PanelAction::TogglePointerMode => {
-                self.pointer.system = !self.pointer.system;
-                self.pointer.pinned = None;
-                self.status_msg = if self.pointer.system {
-                    "鼠标控制：系统鼠标（系统指针原样显示）".to_owned()
-                } else {
-                    "鼠标控制：软件鼠标".to_owned()
-                };
-            }
             PanelAction::TogglePointerTrail => {
                 self.pointer.show_trail = !self.pointer.show_trail;
                 self.status_msg = if self.pointer.show_trail {
@@ -381,7 +358,6 @@ impl StockApp {
                     "鼠标轨迹：关".to_owned()
                 };
             }
-            PanelAction::ToggleTheme => self.switch_theme(),
             PanelAction::FollowSystemColors => self.follow_system_chart_colors(),
 
             PanelAction::AddChart => self.request_win(WinCmd::AddChart),
@@ -391,7 +367,7 @@ impl StockApp {
                 self.status_msg = format!(
                     "图表 {} 块，窗口 {} 块，主题 {}，缩放 {}，平移 {}",
                     self.debug_windows.chart_count,
-                    self.debug_windows.windows.len(),
+                    self.debug_windows.window_count,
                     theme().name(),
                     view.map_or(0, |view| view.scale),
                     view.map_or(0, |view| view.offset)

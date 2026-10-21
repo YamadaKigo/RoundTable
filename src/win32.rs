@@ -41,12 +41,30 @@ unsafe extern "system" {
     pub(crate) fn SetCursorPos(x: i32, y: i32) -> i32;
     pub(crate) fn ClientToScreen(hwnd: isize, p: *mut Point) -> i32;
     pub(crate) fn GetLocalTime(time: *mut SystemTime);
+    pub(crate) fn MonitorFromWindow(hwnd: isize, flags: u32) -> isize;
+    fn GetMonitorInfoW(monitor: isize, info: *mut NativeMonitorInfo) -> i32;
 }
 
 #[repr(C)]
 pub(crate) struct Point {
     pub(crate) x: i32,
     pub(crate) y: i32,
+}
+
+#[repr(C)]
+struct NativeRect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[repr(C)]
+struct NativeMonitorInfo {
+    cb_size: u32,
+    monitor: NativeRect,
+    work: NativeRect,
+    flags: u32,
 }
 
 #[repr(C)]
@@ -122,6 +140,59 @@ pub(crate) fn screen_area() -> Option<(i32, i32, i32, i32)> {
     Some((0, 0, w, h))
 }
 
+pub(crate) fn enter_fullscreen(hwnd: isize) -> bool {
+    if hwnd == 0 {
+        return false;
+    }
+
+    const MONITOR_DEFAULTTONEAREST: u32 = 2;
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    let mut info = NativeMonitorInfo {
+        cb_size: core::mem::size_of::<NativeMonitorInfo>() as u32,
+        monitor: NativeRect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        },
+        work: NativeRect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        },
+        flags: 0,
+    };
+    if monitor == 0 || unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+        return false;
+    }
+    let rect = info.monitor;
+    let width = rect.right - rect.left;
+    let height = rect.bottom - rect.top;
+    if width <= 0 || height <= 0 {
+        return false;
+    }
+
+    let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) };
+    let fullscreen_style = (style & !(WS_CAPTION | WS_THICKFRAME)) | WS_POPUP | WS_VISIBLE;
+    if fullscreen_style != style {
+        unsafe {
+            SetWindowLongW(hwnd, GWL_STYLE, fullscreen_style);
+        }
+    }
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            rect.left,
+            rect.top,
+            width,
+            height,
+            SWP_SHOWWINDOW | SWP_FRAMECHANGED,
+        ) != 0
+    }
+}
+
 pub(crate) fn cursor_pos() -> Option<(i32, i32)> {
     let mut p = Point { x: 0, y: 0 };
     let ok = unsafe { GetCursorPos(&mut p) };
@@ -157,7 +228,25 @@ pub(crate) fn client_origin(hwnd: isize) -> Option<(i32, i32)> {
 }
 
 pub(crate) fn mouse_feel() -> crate::pointer::PointerFeel {
-    crate::pointer::PointerFeel::default()
+    const SPI_GETMOUSE: u32 = 0x0003;
+    const SPI_GETMOUSESPEED: u32 = 0x0070;
+    let mut speed = 10;
+    let mut mouse = [6, 10, 1];
+    unsafe {
+        SystemParametersInfoW(
+            SPI_GETMOUSESPEED,
+            0,
+            &mut speed as *mut i32 as *mut core::ffi::c_void,
+            0,
+        );
+        SystemParametersInfoW(
+            SPI_GETMOUSE,
+            0,
+            mouse.as_mut_ptr() as *mut core::ffi::c_void,
+            0,
+        );
+    }
+    crate::pointer::PointerFeel::from_system(speed, mouse)
 }
 
 pub(crate) const SPI_GETWORKAREA: u32 = 0x0030;
@@ -234,6 +323,8 @@ pub(crate) const MB_ICONERROR: u32 = 0x0000_0010;
 pub(crate) const MB_OK: u32 = 0x0000_0000;
 pub(crate) const WS_CAPTION: i32 = 0x00C0_0000;
 pub(crate) const WS_THICKFRAME: i32 = 0x0004_0000;
+pub(crate) const WS_POPUP: i32 = 0x8000_0000u32 as i32;
+pub(crate) const WS_VISIBLE: i32 = 0x1000_0000;
 pub(crate) const WS_EX_WINDOWEDGE: i32 = 0x0000_0100;
 pub(crate) const WS_EX_CLIENTEDGE: i32 = 0x0000_0200;
 pub(crate) const WS_EX_STATICEDGE: i32 = 0x0000_2000;
@@ -242,6 +333,8 @@ pub(crate) const SWP_NOMOVE: u32 = 0x0002;
 pub(crate) const SWP_NOZORDER: u32 = 0x0004;
 pub(crate) const SWP_NOACTIVATE: u32 = 0x0010;
 pub(crate) const SWP_FRAMECHANGED: u32 = 0x0020;
+pub(crate) const SWP_SHOWWINDOW: u32 = 0x0040;
+pub(crate) const HWND_TOPMOST: isize = -1;
 
 pub(crate) const WM_NCCALCSIZE: u32 = 0x0083;
 

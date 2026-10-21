@@ -101,13 +101,13 @@ fn main() -> eframe::Result {
 }
 
 fn run() -> eframe::Result {
-    let (win_x, win_y, win_w, win_h) = match platform::screen_area().or_else(platform::work_area) {
+    let (win_x, win_y, win_w, win_h) = match platform::work_area().or_else(platform::screen_area) {
         Some((x, y, w, h)) => (x as f32, y as f32, w as f32, h as f32),
         None => (0.0, 0.0, WINDOW_W, WINDOW_H),
     };
     let mut wgpu_options = eframe::WgpuConfiguration::default();
     wgpu_options.surface.present_mode = eframe::wgpu::PresentMode::AutoNoVsync;
-    wgpu_options.surface.desired_maximum_frame_latency = Some(1);
+    wgpu_options.surface.desired_maximum_frame_latency = Some(2);
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_NAME)
