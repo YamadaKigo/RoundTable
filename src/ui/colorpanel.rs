@@ -1,10 +1,10 @@
-use crate::app::*;
-use crate::grid::*;
-use crate::theme::*;
+use crate::application::app::*;
+use crate::domain::layout::*;
+use crate::engine::kit;
+use crate::engine::theme::*;
 use crate::ui::button::*;
 use crate::ui::icon::*;
 use crate::ui::textbox::*;
-use eframe::egui;
 
 pub(crate) const CP_COLS: i32 = 26;
 pub(crate) const CP_ROWS: i32 = 28;
@@ -32,21 +32,21 @@ pub(crate) const CP_Y_BTN: f32 = grid_line(CP_ROW_BTN);
 pub(crate) const CP_CLOSE_W: f32 = cells(2);
 const _: () = assert!(CP_CLOSE_W == WIN_CLOSE_W && CP_TITLE_ROWS == WIN_TITLE_ROWS);
 
-pub(crate) fn cp_band(panel: egui::Rect, row: i32, rows: i32) -> egui::Rect {
-    egui::Rect::from_min_size(
-        egui::pos2(panel.min.x, panel.min.y + grid_line(row)),
-        egui::vec2(CP_W, cells(rows)),
+pub(crate) fn cp_band(panel: kit::Rect, row: i32, rows: i32) -> kit::Rect {
+    kit::Rect::from_min_size(
+        kit::pos2(panel.min.x, panel.min.y + grid_line(row)),
+        kit::vec2(CP_W, cells(rows)),
     )
 }
 
-pub(crate) fn cp_inner(panel: egui::Rect, row: i32, rows: i32) -> egui::Rect {
+pub(crate) fn cp_inner(panel: kit::Rect, row: i32, rows: i32) -> kit::Rect {
     cp_band(panel, row, rows).shrink(LINE_W)
 }
 
-pub(crate) fn hex_box(panel: egui::Rect) -> egui::Rect {
+pub(crate) fn hex_box(panel: kit::Rect) -> kit::Rect {
     let band = cp_band(panel, CP_ROW_HEX, CP_HEX_ROWS);
-    egui::Rect::from_min_max(
-        egui::pos2(band.min.x + grid_line(CP_TRACK_LINE), band.min.y),
+    kit::Rect::from_min_max(
+        kit::pos2(band.min.x + grid_line(CP_TRACK_LINE), band.min.y),
         band.max,
     )
 }
@@ -77,9 +77,9 @@ pub(crate) const HEX_LEN_MAX: usize = 6;
 
 pub(crate) const HEX_PREFIX: &str = "#";
 
-pub(crate) const CP_APPLY_TEXT: &str = "应用";
+pub(crate) const CP_APPLY_TEXT: &str = "Apply";
 
-pub(crate) const CP_REVERT_TEXT: &str = "撤销";
+pub(crate) const CP_REVERT_TEXT: &str = "Undo";
 
 pub(crate) fn hex_input_char(c: char) -> bool {
     c != '#' && !c.is_control()
@@ -139,17 +139,17 @@ pub(crate) fn hsv_to_rgb(h: u16, s: u8, v: u8) -> (u8, u8, u8) {
     (to(r), to(g), to(b))
 }
 
-pub(crate) fn selection_cross_rects(center: egui::Pos2) -> [egui::Rect; 2] {
+pub(crate) fn selection_cross_rects(center: kit::Pos2) -> [kit::Rect; 2] {
     let cx = center.x.round();
     let cy = center.y.round();
     [
-        egui::Rect::from_min_size(
-            egui::pos2(cx - 3.0 * LINE_W, cy - LINE_W),
-            egui::vec2(6.0 * LINE_W, 2.0 * LINE_W),
+        kit::Rect::from_min_size(
+            kit::pos2(cx - 3.0 * LINE_W, cy - LINE_W),
+            kit::vec2(6.0 * LINE_W, 2.0 * LINE_W),
         ),
-        egui::Rect::from_min_size(
-            egui::pos2(cx - LINE_W, cy - 3.0 * LINE_W),
-            egui::vec2(2.0 * LINE_W, 6.0 * LINE_W),
+        kit::Rect::from_min_size(
+            kit::pos2(cx - LINE_W, cy - 3.0 * LINE_W),
+            kit::vec2(2.0 * LINE_W, 6.0 * LINE_W),
         ),
     ]
 }
@@ -180,17 +180,17 @@ pub(crate) fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (u16, u8, u8) {
     )
 }
 
-pub(crate) fn contrast_on(rgb: (u8, u8, u8)) -> egui::Color32 {
+pub(crate) fn contrast_on(rgb: (u8, u8, u8)) -> kit::Color32 {
     let luma = (299 * rgb.0 as u32 + 587 * rgb.1 as u32 + 114 * rgb.2 as u32) / 1000;
     if luma >= 128 {
-        egui::Color32::BLACK
+        kit::Color32::BLACK
     } else {
-        egui::Color32::WHITE
+        kit::Color32::WHITE
     }
 }
 
-pub(crate) fn rgb32(rgb: (u8, u8, u8)) -> egui::Color32 {
-    egui::Color32::from_rgb(rgb.0, rgb.1, rgb.2)
+pub(crate) fn rgb32(rgb: (u8, u8, u8)) -> kit::Color32 {
+    kit::Color32::from_rgb(rgb.0, rgb.1, rgb.2)
 }
 
 pub(crate) fn hex_of(rgb: (u8, u8, u8)) -> String {
@@ -257,8 +257,8 @@ pub(crate) enum ColorTarget {
 impl ColorTarget {
     pub(crate) fn name(self) -> &'static str {
         match self {
-            ColorTarget::Up => "涨",
-            ColorTarget::Down => "跌",
+            ColorTarget::Up => "Up",
+            ColorTarget::Down => "Down",
         }
     }
 }
@@ -292,7 +292,7 @@ pub(crate) struct ColorPanel {
 
     pub(crate) drag: ColorDrag,
 
-    pub(crate) drag_off: egui::Vec2,
+    pub(crate) drag_off: kit::Vec2,
 
     pub(crate) close_requested: bool,
 }
@@ -312,7 +312,7 @@ impl ColorPanel {
             hex: TextInput::new(HEX_LEN_MAX),
             hex_valid: true,
             drag: ColorDrag::None,
-            drag_off: egui::Vec2::ZERO,
+            drag_off: kit::Vec2::ZERO,
             close_requested: false,
         }
     }
@@ -367,40 +367,17 @@ impl ColorPanel {
     }
 }
 
-impl StockApp {
-    pub(crate) fn open_color_panel(&mut self, target: ColorTarget) {
-        let (up, down) = (self.up_color, self.down_color);
-        self.color_panel.pending_up = up;
-        self.color_panel.pending_down = down;
-        self.color_panel.initial_up = up;
-        self.color_panel.initial_down = down;
-        self.color_panel.target = target;
-        self.color_panel.drag = ColorDrag::None;
-        self.color_panel.close_requested = false;
-        let rgb = self.color_panel.pending_for(target);
-        self.color_panel.load(rgb);
-        if self.win_mgr.show_color(self.work_rect).is_none() {
-            let text = "窗口出生位置已触底，不能继续添加".to_owned();
-            self.status_msg = text.clone();
-            self.tooltip = Some((
-                egui::Rect::from_min_size(self.work_rect.center(), egui::vec2(LINE_W, LINE_W)),
-                text,
-            ));
-            return;
-        }
-        self.status_msg = format!("颜色面板：正在编辑{}色", target.name());
-    }
-
-    pub(crate) fn ui_color_panel_content(&mut self, ui: &mut egui::Ui, panel: egui::Rect) {
-        let mut cp = self.color_panel.clone();
+impl AppState {
+    pub(crate) fn ui_color_panel_content(&mut self, ui: &mut kit::Ui, panel: kit::Rect) {
+        let mut cp = self.shell.color_panel.clone();
 
         let painter = ui.painter().clone();
         painter.rect_filled(
-            egui::Rect::from_min_max(
-                egui::pos2(panel.min.x, panel.min.y + grid_line(CP_TITLE_ROWS)),
+            kit::Rect::from_min_max(
+                kit::pos2(panel.min.x, panel.min.y + grid_line(CP_TITLE_ROWS)),
                 panel.max,
             ),
-            egui::CornerRadius::ZERO,
+            kit::CornerRadius::ZERO,
             theme().color_picker_bg,
         );
 
@@ -415,13 +392,13 @@ impl StockApp {
         let sv = cp_inner(panel, CP_ROW_SV, CP_SV_ROWS);
         for row in 0..SV_ROWS {
             for col in 0..SV_COLS {
-                let block = egui::Rect::from_min_size(
-                    egui::pos2(sv.min.x + col as f32 * PITCH, sv.min.y + row as f32 * PITCH),
-                    egui::vec2(SV_BLOCK, SV_BLOCK),
+                let block = kit::Rect::from_min_size(
+                    kit::pos2(sv.min.x + col as f32 * PITCH, sv.min.y + row as f32 * PITCH),
+                    kit::vec2(SV_BLOCK, SV_BLOCK),
                 );
                 painter.rect_filled(
                     block,
-                    egui::CornerRadius::ZERO,
+                    kit::CornerRadius::ZERO,
                     rgb32(hsv_to_rgb(cp.h, s_of_col(col), v_of_row(row))),
                 );
             }
@@ -446,7 +423,7 @@ impl StockApp {
                 theme().color_picker_border,
             );
         }
-        let sv_resp = ui.allocate_rect(sv, egui::Sense::click_and_drag());
+        let sv_resp = ui.allocate_rect(sv, kit::Sense::click_and_drag());
         if sv_resp.hovered() || sv_resp.is_pointer_button_down_on() {
             self.pointer.hint = CursorKind::Slider;
         }
@@ -461,7 +438,7 @@ impl StockApp {
             }
         }
 
-        let sel_center = egui::pos2(
+        let sel_center = kit::pos2(
             sv.min.x + col_of_s(cp.s) as f32 * PITCH + SV_BLOCK / 2.0,
             sv.min.y + row_of_v(cp.v) as f32 * PITCH + SV_BLOCK / 2.0,
         );
@@ -521,11 +498,11 @@ impl StockApp {
 
         self.text(
             &painter,
-            egui::pos2(
+            kit::pos2(
                 text_left_x(hex_band.min.x, panel.min.x),
                 hex_band.center().y,
             ),
-            egui::Align2::LEFT_CENTER,
+            kit::Align2::LEFT_CENTER,
             HEX_PREFIX,
             theme().input_text,
         );
@@ -533,7 +510,7 @@ impl StockApp {
             self,
             ui,
             hex_box,
-            egui::Id::new("rt_color_hex"),
+            kit::Id::new("rt_color_hex"),
             &hex_input_char,
             TextInputStyle {
                 bg: theme().input_bg,
@@ -559,10 +536,10 @@ impl StockApp {
 
         let btn_band = cp_band(panel, CP_ROW_BTN, CP_BTN_ROWS);
         let apply_rect =
-            egui::Rect::from_min_size(btn_band.min, egui::vec2(CP_LEFT_W, btn_band.height()));
-        let cancel_rect = egui::Rect::from_min_size(
-            egui::pos2(btn_band.min.x + CP_HALF_W - LINE_W, btn_band.min.y),
-            egui::vec2(CP_HALF_W, btn_band.height()),
+            kit::Rect::from_min_size(btn_band.min, kit::vec2(CP_LEFT_W, btn_band.height()));
+        let cancel_rect = kit::Rect::from_min_size(
+            kit::pos2(btn_band.min.x + CP_HALF_W - LINE_W, btn_band.min.y),
+            kit::vec2(CP_HALF_W, btn_band.height()),
         );
         let mut close_after = false;
         let apply_text = ButtonContent::Text(CP_APPLY_TEXT.to_owned());
@@ -570,14 +547,14 @@ impl StockApp {
             cp.save_pending();
             let rgb = cp.pending_for(cp.target);
             match cp.target {
-                ColorTarget::Up => self.up_color = rgb,
-                ColorTarget::Down => self.down_color = rgb,
+                ColorTarget::Up => self.chart_ui.up_color = rgb,
+                ColorTarget::Down => self.chart_ui.down_color = rgb,
             }
             self.mark_panes_dirty();
-            self.chart_follows_theme = false;
+            self.chart_ui.chart_follows_theme = false;
             cp.close_session();
-            self.status_msg = format!(
-                "已应用：{}色 {}（图表配色改为自定义）",
+            self.shell.status_msg = format!(
+                "Applied {} {} (chart colors are now custom)",
                 cp.target.name(),
                 hex_of(rgb)
             );
@@ -586,7 +563,8 @@ impl StockApp {
         let cancel_text = ButtonContent::Text(CP_REVERT_TEXT.to_owned());
         if self.draw_button(ui, &painter, cancel_rect, &cancel_text, false, "") {
             cp.revert_initial();
-            self.status_msg = "颜色面板：已撤销到打开时的颜色".to_owned();
+            self.shell.status_msg =
+                "Color panel: restored the colors from when it opened".to_owned();
         }
 
         for row in [
@@ -608,8 +586,8 @@ impl StockApp {
 
         let mark = contrast_on(cp.rgb);
         let [horizontal, vertical] = selection_cross_rects(sel_center);
-        painter.rect_filled(horizontal, egui::CornerRadius::ZERO, mark);
-        painter.rect_filled(vertical, egui::CornerRadius::ZERO, mark);
+        painter.rect_filled(horizontal, kit::CornerRadius::ZERO, mark);
+        painter.rect_filled(vertical, kit::CornerRadius::ZERO, mark);
 
         let hex_edge = theme().color_picker_border;
         vline_hard(
@@ -641,21 +619,24 @@ impl StockApp {
             cp.hex.set_text(&hex_digits(cp.rgb));
             cp.hex_valid = true;
         }
-        self.color_panel = cp;
+        self.shell.color_panel = cp;
         if close_after {
-            self.color_panel.close_requested = true;
+            self.shell.color_panel.close_requested = true;
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "hard-edge primitive keeps geometry arguments explicit"
+    )]
     pub(crate) fn color_slider(
         &mut self,
-        ui: &mut egui::Ui,
-        painter: &egui::Painter,
+        ui: &mut kit::Ui,
+        painter: &kit::Painter,
         slot: u8,
         drag: &mut ColorDrag,
-        drag_off: &mut egui::Vec2,
-        row: egui::Rect,
+        drag_off: &mut kit::Vec2,
+        row: kit::Rect,
         label: &str,
         value_text: &str,
         ratio: f32,
@@ -666,49 +647,49 @@ impl StockApp {
             .pointer
             .live
             .or_else(|| ui.input(|i| i.pointer.latest_pos()));
-        let track = egui::Rect::from_min_size(
-            egui::pos2(row.min.x + grid_line(CP_TRACK_LINE), row.min.y),
-            egui::vec2(CP_TRACK_W, row.height()),
+        let track = kit::Rect::from_min_size(
+            kit::pos2(row.min.x + grid_line(CP_TRACK_LINE), row.min.y),
+            kit::vec2(CP_TRACK_W, row.height()),
         );
         self.text(
             painter,
-            egui::pos2(text_left_x(row.min.x, row.min.x), row.center().y),
-            egui::Align2::LEFT_CENTER,
+            kit::pos2(text_left_x(row.min.x, row.min.x), row.center().y),
+            kit::Align2::LEFT_CENTER,
             label,
             theme().input_text,
         );
 
-        let value_rect = egui::Rect::from_min_size(
-            egui::pos2(
+        let value_rect = kit::Rect::from_min_size(
+            kit::pos2(
                 row.min.x + grid_line(CP_TRACK_LINE + CP_TRACK_COLS + CP_SLIDER_GAP_COLS),
                 row.min.y,
             ),
-            egui::vec2(cells(CP_SLIDER_VALUE_COLS), row.height()),
+            kit::vec2(cells(CP_SLIDER_VALUE_COLS), row.height()),
         );
         self.text(
             painter,
             value_rect.center(),
-            egui::Align2::CENTER_CENTER,
+            kit::Align2::CENTER_CENTER,
             value_text,
             theme().input_text,
         );
 
         let inner = track.shrink(LINE_W);
         for i in 0..CP_TRACK_INNER_W {
-            let bar = egui::Rect::from_min_size(
-                egui::pos2(inner.min.x + i as f32, inner.min.y),
-                egui::vec2(LINE_W, inner.height()),
+            let bar = kit::Rect::from_min_size(
+                kit::pos2(inner.min.x + i as f32, inner.min.y),
+                kit::vec2(LINE_W, inner.height()),
             );
-            painter.rect_filled(bar, egui::CornerRadius::ZERO, rgb32(grad(i)));
+            painter.rect_filled(bar, kit::CornerRadius::ZERO, rgb32(grad(i)));
         }
 
         let rest_x = handle_left(track.min.x, ratio);
-        let rest = egui::Rect::from_min_size(
-            egui::pos2(rest_x, row.min.y),
-            egui::vec2(CP_HANDLE_W, row.height()),
+        let rest = kit::Rect::from_min_size(
+            kit::pos2(rest_x, row.min.y),
+            kit::vec2(CP_HANDLE_W, row.height()),
         );
 
-        let track_resp = ui.allocate_rect(track, egui::Sense::click_and_drag());
+        let track_resp = ui.allocate_rect(track, kit::Sense::click_and_drag());
         let over_track = track_resp.hovered();
         let wheel_value = if over_track && *drag == ColorDrag::None {
             let notches = color_wheel_notches(ui);
@@ -722,8 +703,8 @@ impl StockApp {
 
         let knob = ui.interact(
             rest,
-            egui::Id::new(("rt_cp_slider_knob", slot)),
-            egui::Sense::click_and_drag(),
+            kit::Id::new(("rt_cp_slider_knob", slot)),
+            kit::Sense::click_and_drag(),
         );
 
         if knob.hovered() || over_track || *drag == ColorDrag::Slider(slot) {
@@ -760,16 +741,12 @@ impl StockApp {
             (None, Some(value)) => handle_left(track.min.x, value as f32 / max as f32),
             (None, None) => rest_x,
         };
-        let handle = egui::Rect::from_min_size(
-            egui::pos2(hx, row.min.y),
-            egui::vec2(CP_HANDLE_W, row.height()),
+        let handle = kit::Rect::from_min_size(
+            kit::pos2(hx, row.min.y),
+            kit::vec2(CP_HANDLE_W, row.height()),
         );
 
-        painter.rect_filled(
-            handle,
-            egui::CornerRadius::ZERO,
-            theme().color_picker_handle,
-        );
+        painter.rect_filled(handle, kit::CornerRadius::ZERO, theme().color_picker_handle);
         border_hard(painter, handle, theme().color_picker_border);
 
         vline_hard(
@@ -793,15 +770,46 @@ impl StockApp {
     }
 }
 
-fn color_wheel_notches(ui: &egui::Ui) -> i32 {
+impl StockApp {
+    pub(crate) fn open_color_panel(&mut self, target: ColorTarget) {
+        let (up, down) = (self.state.chart_ui.up_color, self.state.chart_ui.down_color);
+        self.state.shell.color_panel.pending_up = up;
+        self.state.shell.color_panel.pending_down = down;
+        self.state.shell.color_panel.initial_up = up;
+        self.state.shell.color_panel.initial_down = down;
+        self.state.shell.color_panel.target = target;
+        self.state.shell.color_panel.drag = ColorDrag::None;
+        self.state.shell.color_panel.close_requested = false;
+        let rgb = self.state.shell.color_panel.pending_for(target);
+        self.state.shell.color_panel.load(rgb);
+        if self
+            .win_mgr
+            .show_color(self.state.chart_ui.work_rect)
+            .is_none()
+        {
+            let text = "No room left to open another window".to_owned();
+            self.state.shell.status_msg = text.clone();
+            self.state.shell.tooltip = Some((
+                kit::Rect::from_min_size(
+                    self.state.chart_ui.work_rect.center(),
+                    kit::vec2(LINE_W, LINE_W),
+                ),
+                text,
+            ));
+            return;
+        }
+        self.state.shell.status_msg = format!("Color panel: editing {}", target.name());
+    }
+}
+
+fn color_wheel_notches(ui: &kit::Ui) -> i32 {
     let mut acc = 0.0f32;
     ui.input(|i| {
         for event in &i.events {
-            if let egui::Event::MouseWheel { unit, delta, .. } = event {
+            if let kit::Event::MouseWheel { unit, delta, .. } = event {
                 acc += match unit {
-                    egui::MouseWheelUnit::Line => delta.y,
-                    egui::MouseWheelUnit::Point => delta.y / WHEEL_POINTS_PER_NOTCH,
-                    egui::MouseWheelUnit::Page => delta.y,
+                    kit::MouseWheelUnit::Line => delta.y,
+                    kit::MouseWheelUnit::Point => delta.y / WHEEL_POINTS_PER_NOTCH,
                 };
             }
         }

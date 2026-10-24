@@ -1,8 +1,8 @@
-use crate::app::*;
-use crate::grid::*;
-use crate::indicator;
+use crate::application::app::*;
+use crate::domain::indicator;
+use crate::domain::layout::*;
+use crate::engine::kit;
 use crate::ui::editor::*;
-use eframe::egui;
 
 pub(crate) struct SourceView {
     pub(crate) pane: usize,
@@ -27,100 +27,78 @@ impl SourceView {
 
 pub(crate) const EDITOR_ID: &str = "rt_source_editor";
 
-impl StockApp {
-    pub(crate) fn open_source_window(&mut self, pane: usize) {
-        if !self.win_mgr.source_open()
-            && !self
-                .win_mgr
-                .can_spawn_window(self.work_rect, egui::vec2(SRC_W, SRC_H))
-        {
-            let text = "窗口出生位置已触底，不能继续添加".to_owned();
-            self.status_msg = text.clone();
-            self.tooltip = Some((
-                egui::Rect::from_min_size(self.work_rect.center(), egui::vec2(LINE_W, LINE_W)),
-                text,
-            ));
-            return;
-        }
-        if self.source.pane != pane || !self.win_mgr.source_open() {
-            self.open_pane_source(pane);
-        }
-        if self.win_mgr.show_source(self.work_rect).is_none() {
-            let text = "窗口出生位置已触底，不能继续添加".to_owned();
-            self.status_msg = text.clone();
-            self.tooltip = Some((
-                egui::Rect::from_min_size(self.work_rect.center(), egui::vec2(LINE_W, LINE_W)),
-                text,
-            ));
-            return;
-        }
-        let name = self.panes[pane].indicator.name().to_owned();
-        self.status_msg = format!("指标代码：{name}");
-    }
-
+impl AppState {
     pub(crate) fn source_title(&self) -> String {
-        let name = self.panes[self.source.pane].indicator.name();
-        let star = if self.source.editor.modified {
+        let name = self.chart_world.panes[self.workbench.source.pane]
+            .indicator
+            .name();
+        let star = if self.workbench.source.editor.modified {
             " *"
         } else {
             ""
         };
-        format!("指标代码 - {name}{star}")
+        format!("Indicator Source - {name}{star}")
     }
 
     pub(crate) fn reload_source(&mut self, pane: usize) {
-        let src = indicator::script_source(self.panes[pane].indicator.name());
-        let name = self.panes[pane].indicator.name().to_owned();
-        self.source.pane = pane;
-        self.source.editor.load(&src);
-        self.source.last_text = src;
-        self.source.user_path = Some(indicator::user_script_path(pane, &name));
-        self.status_msg = format!("指标代码：{name}");
+        let src = indicator::script_source(self.chart_world.panes[pane].indicator.name());
+        let name = self.chart_world.panes[pane].indicator.name().to_owned();
+        self.workbench.source.pane = pane;
+        self.workbench.source.editor.load(&src);
+        self.workbench.source.last_text = src.clone();
+        self.workbench.source.user_path = Some(indicator::user_script_path(pane, &name));
+        self.apply_script_source(src);
+        self.shell.status_msg = format!("Indicator source: {name}");
     }
 
     fn open_pane_source(&mut self, pane: usize) {
-        let name = self.panes[pane].indicator.name().to_owned();
+        let name = self.chart_world.panes[pane].indicator.name().to_owned();
         let user_path = indicator::user_script_path(pane, &name);
         let src =
             std::fs::read_to_string(&user_path).unwrap_or_else(|_| indicator::script_source(&name));
-        self.source.pane = pane;
-        self.source.editor.load(&src);
-        self.source.last_text = src;
-        self.source.user_path = Some(user_path);
-        self.apply_script_source(self.source.last_text.clone());
-        self.status_msg = format!("指标代码：{name}");
+        self.workbench.source.pane = pane;
+        self.workbench.source.editor.load(&src);
+        self.workbench.source.last_text = src;
+        self.workbench.source.user_path = Some(user_path);
+        self.apply_script_source(self.workbench.source.last_text.clone());
+        self.shell.status_msg = format!("Indicator source: {name}");
     }
 
-    pub(crate) fn close_source(&mut self) {
-        self.win_mgr.hide_source();
-        self.status_msg = "指标代码编辑窗：已关闭".to_owned();
+    pub(crate) fn revert_unsaved_source_if_needed(&mut self) -> bool {
+        if !self.workbench.source.editor.modified {
+            return false;
+        }
+        let pane = self.workbench.source.pane;
+        self.reload_source(pane);
+        self.workbench.source.editor.modified = false;
+        true
     }
 
-    pub(crate) fn ui_source_body(&mut self, ui: &mut egui::Ui, rect: egui::Rect) -> EditorCmd {
-        let mut editor = std::mem::take(&mut self.source.editor);
-        let cmd = editor.ui(self, ui, rect, egui::Id::new(EDITOR_ID));
+    pub(crate) fn ui_source_body(&mut self, ui: &mut kit::Ui, rect: kit::Rect) -> EditorCmd {
+        let mut editor = std::mem::take(&mut self.workbench.source.editor);
+        let cmd = editor.ui(self, ui, rect, kit::Id::new(EDITOR_ID));
         let text = editor.buf.to_text();
-        let changed = text != self.source.last_text;
-        self.source.editor = editor;
+        let changed = text != self.workbench.source.last_text;
+        self.workbench.source.editor = editor;
         if changed {
-            self.source.last_text = text.clone();
+            self.workbench.source.last_text = text.clone();
             self.apply_script_source(text);
         }
         cmd
     }
 
     pub(crate) fn apply_script_source(&mut self, text: String) {
-        let pane = self.source.pane;
-        match crate::script::ScriptProgram::parse(&text) {
+        let pane = self.workbench.source.pane;
+        match crate::domain::script::ScriptProgram::parse(&text) {
             Ok(script) => {
-                self.panes[pane].script = Some(script);
-                self.panes[pane].script_source = text;
-                self.panes[pane].script_error = None;
-                self.panes[pane].dirty = true;
+                self.chart_world.panes[pane].script = Some(script);
+                self.chart_world.panes[pane].script_source = text;
+                self.chart_world.panes[pane].script_error = None;
+                self.chart_world.panes[pane].dirty = true;
             }
             Err(error) => {
-                self.panes[pane].script_error = Some(error.clone());
-                self.status_msg = format!("指标代码错误：{error}");
+                self.chart_world.panes[pane].script_error = Some(error.clone());
+                self.shell.status_msg = format!("Indicator source error: {error}");
             }
         }
     }
@@ -131,47 +109,118 @@ impl StockApp {
             EditorCmd::New => self.new_source(),
             EditorCmd::Save => self.save_source(),
             EditorCmd::Reload => {
-                let pane = self.source.pane;
+                let pane = self.workbench.source.pane;
                 self.reload_source(pane);
-                let name = self.panes[pane].indicator.name().to_owned();
-                self.status_msg = format!("已还原成原始指标代码：{name}");
+                let name = self.chart_world.panes[pane].indicator.name().to_owned();
+                self.shell.status_msg = format!("Restored the original indicator source: {name}");
             }
-            EditorCmd::Close => self.close_source(),
+            EditorCmd::Close => self.request_win(WinCmd::CloseSource),
 
             _ => {}
         }
     }
 
     pub(crate) fn new_source(&mut self) {
-        self.source.editor.load("");
-        self.source.editor.modified = true;
-        self.source.last_text.clear();
+        self.workbench.source.editor.load("");
+        self.workbench.source.editor.modified = true;
+        self.workbench.source.last_text.clear();
         self.apply_script_source(String::new());
-        self.status_msg = "新建空白文件".to_owned();
+        self.shell.status_msg = "New empty file".to_owned();
     }
 
     pub(crate) fn save_source(&mut self) {
-        let name = self.panes[self.source.pane].indicator.name().to_owned();
+        let name = self.chart_world.panes[self.workbench.source.pane]
+            .indicator
+            .name()
+            .to_owned();
         let path = self
+            .workbench
             .source
             .user_path
             .clone()
-            .unwrap_or_else(|| indicator::user_script_path(self.source.pane, &name));
+            .unwrap_or_else(|| indicator::user_script_path(self.workbench.source.pane, &name));
         if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
+            if let Err(error) = std::fs::create_dir_all(dir) {
+                self.shell.status_msg = format!(
+                    "Save failed: cannot create {}: {}",
+                    dir.display(),
+                    plain_text(&error.to_string())
+                );
+                return;
+            }
         }
-        let text = self.source.editor.buf.to_text();
+        let text = self.workbench.source.editor.buf.to_text();
         self.apply_script_source(text.clone());
         match write_source(&path, &text) {
             Ok(()) => {
-                self.source.editor.modified = false;
-                self.source.last_text = text;
-                self.status_msg = format!("已保存 {}", file_name(&path.to_string_lossy()));
+                self.workbench.source.editor.modified = false;
+                self.workbench.source.last_text = text;
+                self.shell.status_msg = format!("Saved {}", file_name(&path.to_string_lossy()));
             }
             Err(e) => {
-                self.status_msg = format!("保存失败：{}", plain_text(&e.to_string()));
+                self.shell.status_msg = format!("Save failed: {}", plain_text(&e.to_string()));
             }
         }
+    }
+}
+
+impl StockApp {
+    pub(crate) fn open_source_window(&mut self, pane: usize) {
+        if !self.win_mgr.source_open()
+            && !self
+                .win_mgr
+                .can_spawn_window(self.state.chart_ui.work_rect, kit::vec2(SRC_W, SRC_H))
+        {
+            let text = "No room left to open another window".to_owned();
+            self.state.shell.status_msg = text.clone();
+            self.state.shell.tooltip = Some((
+                kit::Rect::from_min_size(
+                    self.state.chart_ui.work_rect.center(),
+                    kit::vec2(LINE_W, LINE_W),
+                ),
+                text,
+            ));
+            return;
+        }
+        if self.state.workbench.source.pane != pane && self.state.workbench.source.editor.modified {
+            self.state.revert_unsaved_source_if_needed();
+        }
+        if self.state.workbench.source.pane != pane || !self.win_mgr.source_open() {
+            self.state.open_pane_source(pane);
+        }
+        if self
+            .win_mgr
+            .show_source(self.state.chart_ui.work_rect)
+            .is_none()
+        {
+            let text = "No room left to open another window".to_owned();
+            self.state.shell.status_msg = text.clone();
+            self.state.shell.tooltip = Some((
+                kit::Rect::from_min_size(
+                    self.state.chart_ui.work_rect.center(),
+                    kit::vec2(LINE_W, LINE_W),
+                ),
+                text,
+            ));
+            return;
+        }
+        self.state.workbench.debug_windows.source_open = true;
+        let name = self.state.chart_world.panes[pane]
+            .indicator
+            .name()
+            .to_owned();
+        self.state.shell.status_msg = format!("Indicator source: {name}");
+    }
+
+    pub(crate) fn close_source(&mut self) {
+        let restored = self.state.revert_unsaved_source_if_needed();
+        self.win_mgr.hide_source();
+        self.state.workbench.debug_windows.source_open = false;
+        self.state.shell.status_msg = if restored {
+            "Indicator editor closed; unsaved changes were reverted".to_owned()
+        } else {
+            "Indicator editor closed".to_owned()
+        };
     }
 }
 

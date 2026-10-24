@@ -1,8 +1,9 @@
-use crate::app::*;
-use crate::grid::*;
-use crate::theme::*;
+use crate::application::app::*;
+use crate::domain::layout::*;
+use crate::engine::kit;
+use crate::engine::theme::*;
+#[cfg(test)]
 use crate::ui::icon::*;
-use eframe::egui;
 
 pub(crate) const BTN_ROWS: i32 = TEXT_ROWS;
 pub(crate) const BTN_H: f32 = cells(BTN_ROWS);
@@ -20,7 +21,7 @@ pub(crate) enum ButtonState {
 }
 
 impl ButtonState {
-    pub(crate) fn face(self) -> egui::Color32 {
+    pub(crate) fn face(self) -> kit::Color32 {
         match self {
             ButtonState::Idle => theme().btn_face,
             ButtonState::Hover => theme().btn_hover,
@@ -35,20 +36,38 @@ pub(crate) enum ButtonContent {
 
     Symbol(SymbolKind),
 
-    #[allow(dead_code)]
-    IconText(IconKind, String),
-
-    #[allow(dead_code)]
+    #[cfg(test)]
     Icon(IconKind),
 }
 
 impl ButtonContent {
+    pub(crate) fn tooltip(&self) -> String {
+        match self {
+            ButtonContent::Text(text) => text.clone(),
+            ButtonContent::Symbol(kind) => match kind {
+                SymbolKind::Minimize => "Minimize",
+                SymbolKind::Maximize => "Maximize",
+                SymbolKind::Restore => "Restore",
+                SymbolKind::Close => "Close",
+                SymbolKind::Pin => "Pin",
+                SymbolKind::Unpin => "Pinned",
+                SymbolKind::Exclusive => "Lock",
+                SymbolKind::ExclusiveOn => "Free",
+                SymbolKind::PageUp => "Previous Page",
+                SymbolKind::PageDown => "Next Page",
+            }
+            .to_owned(),
+            #[cfg(test)]
+            ButtonContent::Icon(kind) => kind.label().to_owned(),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn label(&self) -> String {
         match self {
             ButtonContent::Text(text) => text.clone(),
             ButtonContent::Symbol(kind) => kind.file_stem().to_owned(),
-            ButtonContent::IconText(_, text) => text.clone(),
+            #[cfg(test)]
             ButtonContent::Icon(kind) => kind.label().to_owned(),
         }
     }
@@ -56,9 +75,18 @@ impl ButtonContent {
     pub(crate) fn class(&self) -> ButtonClass {
         match self {
             ButtonContent::Text(_) => ButtonClass::Text,
-            ButtonContent::Symbol(_) | ButtonContent::Icon(_) | ButtonContent::IconText(..) => {
-                ButtonClass::Icon
-            }
+            ButtonContent::Symbol(_) => ButtonClass::Icon,
+            #[cfg(test)]
+            ButtonContent::Icon(_) => ButtonClass::Icon,
+        }
+    }
+
+    pub(crate) fn interaction_id(&self) -> kit::Id {
+        match self {
+            ButtonContent::Text(text) => kit::Id::new(("button_text", text)),
+            ButtonContent::Symbol(kind) => kit::Id::new(("button_symbol", kind.file_stem())),
+            #[cfg(test)]
+            ButtonContent::Icon(kind) => kit::Id::new(("button_icon", kind.file_stem())),
         }
     }
 }
@@ -92,19 +120,18 @@ impl Button {
         self
     }
 
-    pub(crate) fn measure(&mut self, app: &mut StockApp) -> &mut Self {
+    pub(crate) fn measure(&mut self, app: &mut AppState) -> &mut Self {
         self.w = app.button_width(&self.content);
         self
     }
 }
 
-impl StockApp {
+impl AppState {
     pub(crate) fn button_width(&mut self, content: &ButtonContent) -> f32 {
         let inner = match content {
             ButtonContent::Text(text) => self.text_width(text),
             ButtonContent::Symbol(_) => SYMBOL_W,
-            ButtonContent::IconText(_, text) => ICON_W + ICON_GAP + self.text_width(text),
-
+            #[cfg(test)]
             ButtonContent::Icon(_) => return cells(2),
         };
         snap_cells_up(inner + 2.0 * TEXT_PAD_X).min(BTN_MAX_W)
@@ -112,9 +139,9 @@ impl StockApp {
 
     pub(crate) fn draw_button(
         &mut self,
-        ui: &mut egui::Ui,
-        painter: &egui::Painter,
-        rect: egui::Rect,
+        ui: &mut kit::Ui,
+        painter: &kit::Painter,
+        rect: kit::Rect,
         content: &ButtonContent,
         pressed: bool,
         tip: &str,
@@ -130,19 +157,22 @@ impl StockApp {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "hard-edge primitive keeps geometry arguments explicit"
+    )]
     pub(crate) fn draw_button_with_text(
         &mut self,
-        ui: &mut egui::Ui,
-        painter: &egui::Painter,
-        rect: egui::Rect,
+        ui: &mut kit::Ui,
+        painter: &kit::Painter,
+        rect: kit::Rect,
         content: &ButtonContent,
         pressed: bool,
         tip: &str,
-        text_color: egui::Color32,
+        text_color: kit::Color32,
     ) -> bool {
-        let resp = interact_rect(ui, rect, egui::Sense::click());
-        let active = ui.is_enabled() && !self.win_silent;
+        let resp = interact_rect(ui, rect, content.interaction_id(), kit::Sense::click());
+        let active = ui.is_enabled() && !self.shell.win_silent;
         let state = if active && (pressed || resp.is_pointer_button_down_on()) {
             ButtonState::Pressed
         } else if active && resp.hovered() {
@@ -151,11 +181,18 @@ impl StockApp {
             ButtonState::Idle
         };
 
-        painter.rect_filled(rect, egui::CornerRadius::ZERO, state.face());
+        painter.rect_filled(rect, kit::CornerRadius::ZERO, state.face());
         border_hard(painter, rect, theme().button_border);
 
-        if active && resp.hovered() && !tip.is_empty() {
-            self.tooltip = Some((rect, tip.to_owned()));
+        if active && resp.hovered() {
+            let text = if tip.is_empty() {
+                content.tooltip()
+            } else {
+                tip.to_owned()
+            };
+            if !text.is_empty() {
+                self.shell.tooltip = Some((rect, text));
+            }
         }
 
         match content {
@@ -164,50 +201,32 @@ impl StockApp {
                 self.text(
                     painter,
                     rect.center(),
-                    egui::Align2::CENTER_CENTER,
+                    kit::Align2::CENTER_CENTER,
                     &text,
                     text_color,
                 );
             }
             ButtonContent::Symbol(kind) => {
-                let symbol = self.symbols.get(*kind);
+                let symbol = self.assets.symbols.get(*kind);
                 let rect =
-                    egui::Rect::from_center_size(rect.center(), egui::vec2(SYMBOL_W, SYMBOL_H));
+                    kit::Rect::from_center_size(rect.center(), kit::vec2(SYMBOL_W, SYMBOL_H));
                 symbol.paint(painter, rect, theme().symbol);
             }
+            #[cfg(test)]
             ButtonContent::Icon(kind) => {
-                let icon = egui::Rect::from_min_size(
-                    egui::pos2(rect.min.x + LINE_W, rect.min.y + LINE_W),
-                    egui::vec2(ICON_W, ICON_H),
+                let icon = kit::Rect::from_min_size(
+                    kit::pos2(rect.min.x + LINE_W, rect.min.y + LINE_W),
+                    kit::vec2(ICON_W, ICON_H),
                 );
-                let img = *self.icons.get(*kind);
+                let img = *self.assets.icons.get(*kind);
                 img.paint(painter, icon);
-            }
-            ButtonContent::IconText(kind, text) => {
-                let text = text.clone();
-                let total = ICON_W + ICON_GAP + self.text_width(&text);
-                let icon_x = (rect.center().x - total / 2.0).round();
-
-                let icon = egui::Rect::from_min_size(
-                    egui::pos2(icon_x, rect.min.y + LINE_W),
-                    egui::vec2(ICON_W, ICON_H),
-                );
-                let img = *self.icons.get(*kind);
-                img.paint(painter, icon);
-                self.text(
-                    painter,
-                    egui::pos2(icon.max.x + ICON_GAP, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    &text,
-                    text_color,
-                );
             }
         }
-        active && resp.clicked()
+        active && resp.pressed()
     }
 
-    pub(crate) fn paint_tooltip(&mut self, ctx: &egui::Context, layout: egui::Rect) {
-        let Some((anchor, text)) = self.tooltip.take() else {
+    pub(crate) fn paint_tooltip(&mut self, ctx: &kit::Context, layout: kit::Rect) {
+        let Some((anchor, text)) = self.shell.tooltip.take() else {
             return;
         };
         if text.is_empty() {
@@ -223,16 +242,18 @@ impl StockApp {
         } else {
             (anchor.min.y + LINE_W - h).max(layout.min.y)
         };
-        let rect = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, h));
-        let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("rt_tooltip"));
-        let painter = ctx.layer_painter(layer);
-        tag_box(&painter, rect, theme().tooltip_bg, theme().tooltip_border);
-        self.text(
-            &painter,
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            &text,
-            theme().tooltip_text,
-        );
+        let rect = kit::Rect::from_min_size(kit::pos2(x, y), kit::vec2(w, h));
+        let layer = kit::LayerId::new(kit::Order::Tooltip, kit::Id::new("rt_tooltip"));
+        ctx.with_layer(kit::PaintLayer::Dynamic, || {
+            let painter = ctx.layer_painter(layer);
+            tag_box(&painter, rect, theme().tooltip_bg, theme().tooltip_border);
+            self.text(
+                &painter,
+                rect.center(),
+                kit::Align2::CENTER_CENTER,
+                &text,
+                theme().tooltip_text,
+            );
+        });
     }
 }

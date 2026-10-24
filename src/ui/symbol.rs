@@ -1,6 +1,6 @@
-use crate::grid::LINE_W;
+use crate::domain::layout::LINE_W;
+use crate::engine::kit;
 use crate::ui::icon::decode_png_rgba;
-use eframe::egui;
 
 pub(crate) const SYMBOL_PX: usize = 17;
 pub(crate) const SYMBOL_W: f32 = SYMBOL_PX as f32;
@@ -80,7 +80,7 @@ impl SymbolImage {
         }
     }
 
-    fn from_rgba(data: &egui::IconData) -> Option<Self> {
+    fn from_rgba(data: &kit::IconData) -> Option<Self> {
         let (w, h) = (data.width as usize, data.height as usize);
         if w == 0 || h == 0 {
             return None;
@@ -104,10 +104,10 @@ impl SymbolImage {
         !self.mask.iter().any(|on| *on)
     }
 
-    pub(crate) fn paint(&self, painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    pub(crate) fn paint(&self, painter: &kit::Painter, rect: kit::Rect, color: kit::Color32) {
         let x0 = rect.min.x.round();
         let y0 = rect.min.y.round();
-        let mut mesh = egui::Mesh::default();
+        let mut mesh = kit::Mesh::default();
         for row in 0..SYMBOL_PX {
             let mut col = 0usize;
             while col < SYMBOL_PX {
@@ -120,16 +120,16 @@ impl SymbolImage {
                     col += 1;
                 }
                 mesh.add_colored_rect(
-                    egui::Rect::from_min_size(
-                        egui::pos2(x0 + start as f32, y0 + row as f32),
-                        egui::vec2((col - start) as f32, LINE_W),
+                    kit::Rect::from_min_size(
+                        kit::pos2(x0 + start as f32, y0 + row as f32),
+                        kit::vec2((col - start) as f32, LINE_W),
                     ),
                     color,
                 );
             }
         }
         if !mesh.is_empty() {
-            painter.add(egui::Shape::mesh(mesh));
+            painter.add(kit::Shape::mesh(mesh));
         }
     }
 }
@@ -141,7 +141,7 @@ pub(crate) struct SymbolSet {
 
 impl SymbolSet {
     pub(crate) fn load() -> Self {
-        let dir = crate::assets::symbols_dir();
+        let dir = crate::platform::assets::symbols_dir();
         let symbols = SymbolKind::ALL.map(|kind| {
             std::fs::read(dir.join(format!("{}.png", kind.file_stem())))
                 .ok()

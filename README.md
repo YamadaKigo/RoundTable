@@ -1,17 +1,10 @@
 # RoundTable
 
-<p align="center">
-  <img src="assets/logo/RoundTable_64.ico" width="64" height="64" alt="RoundTable logo">
-</p>
-
-Version `0.1.1`
-
 ## System Requirements
 
 Runtime environment:
 
 - Windows 10 or Windows 11, x64.
-- A graphics card and driver that support wgpu.
 - Access to the program directory for reading `assets` and writing `userdata`.
 
 Build environment:
@@ -23,9 +16,12 @@ Build environment:
 
 The project uses the Rust 2024 Edition.
 
-## Version
+The application has no third-party crate dependencies.
 
-The current version is `0.1.1`.
+## Performance
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the layered production architecture,
+ownership model, frame lifecycle, and invariants.
 
 ## License
 

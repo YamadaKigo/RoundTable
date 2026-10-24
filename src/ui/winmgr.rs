@@ -1,6 +1,7 @@
-use crate::app::*;
-use crate::grid::*;
-use crate::theme::theme;
+use crate::application::app::*;
+use crate::domain::layout::*;
+use crate::engine::kit;
+use crate::engine::theme::theme;
 use crate::ui::button::ButtonContent;
 use crate::ui::chart::*;
 use crate::ui::colorpanel::{CP_H, CP_W};
@@ -9,7 +10,7 @@ use crate::ui::floatwin::*;
 use crate::ui::icon::*;
 use crate::ui::panel::*;
 use crate::ui::titlebar::*;
-use eframe::egui;
+use std::cell::{Cell, RefCell};
 
 pub(crate) const MAX_CHART_WINS: usize = 32;
 
@@ -20,11 +21,11 @@ pub(crate) const MINI_W: f32 = cells(10);
 
 pub(crate) const TASKBAR_GAP_W: f32 = cells(2);
 
-pub(crate) const WIN_CHART_TITLE: &str = "图表";
+pub(crate) const WIN_CHART_TITLE: &str = "Chart";
 
-pub(crate) const SRC_TITLE: &str = "指标代码";
+pub(crate) const SRC_TITLE: &str = "Source";
 
-pub(crate) const TASKBAR_MENU_TEXT: &str = "圆桌";
+pub(crate) const TASKBAR_MENU_TEXT: &str = "RoundTable";
 
 const _: () = assert!((NEW_WIN_W as i32 - 1) % 9 == 0 && (NEW_WIN_H as i32 - 1) % 9 == 0);
 const _: () = assert!((MINI_W as i32 - 1) % 9 == 0);
@@ -48,7 +49,7 @@ pub(crate) struct ManagedWin {
     pub(crate) title: String,
     pub(crate) minimized: bool,
 
-    pub(crate) restore: (egui::Pos2, egui::Vec2),
+    pub(crate) restore: (kit::Pos2, kit::Vec2),
 
     pub(crate) pane: usize,
 
@@ -73,20 +74,20 @@ struct TaskbarDrag {
 }
 
 impl ManagedWin {
-    pub(crate) fn rect(&self) -> egui::Rect {
+    pub(crate) fn rect(&self) -> kit::Rect {
         self.w.rect()
     }
 
-    fn edge_guard(&self) -> egui::Rect {
+    fn edge_guard(&self) -> kit::Rect {
         match self.kind {
             WinKind::Source => crate::ui::editor::scrollbar_track(self.w.inner_rect()),
             WinKind::Chart | WinKind::Panel | WinKind::Console | WinKind::Color => {
-                egui::Rect::NOTHING
+                kit::Rect::NOTHING
             }
         }
     }
 
-    pub(crate) fn body(rect: egui::Rect) -> egui::Rect {
+    pub(crate) fn body(rect: kit::Rect) -> kit::Rect {
         free_tail(rect.shrink(WIN_FRAME), WIN_TITLE_ROWS)
     }
 }
@@ -94,17 +95,15 @@ impl ManagedWin {
 pub(crate) struct WinMgr {
     pub(crate) wins: Vec<ManagedWin>,
 
-    pub(crate) plots: Vec<egui::Rect>,
+    pub(crate) plots: Vec<kit::Rect>,
 
-    pending: Option<u64>,
+    pub(crate) work: kit::Rect,
 
-    pub(crate) work: egui::Rect,
+    pub(crate) taskbar: kit::Rect,
 
-    pub(crate) taskbar: egui::Rect,
+    taskbar_gap: kit::Rect,
 
-    taskbar_gap: egui::Rect,
-
-    taskbar_items: egui::Rect,
+    taskbar_items: kit::Rect,
 
     taskbar_pages: Vec<(usize, usize)>,
 
@@ -117,9 +116,11 @@ pub(crate) struct WinMgr {
     next_mini: u64,
     focused_id: Option<u64>,
     pending_placement: Vec<u64>,
-    move_guard_live: Vec<(u64, egui::Rect, bool)>,
-    move_guard_scratch: Vec<(u64, egui::Rect, bool)>,
+    move_guard_live: Vec<(u64, kit::Rect, bool)>,
+    move_guard_scratch: Vec<(u64, kit::Rect, bool)>,
     draw_scratch: Vec<usize>,
+    draw_order_cache: RefCell<Vec<usize>>,
+    draw_order_key: Cell<Option<u64>>,
     #[cfg(test)]
     focused_pane_override: Option<usize>,
 }
@@ -129,11 +130,10 @@ impl WinMgr {
         Self {
             wins: Vec::new(),
             plots: Vec::new(),
-            pending: None,
-            work: egui::Rect::NOTHING,
-            taskbar: egui::Rect::NOTHING,
-            taskbar_gap: egui::Rect::NOTHING,
-            taskbar_items: egui::Rect::NOTHING,
+            work: kit::Rect::NOTHING,
+            taskbar: kit::Rect::NOTHING,
+            taskbar_gap: kit::Rect::NOTHING,
+            taskbar_items: kit::Rect::NOTHING,
             taskbar_pages: Vec::new(),
             taskbar_page: 0,
             taskbar_drag: None,
@@ -145,13 +145,11 @@ impl WinMgr {
             move_guard_live: Vec::new(),
             move_guard_scratch: Vec::new(),
             draw_scratch: Vec::new(),
+            draw_order_cache: RefCell::new(Vec::new()),
+            draw_order_key: Cell::new(None),
             #[cfg(test)]
             focused_pane_override: None,
         }
-    }
-
-    pub(crate) fn take(&mut self) -> Self {
-        std::mem::replace(self, Self::new())
     }
 
     pub(crate) fn with_default_windows() -> Self {
@@ -169,15 +167,15 @@ impl WinMgr {
             WinKind::Panel,
             PANEL_TITLE,
             PANE_CANDLE,
-            egui::vec2(PANEL_W, PANEL_CHILD_H),
-            egui::vec2(PANEL_W, PANEL_CHILD_H),
+            kit::vec2(PANEL_W, PANEL_CHILD_H),
+            kit::vec2(PANEL_W, PANEL_CHILD_H),
         );
         if chart {
             mgr.add(
                 WinKind::Chart,
                 WIN_CHART_TITLE,
                 PANE_CANDLE,
-                egui::vec2(NEW_WIN_W, NEW_WIN_H),
+                kit::vec2(NEW_WIN_W, NEW_WIN_H),
                 Self::chart_min_size(),
             );
         }
@@ -189,12 +187,12 @@ impl WinMgr {
         kind: WinKind,
         title: &str,
         pane: usize,
-        size: egui::Vec2,
-        min_size: egui::Vec2,
+        size: kit::Vec2,
+        min_size: kit::Vec2,
     ) -> usize {
         let id = self.next_id;
         self.next_id += 1;
-        let frame_size = egui::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME);
+        let frame_size = kit::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME);
         let outer_size = size + frame_size;
         let outer_min = min_size + frame_size;
 
@@ -206,7 +204,7 @@ impl WinMgr {
             kind,
             title: title.to_owned(),
             minimized: false,
-            restore: (egui::Pos2::ZERO, outer_size),
+            restore: (kit::Pos2::ZERO, outer_size),
             pane,
             pinned: false,
             exclusive: false,
@@ -235,7 +233,7 @@ impl WinMgr {
         self.wins.iter().position(|w| w.kind == WinKind::Source)
     }
 
-    pub(crate) fn show_source(&mut self, work: egui::Rect) -> Option<usize> {
+    pub(crate) fn show_source(&mut self, work: kit::Rect) -> Option<usize> {
         if let Some(i) = self.source_index() {
             let was_open = self.wins[i].w.open;
             self.wins[i].w.open = true;
@@ -251,13 +249,14 @@ impl WinMgr {
             WinKind::Source,
             SRC_TITLE,
             0,
-            egui::vec2(SRC_W, SRC_H),
-            egui::vec2(SRC_MIN_W, SRC_MIN_H),
+            kit::vec2(SRC_W, SRC_H),
+            kit::vec2(SRC_MIN_W, SRC_MIN_H),
         );
         if !self.place_default(i, work) {
             self.wins[i].w.open = false;
             return None;
         }
+        self.activate(i);
         Some(i)
     }
 
@@ -275,7 +274,7 @@ impl WinMgr {
             .any(|w| w.kind == WinKind::Console && w.w.open)
     }
 
-    pub(crate) fn show_console(&mut self, work: egui::Rect) -> Option<usize> {
+    pub(crate) fn show_console(&mut self, work: kit::Rect) -> Option<usize> {
         if let Some(i) = self.wins.iter().position(|w| w.kind == WinKind::Console) {
             let was_open = self.wins[i].w.open;
             self.wins[i].w.open = true;
@@ -288,13 +287,13 @@ impl WinMgr {
             self.activate(i);
             return Some(i);
         }
-        let size = egui::vec2(CONSOLE_W.min(work.width()), CONSOLE_H.min(work.height()));
+        let size = kit::vec2(CONSOLE_W.min(work.width()), CONSOLE_H.min(work.height()));
         let i = self.add(
             WinKind::Console,
             CONSOLE_TITLE,
             0,
             size,
-            egui::vec2(CONSOLE_MIN_W, CONSOLE_MIN_H),
+            kit::vec2(CONSOLE_MIN_W, CONSOLE_MIN_H),
         );
         if !self.place_default(i, work) {
             self.wins[i].w.open = false;
@@ -312,7 +311,7 @@ impl WinMgr {
         }
     }
 
-    pub(crate) fn show_color(&mut self, work: egui::Rect) -> Option<usize> {
+    pub(crate) fn show_color(&mut self, work: kit::Rect) -> Option<usize> {
         if let Some(i) = self.wins.iter().position(|w| w.kind == WinKind::Color) {
             let was_open = self.wins[i].w.open;
             self.wins[i].w.open = true;
@@ -325,8 +324,8 @@ impl WinMgr {
             self.activate(i);
             return Some(i);
         }
-        let size = egui::vec2(CP_W, CP_H);
-        let i = self.add(WinKind::Color, "颜色设置", 0, size, size);
+        let size = kit::vec2(CP_W, CP_H);
+        let i = self.add(WinKind::Color, "Colors", 0, size, size);
         self.wins[i].w.resizable = false;
         if !self.place_default(i, work) {
             self.wins[i].w.open = false;
@@ -360,11 +359,11 @@ impl WinMgr {
             .position(|w| w.kind == WinKind::Color && w.w.open)
     }
 
-    pub(crate) fn color_rect(&self) -> Option<egui::Rect> {
+    pub(crate) fn color_rect(&self) -> Option<kit::Rect> {
         self.color_index().map(|i| self.rect_of(i))
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn chart_panes(&self) -> Vec<usize> {
         self.wins
             .iter()
@@ -382,19 +381,19 @@ impl WinMgr {
 
     fn spawn_position_for(
         &self,
-        work: egui::Rect,
-        size: egui::Vec2,
+        work: kit::Rect,
+        size: kit::Vec2,
         skip: Option<usize>,
-    ) -> Option<egui::Pos2> {
+    ) -> Option<kit::Pos2> {
         if !work.is_positive() {
             return None;
         }
-        let occupied = |pos: egui::Pos2| {
+        let occupied = |pos: kit::Pos2| {
             self.wins.iter().enumerate().any(|(i, w)| {
                 Some(i) != skip && w.w.open && !w.minimized && (w.w.pos - pos).length_sq() < 0.5
             })
         };
-        let centered = egui::pos2(
+        let centered = kit::pos2(
             (work.center().x - size.x / 2.0).round(),
             (work.center().y - size.y / 2.0).round(),
         );
@@ -407,7 +406,7 @@ impl WinMgr {
             if y + size.y > work.max.y + 0.01 {
                 return None;
             }
-            let pos = egui::pos2(work.min.x, y);
+            let pos = kit::pos2(work.min.x, y);
             if !occupied(pos) {
                 return Some(pos);
             }
@@ -418,7 +417,7 @@ impl WinMgr {
         }
     }
 
-    fn place_default(&mut self, i: usize, work: egui::Rect) -> bool {
+    fn place_default(&mut self, i: usize, work: kit::Rect) -> bool {
         if !work.is_positive() {
             let id = self.wins[i].w.id;
             if !self.pending_placement.contains(&id) {
@@ -440,7 +439,7 @@ impl WinMgr {
         true
     }
 
-    fn place_panel(&mut self, i: usize, work: egui::Rect) {
+    fn place_panel(&mut self, i: usize, work: kit::Rect) {
         if !work.is_positive() {
             let id = self.wins[i].w.id;
             if !self.pending_placement.contains(&id) {
@@ -449,13 +448,13 @@ impl WinMgr {
             return;
         }
         let size = self.wins[i].w.size;
-        let pos = egui::pos2(work.max.x - size.x, work.max.y - size.y);
+        let pos = kit::pos2(work.max.x - size.x, work.max.y - size.y);
         self.wins[i].w.pos = pos;
         self.wins[i].w.clamp_into(work);
         self.wins[i].restore = (self.wins[i].w.pos, self.wins[i].w.size);
     }
 
-    pub(crate) fn place_panel_at_default(&mut self, work: egui::Rect) {
+    pub(crate) fn place_panel_at_default(&mut self, work: kit::Rect) {
         if let Some(i) = self.wins.iter().position(|w| w.kind == WinKind::Panel) {
             self.wins[i].w.open = true;
             self.wins[i].minimized = false;
@@ -465,20 +464,17 @@ impl WinMgr {
     }
 
     pub(crate) fn activate(&mut self, i: usize) {
-        if i + 1 >= self.wins.len() {
+        let Some(window) = self.wins.get(i) else {
             return;
+        };
+        self.focused_id = Some(window.w.id);
+        if i + 1 < self.wins.len() {
+            let window = self.wins.remove(i);
+            self.wins.push(window);
         }
-        let w = self.wins.remove(i);
-        self.focused_id = Some(w.w.id);
-        self.wins.push(w);
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn activate_id(&mut self, id: u64) {
-        self.pending = Some(id);
-    }
-
-    fn place_defaults(&mut self, work: egui::Rect) {
+    fn place_defaults(&mut self, work: kit::Rect) {
         if self.placed {
             return;
         }
@@ -494,7 +490,7 @@ impl WinMgr {
         }
     }
 
-    fn clamp_all(&mut self, work: egui::Rect) {
+    fn clamp_all(&mut self, work: kit::Rect) {
         for w in self.wins.iter_mut() {
             if w.w.open {
                 w.w.clamp_into(work);
@@ -537,7 +533,7 @@ impl WinMgr {
     }
 
     #[cfg(test)]
-    fn exclusive_blocks(&self, id: u64, rect: egui::Rect) -> bool {
+    fn exclusive_blocks(&self, id: u64, rect: kit::Rect) -> bool {
         self.wins.iter().any(|window| {
             window.w.id != id
                 && window.w.open
@@ -559,34 +555,34 @@ impl WinMgr {
         self.wins[i].w.end_sessions();
     }
 
-    pub(crate) fn mini_width(app: &mut StockApp, title: &str) -> f32 {
+    pub(crate) fn mini_width(app: &mut AppState, title: &str) -> f32 {
         let need = app.text_width(title) + 2.0 * TEXT_PAD_X + SYS_BTN_W - LINE_W;
         cells(((need - LINE_W) / PITCH).ceil() as i32).max(MINI_W)
     }
 
-    fn taskbar_menu_rect(&self, app: &mut StockApp) -> egui::Rect {
+    fn taskbar_menu_rect(&self, app: &mut AppState) -> kit::Rect {
         let text = ButtonContent::Text(TASKBAR_MENU_TEXT.to_owned());
         let width = app.button_width(&text).min(self.taskbar.width());
-        egui::Rect::from_min_size(self.taskbar.min, egui::vec2(width, self.taskbar.height()))
+        kit::Rect::from_min_size(self.taskbar.min, kit::vec2(width, self.taskbar.height()))
     }
 
-    fn taskbar_pager_rects(&self) -> [egui::Rect; 2] {
-        let down = egui::Rect::from_min_size(
-            egui::pos2(self.taskbar.max.x - SYS_BTN_W, self.taskbar.min.y),
-            egui::vec2(SYS_BTN_W, self.taskbar.height()),
+    fn taskbar_pager_rects(&self) -> [kit::Rect; 2] {
+        let down = kit::Rect::from_min_size(
+            kit::pos2(self.taskbar.max.x - SYS_BTN_W, self.taskbar.min.y),
+            kit::vec2(SYS_BTN_W, self.taskbar.height()),
         );
-        let up = egui::Rect::from_min_size(
-            egui::pos2(down.min.x - SYS_BTN_W + LINE_W, self.taskbar.min.y),
-            egui::vec2(SYS_BTN_W, self.taskbar.height()),
+        let up = kit::Rect::from_min_size(
+            kit::pos2(down.min.x - SYS_BTN_W + LINE_W, self.taskbar.min.y),
+            kit::vec2(SYS_BTN_W, self.taskbar.height()),
         );
         [up, down]
     }
 
-    fn taskbar_gap_rect(&self, app: &mut StockApp) -> egui::Rect {
+    fn taskbar_gap_rect(&self, app: &mut AppState) -> kit::Rect {
         let menu = self.taskbar_menu_rect(app);
-        egui::Rect::from_min_size(
-            egui::pos2(menu.max.x - LINE_W, self.taskbar.min.y),
-            egui::vec2(TASKBAR_GAP_W, self.taskbar.height()),
+        kit::Rect::from_min_size(
+            kit::pos2(menu.max.x - LINE_W, self.taskbar.min.y),
+            kit::vec2(TASKBAR_GAP_W, self.taskbar.height()),
         )
     }
 
@@ -606,7 +602,7 @@ impl WinMgr {
         }
     }
 
-    fn begin_taskbar_drag(&mut self, p: egui::Pos2) {
+    fn begin_taskbar_drag(&mut self, p: kit::Pos2) {
         if self.taskbar_drag.is_some() || !self.taskbar_items.contains(p) {
             return;
         }
@@ -619,7 +615,7 @@ impl WinMgr {
         let rect = self.rect_of(i);
         let title = free_band(rect, 0, WIN_TITLE_ROWS);
         let keys = sys_button_rects_n(title, 1);
-        let handle = egui::Rect::from_min_max(title.min, egui::pos2(keys[0].min.x, title.max.y));
+        let handle = kit::Rect::from_min_max(title.min, kit::pos2(keys[0].min.x, title.max.y));
         if !handle.contains(p) {
             return;
         }
@@ -634,7 +630,7 @@ impl WinMgr {
         });
     }
 
-    fn update_taskbar_drag(&mut self, ui: &mut egui::Ui) -> bool {
+    fn update_taskbar_drag(&mut self, ui: &mut kit::Ui) -> bool {
         let (pressed, down, latest) = ui.input(|i| {
             (
                 i.pointer.primary_pressed(),
@@ -724,13 +720,13 @@ impl WinMgr {
         self.next_mini = order.len() as u64;
     }
 
-    fn update_taskbar_layout(&mut self, app: &mut StockApp) {
+    fn update_taskbar_layout(&mut self, app: &mut AppState) {
         let gap = self.taskbar_gap_rect(app);
         self.taskbar_gap = gap;
         let [up, _] = self.taskbar_pager_rects();
-        self.taskbar_items = egui::Rect::from_min_max(
-            egui::pos2(gap.max.x - LINE_W, self.taskbar.min.y),
-            egui::pos2(up.min.x, self.taskbar.max.y),
+        self.taskbar_items = kit::Rect::from_min_max(
+            kit::pos2(gap.max.x - LINE_W, self.taskbar.min.y),
+            kit::pos2(up.min.x, self.taskbar.max.y),
         );
         let order = self.taskbar_order();
         let mut pages = Vec::new();
@@ -764,10 +760,10 @@ impl WinMgr {
         self.taskbar_pages = pages;
     }
 
-    fn mini_rect(&self, i: usize, _k: usize) -> egui::Rect {
+    fn mini_rect(&self, i: usize, _k: usize) -> kit::Rect {
         let order = self.taskbar_order();
         let Some(k) = order.iter().position(|&index| index == i) else {
-            return egui::Rect::NOTHING;
+            return kit::Rect::NOTHING;
         };
         let area = if self.taskbar_items.is_positive() {
             self.taskbar_items
@@ -776,7 +772,7 @@ impl WinMgr {
         };
         let (start, end) = self.taskbar_page_range(order.len());
         if k < start || k >= end {
-            return egui::Rect::NOTHING;
+            return kit::Rect::NOTHING;
         }
         let w = self.wins[i].mini_w.min(area.width());
         if self
@@ -784,24 +780,24 @@ impl WinMgr {
             .is_some_and(|drag| drag.id == self.wins[i].w.id)
         {
             let x = self.taskbar_drag.map_or(area.min.x, |drag| drag.x);
-            return egui::Rect::from_min_size(
-                egui::pos2(
+            return kit::Rect::from_min_size(
+                kit::pos2(
                     clamp_soft(x, area.min.x, (area.max.x - w).max(area.min.x)),
                     area.min.y,
                 ),
-                egui::vec2(w, area.height()),
+                kit::vec2(w, area.height()),
             );
         }
         let mut x = area.min.x;
         for &item in &order[start..k] {
             x += (self.wins[item].mini_w.min(area.width()) - LINE_W).max(LINE_W);
         }
-        egui::Rect::from_min_size(
-            egui::pos2(
+        kit::Rect::from_min_size(
+            kit::pos2(
                 clamp_soft(x, area.min.x, (area.max.x - w).max(area.min.x)),
                 area.min.y,
             ),
-            egui::vec2(w, area.height()),
+            kit::vec2(w, area.height()),
         )
     }
 
@@ -813,7 +809,7 @@ impl WinMgr {
             .count()
     }
 
-    pub(crate) fn rect_of(&self, i: usize) -> egui::Rect {
+    pub(crate) fn rect_of(&self, i: usize) -> kit::Rect {
         if self.wins[i].minimized {
             let k = self.mini_index(i);
             self.mini_rect(i, k)
@@ -822,7 +818,7 @@ impl WinMgr {
         }
     }
 
-    fn taskbar_item_at(&self, p: egui::Pos2) -> Option<u64> {
+    fn taskbar_item_at(&self, p: kit::Pos2) -> Option<u64> {
         self.draw_order()
             .into_iter()
             .filter(|&i| self.wins[i].minimized)
@@ -840,6 +836,17 @@ impl WinMgr {
     }
 
     fn fill_draw_order(&self, out: &mut Vec<usize>) {
+        let key = self.draw_order_key();
+        if self.draw_order_key.get() != Some(key) {
+            let mut cache = self.draw_order_cache.borrow_mut();
+            self.compute_draw_order(&mut cache);
+            self.draw_order_key.set(Some(key));
+        }
+        out.clear();
+        out.extend_from_slice(&self.draw_order_cache.borrow());
+    }
+
+    fn compute_draw_order(&self, out: &mut Vec<usize>) {
         let live = |w: &ManagedWin, mini: bool| w.w.open && w.minimized == mini;
         out.clear();
         out.extend((0..self.wins.len()).filter(|&i| {
@@ -863,6 +870,25 @@ impl WinMgr {
         out.extend(minimized);
     }
 
+    fn draw_order_key(&self) -> u64 {
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        for window in &self.wins {
+            for value in [
+                window.w.id,
+                window.mini_seq,
+                u64::from(window.w.open),
+                u64::from(window.minimized),
+                u64::from(window.pinned),
+                u64::from(window.exclusive),
+                self.taskbar_drag.is_some_and(|drag| drag.id == window.w.id) as u64,
+            ] {
+                hash ^= value;
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        hash
+    }
+
     #[cfg(test)]
     pub(crate) fn toggle_pin(&mut self, i: usize) {
         self.set_pin(i, !self.wins[i].pinned);
@@ -876,7 +902,7 @@ impl WinMgr {
         self.wins[i].w.end_sessions();
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn toggle_exclusive(&mut self, i: usize) {
         let exclusive = !self.wins[i].exclusive;
         self.set_exclusive(i, exclusive);
@@ -891,12 +917,12 @@ impl WinMgr {
     }
 
     #[cfg(test)]
-    pub(crate) fn taskbar_items_rect(&self) -> egui::Rect {
+    pub(crate) fn taskbar_items_rect(&self) -> kit::Rect {
         self.taskbar_items
     }
 
     #[cfg(test)]
-    pub(crate) fn taskbar_gap_rect_for_test(&self) -> egui::Rect {
+    pub(crate) fn taskbar_gap_rect_for_test(&self) -> kit::Rect {
         self.taskbar_gap
     }
 
@@ -908,7 +934,7 @@ impl WinMgr {
             .collect()
     }
 
-    fn top_win_at(&self, p: egui::Pos2) -> Option<usize> {
+    fn top_win_at(&self, p: kit::Pos2) -> Option<usize> {
         self.draw_order()
             .into_iter()
             .rev()
@@ -959,14 +985,14 @@ impl WinMgr {
             .map(|i| self.wins[i].pane)
     }
 
-    fn press_owner_at(&self, p: egui::Pos2) -> Option<usize> {
+    fn press_owner_at(&self, p: kit::Pos2) -> Option<usize> {
         if let Some(grip) = self.grip_owner_at(p) {
             return Some(grip);
         }
         self.top_win_at(p)
     }
 
-    fn edge_at_any(&self, p: egui::Pos2) -> bool {
+    fn edge_at_any(&self, p: kit::Pos2) -> bool {
         self.draw_order().into_iter().any(|i| {
             let w = &self.wins[i];
             w.w.open
@@ -977,7 +1003,7 @@ impl WinMgr {
         })
     }
 
-    fn grip_owner_at(&self, p: egui::Pos2) -> Option<usize> {
+    fn grip_owner_at(&self, p: kit::Pos2) -> Option<usize> {
         self.draw_order().into_iter().rev().find(|&i| {
             let w = &self.wins[i];
             self.focused_id == Some(w.w.id)
@@ -989,20 +1015,20 @@ impl WinMgr {
         })
     }
 
-    pub(crate) fn can_spawn_window(&self, work: egui::Rect, size: egui::Vec2) -> bool {
+    pub(crate) fn can_spawn_window(&self, work: kit::Rect, size: kit::Vec2) -> bool {
         if !work.is_positive() {
             return true;
         }
-        let outer = size + egui::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME);
+        let outer = size + kit::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME);
         self.spawn_position_for(work, outer, None).is_some()
     }
 
-    pub(crate) fn add_chart(&mut self, work: egui::Rect, pane: usize) -> Option<usize> {
-        let size = egui::vec2(NEW_WIN_W.min(work.width()), NEW_WIN_H.min(work.height()));
+    pub(crate) fn add_chart(&mut self, work: kit::Rect, pane: usize) -> Option<usize> {
+        let size = kit::vec2(NEW_WIN_W.min(work.width()), NEW_WIN_H.min(work.height()));
         if !self.can_spawn_window(work, size) {
             return None;
         }
-        let frame = egui::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME);
+        let frame = kit::vec2(2.0 * WIN_FRAME, 2.0 * WIN_FRAME);
         let i = if let Some(i) = self
             .wins
             .iter()
@@ -1034,8 +1060,8 @@ impl WinMgr {
         Some(self.wins.len() - 1)
     }
 
-    pub(crate) fn chart_min_size() -> egui::Vec2 {
-        egui::vec2(PANE_MIN_W, PANE_H_MIN)
+    pub(crate) fn chart_min_size() -> kit::Vec2 {
+        kit::vec2(PANE_MIN_W, PANE_H_MIN)
     }
 
     pub(crate) fn drag_active(&self) -> bool {
@@ -1063,7 +1089,7 @@ impl WinMgr {
     }
 
     #[cfg(test)]
-    pub(crate) fn dock(&mut self, i: usize, r: egui::Rect) {
+    pub(crate) fn dock(&mut self, i: usize, r: kit::Rect) {
         if self.exclusive_blocks(self.wins[i].w.id, r) {
             return;
         }
@@ -1075,20 +1101,22 @@ impl WinMgr {
         self.wins[i].w.end_sessions();
     }
 
-    fn close_win(&mut self, app: &mut StockApp, i: usize) {
+    fn close_win(&mut self, app: &mut AppState, i: usize) {
         let closed_id = self.wins[i].w.id;
         let pane = self.wins[i].pane;
         let title = self.wins[i].title.clone();
+        let source_restored =
+            self.wins[i].kind == WinKind::Source && app.revert_unsaved_source_if_needed();
         self.wins[i].w.open = false;
         self.wins[i].w.end_sessions();
         self.wins[i].minimized = false;
         self.taskbar_pages.clear();
-        if self.wins[i].kind == WinKind::Chart && app.pane_menu == Some(pane) {
-            app.pane_menu = None;
+        if self.wins[i].kind == WinKind::Chart && app.shell.pane_menu == Some(pane) {
+            app.shell.pane_menu = None;
         }
         if self.wins[i].kind == WinKind::Color {
-            app.color_panel.revert_initial();
-            app.status_msg = "颜色面板：已撤销，颜色没变".to_owned();
+            app.shell.color_panel.revert_initial();
+            app.shell.status_msg = "Color panel: reverted; colors unchanged".to_owned();
         }
         if self.focused_id == Some(closed_id) {
             self.focused_id = self
@@ -1098,7 +1126,11 @@ impl WinMgr {
                 .map(|i| self.wins[i].w.id)
                 .next();
         }
-        app.status_msg = format!("{title}：已关闭");
+        app.shell.status_msg = if source_restored {
+            format!("{title}：closed; unsaved changes were reverted")
+        } else {
+            format!("{title}: closed")
+        };
     }
 
     pub(crate) fn minimize(&mut self, i: usize, mini_w: f32) {
@@ -1121,28 +1153,19 @@ impl WinMgr {
         self.taskbar_pages.clear();
     }
 
-    #[allow(dead_code)]
-    fn toggle_minimize(&mut self, app: &mut StockApp, i: usize) {
-        let id = self.wins[i].w.id;
-        if self.wins[i].minimized {
-            self.restore(i);
-        } else {
-            let title = self.wins[i].title.clone();
-            let w = Self::mini_width(app, &title);
-            self.minimize(i, w);
-        }
-        self.activate_id(id);
-    }
-
     pub(crate) fn plan(
         &mut self,
-        app: &mut StockApp,
-        ui: &mut egui::Ui,
-        work: egui::Rect,
-        taskbar: egui::Rect,
+        app: &mut AppState,
+        ui: &mut kit::Ui,
+        work: kit::Rect,
+        taskbar: kit::Rect,
     ) {
         self.work = work;
         self.taskbar = taskbar;
+        app.chart_ui.window_drag_active = self.drag_active();
+        app.chart_ui.focused_pane = self.focused_pane();
+        app.chart_ui.active_pane = self.top_chart_pane();
+        app.chart_ui.color_rect = self.color_rect();
         self.update_taskbar_layout(app);
         self.place_defaults(work);
         if work.is_positive() && !self.pending_placement.is_empty() {
@@ -1158,29 +1181,23 @@ impl WinMgr {
             }
         }
         let console_open = self.console_open();
-        app.debug_windows.window_count = self.wins.iter().filter(|w| w.w.open).count();
-        app.debug_windows.windows.clear();
+        app.workbench.debug_windows.window_count = self.wins.iter().filter(|w| w.w.open).count();
+        app.workbench.debug_windows.windows.clear();
         if console_open {
-            app.debug_windows.windows.extend(
+            app.workbench.debug_windows.windows.extend(
                 self.wins
                     .iter()
                     .filter(|w| w.w.open)
                     .map(|w| (w.title.clone(), w.minimized, w.rect())),
             );
         }
-        app.debug_windows.chart_count = self.chart_count();
-        app.debug_windows.source_open = self.source_open();
-        app.debug_windows.console_open = console_open;
+        app.workbench.debug_windows.chart_count = self.chart_count();
+        app.workbench.debug_windows.source_open = self.source_open();
+        app.workbench.debug_windows.console_open = console_open;
 
         for i in 0..self.wins.len() {
             let guard = self.wins[i].edge_guard();
             self.wins[i].w.edge_guard = guard;
-        }
-
-        if let Some(id) = self.pending.take() {
-            if let Some(i) = self.wins.iter().position(|w| w.w.id == id) {
-                self.activate(i);
-            }
         }
 
         if !ui.input(|i| i.pointer.primary_down()) {
@@ -1236,9 +1253,13 @@ impl WinMgr {
             self.wins[i].w.begin_resize(p);
         }
 
-        let panes = app.panes.len();
+        app.chart_ui.window_drag_active = self.drag_active();
+        app.chart_ui.focused_pane = self.focused_pane();
+        app.chart_ui.active_pane = self.top_chart_pane();
+        app.chart_ui.color_rect = self.color_rect();
+        let panes = app.chart_world.panes.len();
         self.plots.clear();
-        self.plots.resize(panes, egui::Rect::NOTHING);
+        self.plots.resize(panes, kit::Rect::NOTHING);
         let mut order = std::mem::take(&mut self.draw_scratch);
         self.fill_draw_order(&mut order);
         for &i in &order {
@@ -1249,25 +1270,29 @@ impl WinMgr {
             let pane = self.wins[i].pane;
             let body = ManagedWin::body(self.rect_of(i));
             app.ensure_pane_computed(pane);
-            let layout = app.panes[pane].chart_layout();
+            let layout = app.chart_world.panes[pane].chart_layout();
             let (_, _, main, _) = chart_rows(body, layout);
-            self.plots[pane] = frame_rects_with_axis(main, app.panes[pane].show_axis()).0;
+            self.plots[pane] =
+                frame_rects_with_axis(main, app.chart_world.panes[pane].show_axis()).0;
         }
         self.draw_scratch = order;
     }
 
     pub(crate) fn draw(
         &mut self,
-        app: &mut StockApp,
-        ui: &mut egui::Ui,
-        work: egui::Rect,
-        taskbar: egui::Rect,
+        app: &mut AppState,
+        ui: &mut kit::Ui,
+        work: kit::Rect,
+        taskbar: kit::Rect,
     ) {
         self.work = work;
         self.taskbar = taskbar;
         let taskbar_drag_released = self.update_taskbar_drag(ui);
         let mut order = std::mem::take(&mut self.draw_scratch);
         self.fill_draw_order(&mut order);
+        let top_visible = order.iter().rev().copied().find(|&i| {
+            self.wins[i].w.open && (!self.wins[i].minimized || self.rect_of(i).is_positive())
+        });
         for &i in &order {
             if !self.wins[i].w.open {
                 continue;
@@ -1283,20 +1308,29 @@ impl WinMgr {
                 .any(|(k, w)| k != i && (w.w.dragging() || w.w.resizing()));
 
             let focused = self.focused_id == Some(self.wins[i].w.id);
-            app.win_silent = !focused;
+            app.shell.win_silent = !focused;
+            let previous_salt = ui.interaction_salt();
+            ui.set_interaction_salt(self.wins[i].w.id);
+            let chart_layer = if top_visible == Some(i) && self.wins[i].kind == WinKind::Chart {
+                kit::PaintLayer::Chart
+            } else {
+                kit::PaintLayer::Base
+            };
             ui.scope(|ui| {
                 if !focused {
                     ui.disable();
                 }
                 let body = self.begin_win(app, ui, i, busy);
                 if let Some(body) = body {
-                    self.draw_content(app, ui, i, body);
+                    self.draw_content(app, ui, i, body, chart_layer);
                 }
-                self.end_win(ui, i, busy);
+                let ctx = ui.ctx().clone();
+                ctx.with_layer(chart_layer, || self.end_win(ui, i, busy));
             });
+            ui.set_interaction_salt(previous_salt);
         }
         self.draw_scratch = order;
-        app.win_silent = false;
+        app.shell.win_silent = false;
         let taskbar_click = ui.input(|input| {
             input
                 .pointer
@@ -1313,7 +1347,7 @@ impl WinMgr {
         self.draw_taskbar_controls(app, ui);
     }
 
-    fn draw_taskbar_controls(&mut self, app: &mut StockApp, ui: &mut egui::Ui) {
+    fn draw_taskbar_controls(&mut self, app: &mut AppState, ui: &mut kit::Ui) {
         let painter = ui.painter().clone();
         let menu = self.taskbar_menu_rect(app);
         let menu_text = ButtonContent::Text(TASKBAR_MENU_TEXT.to_owned());
@@ -1328,29 +1362,29 @@ impl WinMgr {
         );
 
         let gap = self.taskbar_gap;
-        painter.rect_filled(gap, egui::CornerRadius::ZERO, theme().taskbar_bg);
+        painter.rect_filled(gap, kit::CornerRadius::ZERO, theme().taskbar_bg);
         border_hard(&painter, gap, theme().taskbar_border);
 
         let [up, down] = self.taskbar_pager_rects();
         let up_content = ButtonContent::Symbol(SymbolKind::PageUp);
         let down_content = ButtonContent::Symbol(SymbolKind::PageDown);
-        if app.draw_button(ui, &painter, up, &up_content, false, "上一页") {
+        if app.draw_button(ui, &painter, up, &up_content, false, "Previous Page") {
             self.taskbar_page = self.taskbar_page.saturating_sub(1);
         }
-        if app.draw_button(ui, &painter, down, &down_content, false, "下一页") {
+        if app.draw_button(ui, &painter, down, &down_content, false, "Next Page") {
             self.taskbar_page =
                 (self.taskbar_page + 1).min(self.taskbar_pages.len().saturating_sub(1));
         }
     }
 
-    fn run_taskbar_click(&mut self, app: &mut StockApp, p: egui::Pos2, id: u64) {
+    fn run_taskbar_click(&mut self, app: &mut AppState, p: kit::Pos2, id: u64) {
         let Some(i) = self.wins.iter().position(|window| window.w.id == id) else {
             return;
         };
         let rect = self.rect_of(i);
         let title = free_band(rect, 0, WIN_TITLE_ROWS);
         let keys = sys_button_rects_n(title, 1);
-        let handle = egui::Rect::from_min_max(title.min, egui::pos2(keys[0].min.x, title.max.y));
+        let handle = kit::Rect::from_min_max(title.min, kit::pos2(keys[0].min.x, title.max.y));
         if keys[0].contains(p) {
             self.close_win(app, i);
         } else if handle.contains(p) {
@@ -1365,20 +1399,28 @@ impl WinMgr {
         }
     }
 
-    fn draw_content(&mut self, app: &mut StockApp, ui: &mut egui::Ui, i: usize, body: egui::Rect) {
+    fn draw_content(
+        &mut self,
+        app: &mut AppState,
+        ui: &mut kit::Ui,
+        i: usize,
+        body: kit::Rect,
+        chart_layer: kit::PaintLayer,
+    ) {
         match self.wins[i].kind {
             WinKind::Panel => app.ui_panel(ui, body),
             WinKind::Chart => {
                 let pane = self.wins[i].pane;
                 app.ensure_pane_computed(pane);
-                let layout = app.panes[pane].chart_layout();
+                let layout = app.chart_world.panes[pane].chart_layout();
                 let (_, _, main, _) = chart_rows(body, layout);
-                self.plots[pane] = frame_rects_with_axis(main, app.panes[pane].show_axis()).0;
-                if app.win_silent {
-                    app.panes[pane].view.crosshair = None;
-                    app.panes[pane].view.pan = None;
+                self.plots[pane] =
+                    frame_rects_with_axis(main, app.chart_world.panes[pane].show_axis()).0;
+                if app.shell.win_silent {
+                    app.chart_world.clear_pane_navigation(pane);
                 }
-                app.ui_chart(ui, pane, body);
+                let ctx = ui.ctx().clone();
+                ctx.with_layer(chart_layer, || app.ui_chart(ui, pane, body));
             }
             WinKind::Source => {
                 self.wins[i].title = app.source_title();
@@ -1388,17 +1430,17 @@ impl WinMgr {
                 app.run_editor_cmd(cmd);
             }
             WinKind::Console => {
-                let mut console = std::mem::take(&mut app.console);
+                let mut console = std::mem::take(&mut app.workbench.console);
                 console.ui(app, ui, body);
-                app.console = console;
+                app.workbench.console = console;
             }
             WinKind::Color => {
-                let panel = egui::Rect::from_min_max(
-                    egui::pos2(body.min.x, body.min.y - grid_line(WIN_TITLE_ROWS)),
+                let panel = kit::Rect::from_min_max(
+                    kit::pos2(body.min.x, body.min.y - grid_line(WIN_TITLE_ROWS)),
                     body.max,
                 );
                 app.ui_color_panel_content(ui, panel);
-                if std::mem::take(&mut app.color_panel.close_requested) {
+                if std::mem::take(&mut app.shell.color_panel.close_requested) {
                     self.hide_color();
                 }
             }
@@ -1407,11 +1449,11 @@ impl WinMgr {
 
     fn begin_win(
         &mut self,
-        app: &mut StockApp,
-        ui: &mut egui::Ui,
+        app: &mut AppState,
+        ui: &mut kit::Ui,
         i: usize,
         busy: bool,
-    ) -> Option<egui::Rect> {
+    ) -> Option<kit::Rect> {
         let name = self.wins[i].title.clone();
         let work = self.work;
         if self.wins[i].minimized {
@@ -1425,7 +1467,7 @@ impl WinMgr {
                 title,
                 self.wins[i].w.id,
                 &name,
-                WinKeys::CloseOnly,
+                WinKeys::Mini,
                 false,
                 self.wins[i].pinned,
                 true,
@@ -1438,9 +1480,9 @@ impl WinMgr {
         let exclusive = self.wins[i].exclusive;
         let active = self.focused_id == Some(self.wins[i].w.id);
         let keys = if self.wins[i].kind == WinKind::Color {
-            WinKeys::MinAndClose
+            WinKeys::Panel
         } else {
-            WinKeys::MinMaxClose
+            WinKeys::Window
         };
         let out = self.wins[i].w.begin(
             app, ui, work, &name, keys, busy, active, pinned, false, exclusive,
@@ -1460,13 +1502,13 @@ impl WinMgr {
             let width = Self::mini_width(app, &name);
             self.minimize(i, width);
             self.update_taskbar_layout(app);
-            app.tooltip = None;
+            app.shell.tooltip = None;
         }
 
         out.panel.map(ManagedWin::body)
     }
 
-    fn end_win(&mut self, ui: &mut egui::Ui, i: usize, busy: bool) {
+    fn end_win(&mut self, ui: &mut kit::Ui, i: usize, busy: bool) {
         if self.wins[i].minimized {
             let rect = self.rect_of(i);
             border_hard(&ui.painter().clone(), rect, theme().window_border);

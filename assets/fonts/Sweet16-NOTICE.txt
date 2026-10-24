@@ -1,0 +1,5 @@
+Sweet16 mono
+Author: Martin Sedlak
+Source: https://github.com/kmar/Sweet16Font
+License: Boost Software License 1.0
+License text: Sweet16-LICENSE.txt

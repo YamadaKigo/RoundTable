@@ -1,10 +1,11 @@
-use crate::app::*;
-use crate::grid::*;
-use crate::theme::*;
+use crate::application::app::*;
+use crate::domain::layout::*;
+use crate::engine::font::text_advance;
+use crate::engine::kit;
+use crate::engine::theme::*;
 use crate::ui::button::*;
 use crate::ui::menu::*;
 use crate::ui::pattern::*;
-use eframe::egui;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum SysButton {
@@ -16,6 +17,10 @@ pub(crate) enum SysButton {
 }
 
 impl SysButton {
+    fn is_text(self) -> bool {
+        matches!(self, SysButton::Exclusive | SysButton::Pin)
+    }
+
     pub(crate) fn symbol(
         self,
         maximized: bool,
@@ -44,25 +49,36 @@ impl SysButton {
         exclusive: bool,
     ) -> &'static str {
         match self {
-            SysButton::Exclusive if exclusive => "解除独占",
-            SysButton::Exclusive => "独占",
-            SysButton::Pin if pinned => "解除置顶",
-            SysButton::Pin => "置顶",
-            SysButton::Minimize if restore_minimized => "还原",
-            SysButton::Minimize => "最小化",
-            SysButton::Maximize if maximized => "还原",
-            SysButton::Maximize => "最大化",
-            SysButton::Close => "关闭",
+            SysButton::Exclusive if exclusive => "Free",
+            SysButton::Exclusive => "Lock",
+            SysButton::Pin if pinned => "Pinned",
+            SysButton::Pin => "Pin",
+            SysButton::Minimize if restore_minimized => "Restore",
+            SysButton::Minimize => "Minimize",
+            SysButton::Maximize if maximized => "Restore",
+            SysButton::Maximize => "Maximize",
+            SysButton::Close => "Close",
+        }
+    }
+
+    fn width(self, maximized: bool, restore_minimized: bool, pinned: bool, exclusive: bool) -> f32 {
+        if self.is_text() {
+            snap_cells_up(
+                text_advance(self.label(maximized, restore_minimized, pinned, exclusive))
+                    + 2.0 * TEXT_PAD_X,
+            )
+        } else {
+            SYS_BTN_W
         }
     }
 }
 
-pub(crate) fn title_text_slot(app: &mut StockApp, title: egui::Rect, text: &str) -> egui::Rect {
+pub(crate) fn title_text_slot(app: &mut AppState, title: kit::Rect, text: &str) -> kit::Rect {
     let w = tab_width(app, text).min(title.width());
-    egui::Rect::from_min_size(title.min, egui::vec2(w, title.height()))
+    kit::Rect::from_min_size(title.min, kit::vec2(w, title.height()))
 }
 
-pub(crate) fn paint_title_text_edge(painter: &egui::Painter, slot: egui::Rect) {
+pub(crate) fn paint_title_text_edge(painter: &kit::Painter, slot: kit::Rect) {
     vline_hard(
         painter,
         slot.max.x - LINE_W,
@@ -73,36 +89,80 @@ pub(crate) fn paint_title_text_edge(painter: &egui::Painter, slot: egui::Rect) {
 }
 
 pub(crate) fn paint_title_fill(
-    painter: &egui::Painter,
-    title: egui::Rect,
-    text_slot: egui::Rect,
+    painter: &kit::Painter,
+    title: kit::Rect,
+    text_slot: kit::Rect,
     keys_left: f32,
 ) {
-    let fill = egui::Rect::from_min_max(
-        egui::pos2(text_slot.max.x, title.min.y),
-        egui::pos2(keys_left.max(text_slot.max.x), title.max.y),
+    let fill = kit::Rect::from_min_max(
+        kit::pos2(text_slot.max.x, title.min.y),
+        kit::pos2(keys_left.max(text_slot.max.x), title.max.y),
     );
     paint_fill(painter, fill, TITLE_FILL, theme().title_fill);
 }
 
-pub(crate) fn sys_button_rects_n(bar: egui::Rect, count: usize) -> Vec<egui::Rect> {
-    let mut rects = vec![egui::Rect::NOTHING; count];
+pub(crate) fn sys_button_rects_n(bar: kit::Rect, count: usize) -> Vec<kit::Rect> {
+    let mut rects = vec![kit::Rect::NOTHING; count];
     let mut right = bar.max.x;
     for i in (0..count).rev() {
-        rects[i] = egui::Rect::from_min_size(
-            egui::pos2(right - SYS_BTN_W, bar.min.y),
-            egui::vec2(SYS_BTN_W, SYS_BTN_H),
+        rects[i] = kit::Rect::from_min_size(
+            kit::pos2(right - SYS_BTN_W, bar.min.y),
+            kit::vec2(SYS_BTN_W, SYS_BTN_H),
         );
         right = rects[i].min.x + LINE_W;
     }
     rects
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(crate) fn sys_button_rects(
+    bar: kit::Rect,
+    keys: &[(SysButton, usize)],
+    maximized: bool,
+    restore_minimized: bool,
+    pinned: bool,
+    exclusive: bool,
+) -> Vec<kit::Rect> {
+    let count = keys.iter().map(|(_, slot)| slot + 1).max().unwrap_or(0);
+    let mut widths = vec![SYS_BTN_W; count];
+    for &(kind, slot) in keys {
+        widths[slot] = kind.width(maximized, restore_minimized, pinned, exclusive);
+    }
+    let mut rects = vec![kit::Rect::NOTHING; count];
+    let mut right = bar.max.x;
+    for i in (0..count).rev() {
+        rects[i] = kit::Rect::from_min_size(
+            kit::pos2(right - widths[i], bar.min.y),
+            kit::vec2(widths[i], SYS_BTN_H),
+        );
+        right = rects[i].min.x + LINE_W;
+    }
+    rects
+}
+
+pub(crate) fn sys_keys_width(
+    keys: &[(SysButton, usize)],
+    maximized: bool,
+    restore_minimized: bool,
+    pinned: bool,
+    exclusive: bool,
+) -> f32 {
+    if keys.is_empty() {
+        return 0.0;
+    }
+    keys.iter()
+        .map(|(kind, _)| kind.width(maximized, restore_minimized, pinned, exclusive))
+        .sum::<f32>()
+        - (keys.len().saturating_sub(1) as f32) * LINE_W
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "hard-edge primitive keeps geometry arguments explicit"
+)]
 pub(crate) fn paint_sys_button(
-    app: &mut StockApp,
-    painter: &egui::Painter,
-    rect: egui::Rect,
+    app: &mut AppState,
+    painter: &kit::Painter,
+    rect: kit::Rect,
     hot: bool,
     kind: SysButton,
     maximized: bool,
@@ -115,40 +175,48 @@ pub(crate) fn paint_sys_button(
     } else {
         theme().title_button_bg
     };
-    painter.rect_filled(rect, egui::CornerRadius::ZERO, face);
+    painter.rect_filled(rect, kit::CornerRadius::ZERO, face);
     border_hard(painter, rect, theme().title_button_border);
 
-    let content =
-        ButtonContent::Symbol(kind.symbol(maximized, restore_minimized, pinned, exclusive));
-    debug_assert_eq!(content.class(), ButtonClass::Icon);
-    let ButtonContent::Symbol(symbol) = content else {
-        return;
-    };
-    let symbol_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(SYMBOL_W, SYMBOL_H));
-    app.symbols
-        .get(symbol)
-        .paint(painter, symbol_rect, theme().title_button_symbol);
+    let label = kind.label(maximized, restore_minimized, pinned, exclusive);
+    if kind.is_text() {
+        app.text(
+            painter,
+            rect.center(),
+            kit::Align2::CENTER_CENTER,
+            label,
+            theme().button_text,
+        );
+    } else {
+        let content =
+            ButtonContent::Symbol(kind.symbol(maximized, restore_minimized, pinned, exclusive));
+        debug_assert_eq!(content.class(), ButtonClass::Icon);
+        let ButtonContent::Symbol(symbol) = content else {
+            return;
+        };
+        let symbol_rect = kit::Rect::from_center_size(rect.center(), kit::vec2(SYMBOL_W, SYMBOL_H));
+        app.assets
+            .symbols
+            .get(symbol)
+            .paint(painter, symbol_rect, theme().title_button_symbol);
+    }
 
     if hot {
-        app.tooltip = Some((
-            rect,
-            kind.label(maximized, restore_minimized, pinned, exclusive)
-                .to_owned(),
-        ));
+        app.shell.tooltip = Some((rect, label.to_owned()));
     }
 }
 
-impl StockApp {
-    pub(crate) fn ui_titlebar(&mut self, ui: &mut egui::Ui, bar: egui::Rect) {
+impl AppState {
+    pub(crate) fn ui_titlebar(&mut self, ui: &mut kit::Ui, bar: kit::Rect) {
         let ctx = ui.ctx().clone();
         let painter = ui.painter().clone();
 
         let name_slot =
-            egui::Rect::from_min_size(bar.min, egui::vec2(tab_width(self, APP_NAME), bar.height()));
+            kit::Rect::from_min_size(bar.min, kit::vec2(tab_width(self, APP_NAME), bar.height()));
         self.text(
             &painter,
             name_slot.center(),
-            egui::Align2::CENTER_CENTER,
+            kit::Align2::CENTER_CENTER,
             APP_NAME,
             theme().title_text,
         );
@@ -165,7 +233,7 @@ impl StockApp {
                 SysButton::Exclusive | SysButton::Pin | SysButton::Maximize => continue,
             };
             let rect = buttons[slot];
-            let resp = ui.interact(rect, egui::Id::new(("rt_sys_btn", i)), egui::Sense::click());
+            let resp = ui.interact(rect, kit::Id::new(("rt_sys_btn", i)), kit::Sense::click());
             paint_sys_button(
                 self,
                 &painter,
@@ -178,13 +246,13 @@ impl StockApp {
                 false,
             );
 
-            if resp.clicked() {
+            if resp.pressed() {
                 match kind {
                     SysButton::Minimize => {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                        ctx.send_viewport_cmd(kit::ViewportCommand::Minimized(true));
                     }
                     SysButton::Close => {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        ctx.send_viewport_cmd(kit::ViewportCommand::Close);
                     }
                     SysButton::Exclusive | SysButton::Pin | SysButton::Maximize => {}
                 }

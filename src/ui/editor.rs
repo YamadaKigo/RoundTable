@@ -1,49 +1,49 @@
-use crate::app::*;
-use crate::font::{char_advance, text_advance};
-use crate::grid::*;
-use crate::theme::*;
+use crate::application::app::*;
+use crate::domain::layout::*;
+use crate::engine::font::{char_advance, text_advance};
+use crate::engine::kit;
+use crate::engine::theme::*;
 use crate::ui::button::*;
 use crate::ui::contextmenu::*;
 use crate::ui::icon::CursorKind;
 use crate::ui::menu::*;
 use crate::ui::textbuf::*;
-use eframe::egui;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) const EDITOR_TABS: [MenuTab; 3] = [
     MenuTab {
-        title: "文件",
+        title: "File",
         items: &[
-            MenuNode::act("保存"),
-            MenuNode::act("还原原始指标代码"),
-            MenuNode::act("关闭窗口"),
+            MenuNode::act("Save"),
+            MenuNode::act("Restore Original Source"),
+            MenuNode::act("Close Window"),
         ],
     },
     MenuTab {
-        title: "编辑",
+        title: "Edit",
         items: &[
-            MenuNode::act("撤销"),
-            MenuNode::act("剪切"),
-            MenuNode::act("复制"),
-            MenuNode::act("粘贴"),
-            MenuNode::act("全选"),
-            MenuNode::sub("查找", &[MenuNode::act("查找下一个")]),
+            MenuNode::act("Undo"),
+            MenuNode::act("Cut"),
+            MenuNode::act("Copy"),
+            MenuNode::act("Paste"),
+            MenuNode::act("Select All"),
+            MenuNode::sub("Find", &[MenuNode::act("Find Next")]),
         ],
     },
     MenuTab {
-        title: "查看",
-        items: &[MenuNode::act("回到开头"), MenuNode::act("跳到末尾")],
+        title: "View",
+        items: &[MenuNode::act("Go to Start"), MenuNode::act("Go to End")],
     },
 ];
 
 pub(crate) const EDITOR_BUTTONS: [(&str, &str, EditorCmd); 7] = [
-    ("新建", "新建空白文件", EditorCmd::New),
-    ("保存", "保存指标代码", EditorCmd::Save),
-    ("剪切", "剪切选中", EditorCmd::Cut),
-    ("复制", "复制选中", EditorCmd::Copy),
-    ("粘贴", "粘贴", EditorCmd::Paste),
-    ("撤销", "撤销", EditorCmd::Undo),
-    ("查找", "查找下一个", EditorCmd::Find),
+    ("New", "Create an empty file", EditorCmd::New),
+    ("Save", "SaveIndicator Source", EditorCmd::Save),
+    ("Cut", "Cut selection", EditorCmd::Cut),
+    ("Copy", "Copy selection", EditorCmd::Copy),
+    ("Paste", "Paste", EditorCmd::Paste),
+    ("Undo", "Undo", EditorCmd::Undo),
+    ("Find", "Find Next", EditorCmd::Find),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -71,17 +71,17 @@ pub(crate) enum EditorCmd {
 impl EditorCmd {
     fn of(label: &str) -> EditorCmd {
         match label {
-            "保存" => EditorCmd::Save,
-            "还原原始指标代码" => EditorCmd::Reload,
-            "关闭窗口" => EditorCmd::Close,
-            "撤销" => EditorCmd::Undo,
-            "剪切" => EditorCmd::Cut,
-            "复制" => EditorCmd::Copy,
-            "粘贴" => EditorCmd::Paste,
-            "全选" => EditorCmd::SelectAll,
-            "查找下一个" => EditorCmd::Find,
-            "回到开头" => EditorCmd::DocHome,
-            "跳到末尾" => EditorCmd::DocEnd,
+            "Save" => EditorCmd::Save,
+            "Restore Original Source" => EditorCmd::Reload,
+            "Close Window" => EditorCmd::Close,
+            "Undo" => EditorCmd::Undo,
+            "Cut" => EditorCmd::Cut,
+            "Copy" => EditorCmd::Copy,
+            "Paste" => EditorCmd::Paste,
+            "Select All" => EditorCmd::SelectAll,
+            "Find Next" => EditorCmd::Find,
+            "Go to Start" => EditorCmd::DocHome,
+            "Go to End" => EditorCmd::DocEnd,
             _ => EditorCmd::None,
         }
     }
@@ -98,7 +98,7 @@ pub(crate) struct EditOutcome {
 pub(crate) fn apply_edit_events(
     buf: &mut TextBuffer,
     preedit: &mut String,
-    events: &[egui::Event],
+    events: &[kit::Event],
     multiline: bool,
     filter: &dyn Fn(char) -> bool,
 ) -> EditOutcome {
@@ -109,7 +109,7 @@ pub(crate) fn apply_edit_events(
     };
     for event in events {
         match event {
-            egui::Event::Text(text) => {
+            kit::Event::Text(text) => {
                 for ch in text.chars() {
                     if ch.is_control() {
                         continue;
@@ -120,31 +120,22 @@ pub(crate) fn apply_edit_events(
                     }
                 }
             }
-            egui::Event::Paste(text) => {
+            kit::Event::Paste(text) => {
                 buf.insert_text(text, filter);
                 *preedit = String::new();
                 out.changed = true;
             }
-            egui::Event::Copy => {
-                out.copy = Some(buf.selected_text());
-            }
-            egui::Event::Cut => {
-                let text = buf.cut();
-                if !text.is_empty() {
-                    out.changed = true;
-                    out.copy = Some(text);
-                }
-            }
-            egui::Event::Ime(ime) => match ime {
-                egui::ImeEvent::Preedit { text, .. } => {
+            kit::Event::Ime(ime) => match ime {
+                kit::ImeEvent::Preedit { text, .. } => {
                     *preedit = text.clone();
                 }
-                egui::ImeEvent::Commit(text) => {
+                kit::ImeEvent::Commit(text) => {
                     buf.insert_text(text, filter);
                     preedit.clear();
                     out.changed = true;
                 }
-                egui::ImeEvent::DeleteSurrounding {
+                #[cfg(test)]
+                kit::ImeEvent::DeleteSurrounding {
                     before_chars,
                     after_chars,
                 } => {
@@ -156,9 +147,8 @@ pub(crate) fn apply_edit_events(
                     }
                     out.changed = true;
                 }
-                _ => {}
             },
-            egui::Event::Key {
+            kit::Event::Key {
                 key,
                 pressed: true,
                 modifiers,
@@ -166,73 +156,83 @@ pub(crate) fn apply_edit_events(
             } => {
                 let ctrl = modifiers.ctrl || modifiers.command;
                 match key {
-                    egui::Key::Backspace => {
+                    kit::Key::Backspace => {
                         buf.backspace();
                         out.changed = true;
                     }
-                    egui::Key::Delete => {
+                    kit::Key::Delete => {
                         buf.delete();
                         out.changed = true;
                     }
-                    egui::Key::Enter => {
+                    kit::Key::Enter => {
                         if multiline {
                             buf.insert_newline();
                             out.changed = true;
                         }
                     }
-                    egui::Key::Tab => {
+                    kit::Key::Tab => {
                         if !ctrl {
                             buf.insert_text(&" ".repeat(TAB_SPACES), filter);
                             out.changed = true;
                         }
                     }
-                    egui::Key::ArrowLeft => {
+                    kit::Key::ArrowLeft => {
                         if ctrl {
-                            buf.move_home();
+                            buf.move_home_or_end(false, modifiers.shift);
                         } else {
-                            buf.move_left();
+                            buf.move_horizontal(true, modifiers.shift);
                         }
                     }
-                    egui::Key::ArrowRight => {
+                    kit::Key::ArrowRight => {
                         if ctrl {
-                            buf.move_end();
+                            buf.move_home_or_end(true, modifiers.shift);
                         } else {
-                            buf.move_right();
+                            buf.move_horizontal(false, modifiers.shift);
                         }
                     }
-                    egui::Key::ArrowUp => buf.move_vertical(false),
-                    egui::Key::ArrowDown => buf.move_vertical(true),
-                    egui::Key::Home => {
+                    kit::Key::ArrowUp => buf.move_vertical_select(false, modifiers.shift),
+                    kit::Key::ArrowDown => buf.move_vertical_select(true, modifiers.shift),
+                    kit::Key::Home => {
                         if ctrl {
-                            buf.move_doc_home();
+                            buf.move_doc_edge(false, modifiers.shift);
                         } else {
-                            buf.move_home();
+                            buf.move_home_or_end(false, modifiers.shift);
                         }
                     }
-                    egui::Key::End => {
+                    kit::Key::End => {
                         if ctrl {
-                            buf.move_doc_end();
+                            buf.move_doc_edge(true, modifiers.shift);
                         } else {
-                            buf.move_end();
+                            buf.move_home_or_end(true, modifiers.shift);
                         }
                     }
-                    egui::Key::A if ctrl => buf.select_all(),
-                    egui::Key::C if ctrl => {
+                    kit::Key::A if ctrl => buf.select_all(),
+                    kit::Key::C if ctrl => {
                         out.copy = Some(buf.selected_text());
                     }
-                    egui::Key::X if ctrl => {
+                    kit::Key::X if ctrl => {
                         let text = buf.cut();
                         if !text.is_empty() {
                             out.changed = true;
                             out.copy = Some(text);
                         }
                     }
-                    egui::Key::Z if ctrl => {
-                        if buf.undo() {
+                    kit::Key::Z if ctrl => {
+                        let changed = if modifiers.shift {
+                            buf.redo()
+                        } else {
+                            buf.undo()
+                        };
+                        if changed {
                             out.changed = true;
                         }
                     }
-                    egui::Key::S if ctrl => out.save = true,
+                    kit::Key::Y if ctrl => {
+                        if buf.redo() {
+                            out.changed = true;
+                        }
+                    }
+                    kit::Key::S if ctrl => out.save = true,
                     _ => {}
                 }
             }
@@ -248,7 +248,7 @@ pub(crate) struct TextEditor {
 
     pub(crate) scroll: usize,
 
-    pub(crate) scroll_grab: Option<egui::Vec2>,
+    pub(crate) scroll_grab: Option<kit::Vec2>,
 
     pub(crate) rows: usize,
 
@@ -262,9 +262,28 @@ pub(crate) struct TextEditor {
 
     pub(crate) selecting: bool,
 
+    pub(crate) drag_overflow: f32,
+
+    keep_selection_on_release: bool,
+
     pub(crate) find_term: String,
 
     pub(crate) modified: bool,
+
+    layout: TextLayoutCache,
+}
+
+#[derive(Clone, Default)]
+struct TextLayoutCache {
+    initialized: bool,
+    advances: Vec<Vec<f32>>,
+    runs: Vec<Vec<(String, SynKind)>>,
+    line_numbers: Vec<String>,
+    line_names: Vec<BTreeSet<String>>,
+    name_counts: BTreeMap<String, usize>,
+    user_names: BTreeSet<String>,
+    #[cfg(test)]
+    rebuilt_lines: usize,
 }
 
 impl Default for TextEditor {
@@ -285,8 +304,11 @@ impl TextEditor {
             menu: MenuState::default(),
             focused: false,
             selecting: false,
+            drag_overflow: 0.0,
+            keep_selection_on_release: false,
             find_term: String::new(),
             modified: false,
+            layout: TextLayoutCache::default(),
         }
     }
 
@@ -296,7 +318,10 @@ impl TextEditor {
         self.preedit.clear();
         self.wheel_acc = 0.0;
         self.selecting = false;
+        self.drag_overflow = 0.0;
+        self.keep_selection_on_release = false;
         self.modified = false;
+        self.layout = TextLayoutCache::default();
     }
 
     pub(crate) fn max_scroll(&self) -> usize {
@@ -311,14 +336,171 @@ impl TextEditor {
             self.scroll = l + 1 - self.rows;
         }
         self.scroll = self.scroll.min(self.max_scroll());
+        self.ensure_layout();
+    }
+
+    fn ensure_layout(&mut self) {
+        let change = self.buf.take_line_change();
+        if !self.layout.initialized {
+            self.rebuild_layout();
+            return;
+        }
+        let Some(change) = change else {
+            if self.layout.line_names.len() != self.buf.lines.len() {
+                self.rebuild_layout();
+            }
+            return;
+        };
+        let (start, old_len, new_len) = match change {
+            LineChange::Range {
+                start,
+                old_len,
+                new_len,
+            } => (start, old_len, new_len),
+            LineChange::Suffix { start } => (
+                start,
+                self.layout.line_names.len().saturating_sub(start),
+                self.buf.lines.len().saturating_sub(start),
+            ),
+        };
+        let old_end = start.saturating_add(old_len);
+        let new_end = start.saturating_add(new_len);
+        if start > self.layout.line_names.len()
+            || old_end > self.layout.line_names.len()
+            || new_end > self.buf.lines.len()
+            || self.layout.line_names.len() - old_len + new_len != self.buf.lines.len()
+        {
+            self.rebuild_layout();
+            return;
+        }
+
+        let mut names_changed = false;
+        let removed: Vec<BTreeSet<String>> = self.layout.line_names.drain(start..old_end).collect();
+        for names in removed {
+            for name in names {
+                if let Some(count) = self.layout.name_counts.get_mut(&name) {
+                    *count -= 1;
+                    if *count == 0 {
+                        self.layout.name_counts.remove(&name);
+                        self.layout.user_names.remove(&name);
+                        names_changed = true;
+                    }
+                }
+            }
+        }
+
+        let inserted_names: Vec<BTreeSet<String>> = self.buf.lines[start..new_end]
+            .iter()
+            .map(|line| {
+                let mut names = BTreeSet::new();
+                collect_line_user_names(line, &mut names);
+                names
+            })
+            .collect();
+        for names in &inserted_names {
+            for name in names {
+                let count = self.layout.name_counts.entry(name.clone()).or_default();
+                *count += 1;
+                if *count == 1 {
+                    self.layout.user_names.insert(name.clone());
+                    names_changed = true;
+                }
+            }
+        }
+        self.layout.line_names.splice(start..start, inserted_names);
+
+        let mut advances = Vec::with_capacity(new_len);
+        let mut runs = Vec::with_capacity(new_len);
+        for line in &self.buf.lines[start..new_end] {
+            let mut widths = Vec::with_capacity(line.chars().count() + 1);
+            widths.push(0.0);
+            let mut advance = 0.0;
+            for ch in line.chars() {
+                advance += char_advance(ch);
+                widths.push(advance);
+            }
+            advances.push(widths);
+            runs.push(code_runs_with_names(line, &self.layout.user_names));
+        }
+        self.layout.advances.splice(start..old_end, advances);
+        if names_changed {
+            self.layout.runs = self
+                .buf
+                .lines
+                .iter()
+                .map(|line| code_runs_with_names(line, &self.layout.user_names))
+                .collect();
+        } else {
+            self.layout.runs.splice(start..old_end, runs);
+        }
+
+        self.layout.line_numbers.truncate(self.buf.lines.len());
+        self.layout.line_numbers.resize_with(self.buf.lines.len(), {
+            let mut next = self.layout.line_numbers.len() + 1;
+            move || {
+                let value = next.to_string();
+                next += 1;
+                value
+            }
+        });
+        for line in start..self.buf.lines.len() {
+            self.layout.line_numbers[line] = (line + 1).to_string();
+        }
+        #[cfg(test)]
+        {
+            self.layout.rebuilt_lines = new_len;
+        }
+    }
+
+    fn rebuild_layout(&mut self) {
+        self.layout = TextLayoutCache::default();
+        self.layout.initialized = true;
+        self.layout.line_names.reserve(self.buf.lines.len());
+        for line in &self.buf.lines {
+            let mut names = BTreeSet::new();
+            collect_line_user_names(line, &mut names);
+            for name in &names {
+                *self.layout.name_counts.entry(name.clone()).or_default() += 1;
+            }
+            self.layout.user_names.extend(names.iter().cloned());
+            self.layout.line_names.push(names);
+        }
+        for (index, line) in self.buf.lines.iter().enumerate() {
+            self.layout.line_numbers.push((index + 1).to_string());
+
+            let mut widths = Vec::with_capacity(line.chars().count() + 1);
+            widths.push(0.0);
+            let mut advance = 0.0;
+            for ch in line.chars() {
+                advance += char_advance(ch);
+                widths.push(advance);
+            }
+            self.layout.advances.push(widths);
+            self.layout
+                .runs
+                .push(code_runs_with_names(line, &self.layout.user_names));
+        }
+        #[cfg(test)]
+        {
+            self.layout.rebuilt_lines = self.buf.lines.len();
+        }
+    }
+
+    fn advance_at(&self, line: usize, column: usize) -> f32 {
+        self.layout
+            .advances
+            .get(line)
+            .and_then(|widths| widths.get(column))
+            .copied()
+            .unwrap_or(0.0)
     }
 
     pub(crate) fn ui(
         &mut self,
-        app: &mut StockApp,
-        ui: &mut egui::Ui,
-        panel: egui::Rect,
-        id: egui::Id,
+        app: &mut AppState,
+        ui: &mut kit::Ui,
+        panel: kit::Rect,
+        id: kit::Id,
     ) -> EditorCmd {
         let mut cmd = EditorCmd::None;
 
@@ -357,14 +539,14 @@ impl TextEditor {
         self.finish_cmd(ui, cmd)
     }
 
-    fn paint_separators(&self, painter: &egui::Painter, panel: egui::Rect) {
+    fn paint_separators(&self, painter: &kit::Painter, panel: kit::Rect) {
         for rows in [SRC_TITLE_ROWS + SRC_MENU_ROWS, SRC_HEAD_ROWS] {
             let y = panel.min.y + grid_line(rows);
             hline_hard(painter, panel.min.x, panel.max.x, y, theme().editor_border);
         }
     }
 
-    fn finish_cmd(&mut self, ui: &egui::Ui, cmd: EditorCmd) -> EditorCmd {
+    fn finish_cmd(&mut self, ui: &kit::Ui, cmd: EditorCmd) -> EditorCmd {
         let caret_before = self.buf.cursor;
         let out = match cmd {
             EditorCmd::None => EditorCmd::None,
@@ -431,7 +613,7 @@ impl TextEditor {
         out
     }
 
-    pub(crate) fn apply_context_action(&mut self, ui: &egui::Ui, action: ContextAction) {
+    pub(crate) fn apply_context_action(&mut self, ui: &kit::Ui, action: ContextAction) {
         let cmd = match action {
             ContextAction::Cut => EditorCmd::Cut,
             ContextAction::Copy => EditorCmd::Copy,
@@ -445,16 +627,16 @@ impl TextEditor {
 
     fn ui_buttonbar(
         &mut self,
-        app: &mut StockApp,
-        ui: &mut egui::Ui,
-        band: egui::Rect,
+        app: &mut AppState,
+        ui: &mut kit::Ui,
+        band: kit::Rect,
         cmd: &mut EditorCmd,
     ) {
         let painter = ui.painter().clone();
 
         painter.rect_filled(
-            egui::Rect::from_min_max(egui::pos2(band.min.x, band.min.y + LINE_W), band.max),
-            egui::CornerRadius::ZERO,
+            kit::Rect::from_min_max(kit::pos2(band.min.x, band.min.y + LINE_W), band.max),
+            kit::CornerRadius::ZERO,
             theme().panel_bg,
         );
         let mut x = band.min.x + grid_line(1);
@@ -466,7 +648,7 @@ impl TextEditor {
                 break;
             }
             let rect =
-                egui::Rect::from_min_size(egui::pos2(x, band.min.y), egui::vec2(w, band.height()));
+                kit::Rect::from_min_size(kit::pos2(x, band.min.y), kit::vec2(w, band.height()));
             if app.draw_button(ui, &painter, rect, &content, false, tip) {
                 *cmd = action;
             }
@@ -474,7 +656,7 @@ impl TextEditor {
         }
     }
 
-    fn pos_at(&self, p: egui::Pos2, code_x: f32, body_top: f32) -> (usize, usize) {
+    fn pos_at(&self, p: kit::Pos2, code_x: f32, body_top: f32) -> (usize, usize) {
         let row = ((p.y - body_top) / SRC_ROW_PITCH).floor().max(0.0) as usize;
         let line = (self.scroll + row).min(self.buf.line_count().saturating_sub(1));
         let x = (p.x - code_x).max(0.0);
@@ -494,10 +676,10 @@ impl TextEditor {
 
     fn ui_body(
         &mut self,
-        app: &mut StockApp,
-        ui: &mut egui::Ui,
-        panel: egui::Rect,
-        id: egui::Id,
+        app: &mut AppState,
+        ui: &mut kit::Ui,
+        panel: kit::Rect,
+        id: kit::Id,
         menu_open: bool,
         cmd: &mut EditorCmd,
     ) {
@@ -513,19 +695,19 @@ impl TextEditor {
         let visible = self.rows;
 
         painter.rect_filled(
-            egui::Rect::from_min_max(
-                egui::pos2(panel.min.x + LINE_W, body_top),
-                egui::pos2(panel.max.x - LINE_W, body_bottom),
+            kit::Rect::from_min_max(
+                kit::pos2(panel.min.x + LINE_W, body_top),
+                kit::pos2(panel.max.x - LINE_W, body_bottom),
             ),
-            egui::CornerRadius::ZERO,
+            kit::CornerRadius::ZERO,
             theme().editor_bg,
         );
         painter.rect_filled(
-            egui::Rect::from_min_max(
-                egui::pos2(panel.min.x + LINE_W, body_top + LINE_W),
-                egui::pos2(gutter_line, body_bottom),
+            kit::Rect::from_min_max(
+                kit::pos2(panel.min.x + LINE_W, body_top + LINE_W),
+                kit::pos2(gutter_line, body_bottom),
             ),
-            egui::CornerRadius::ZERO,
+            kit::CornerRadius::ZERO,
             theme().editor_gutter_bg,
         );
         vline_hard(
@@ -537,7 +719,7 @@ impl TextEditor {
         );
 
         let hovered = !menu_open
-            && !app.win_silent
+            && !app.shell.win_silent
             && ui
                 .input(|i| i.pointer.hover_pos())
                 .is_some_and(|p| panel.contains(p));
@@ -545,11 +727,10 @@ impl TextEditor {
             let mut acc = self.wheel_acc;
             ui.input(|i| {
                 for event in &i.events {
-                    if let egui::Event::MouseWheel { unit, delta, .. } = event {
+                    if let kit::Event::MouseWheel { unit, delta, .. } = event {
                         acc += match unit {
-                            egui::MouseWheelUnit::Line => delta.y,
-                            egui::MouseWheelUnit::Point => delta.y / WHEEL_POINTS_PER_NOTCH,
-                            egui::MouseWheelUnit::Page => delta.y,
+                            kit::MouseWheelUnit::Line => delta.y,
+                            kit::MouseWheelUnit::Point => delta.y / WHEEL_POINTS_PER_NOTCH,
                         };
                     }
                 }
@@ -563,67 +744,60 @@ impl TextEditor {
         }
         self.scroll = self.scroll.min(self.max_scroll());
 
-        let body = egui::Rect::from_min_max(
-            egui::pos2(panel.min.x + LINE_W, body_top),
-            egui::pos2(panel.max.x - LINE_W, body_bottom),
+        let text_area = kit::Rect::from_min_max(
+            kit::pos2(panel.min.x + LINE_W, body_top),
+            kit::pos2(bar_line, body_bottom),
         );
 
-        let window_active = !app.win_silent;
-        if !window_active {
-            self.focused = false;
-            ui.memory_mut(|m| m.surrender_focus(id));
-        }
+        let window_active = !app.shell.win_silent;
         let resp = if menu_open {
-            ui.interact(body, id, egui::Sense::hover())
+            ui.interact(text_area, id, kit::Sense::hover())
         } else {
-            ui.interact(body, id, egui::Sense::click_and_drag())
+            ui.interact(text_area, id, kit::Sense::click_and_drag())
         };
-        let text_area = egui::Rect::from_min_max(
-            egui::pos2(panel.min.x + LINE_W, body_top),
-            egui::pos2(bar_line, body_bottom),
-        );
         if ui
             .input(|i| i.pointer.hover_pos())
             .filter(|_| window_active && !menu_open)
             .is_some_and(|p| text_area.contains(p))
         {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+            ui.ctx().set_cursor_icon(kit::CursorIcon::Text);
             app.pointer.text_hover = true;
             app.pointer.hint = CursorKind::Text;
         }
-        let primary_clicked_in_body = !menu_open
-            && ui.input(|i| {
-                i.pointer.primary_clicked()
-                    && i.pointer
-                        .interact_pos()
-                        .or_else(|| i.pointer.latest_pos())
-                        .is_some_and(|p| body.contains(p))
-            });
-        if primary_clicked_in_body || resp.drag_started() {
+        let primary_pressed_in_body = resp.pressed() && !menu_open;
+        let primary_clicked_in_body = resp.clicked() && !menu_open;
+        if primary_pressed_in_body || resp.drag_started() {
+            if primary_pressed_in_body {
+                self.keep_selection_on_release = !self.focused && self.buf.selection().is_some();
+            } else {
+                self.keep_selection_on_release = false;
+            }
             self.focused = true;
 
             ui.memory_mut(|m| m.request_focus(id));
         }
 
-        if self.focused {
-            let outside_click = ui.ctx().input(|i| {
-                i.pointer.primary_clicked()
-                    && !self.selecting
-                    && i.pointer.interact_pos().is_some_and(|p| !panel.contains(p))
-            });
-            if outside_click {
-                self.focused = false;
-            }
+        let blur_press = ui.ctx().input(|i| {
+            i.pointer.primary_pressed()
+                && i.pointer.interact_pos().is_none_or(|p| !panel.contains(p))
+        });
+        if blur_press {
+            self.focused = false;
+            self.selecting = false;
+            self.drag_overflow = 0.0;
+            self.keep_selection_on_release = false;
+            self.buf.sel_anchor = None;
         }
 
         if !self.focused {
             ui.memory_mut(|m| m.surrender_focus(id));
+            self.selecting = false;
         } else if self.preedit.is_empty() && !ui.memory(|m| m.has_focus(id)) {
             ui.memory_mut(|m| m.request_focus(id));
         }
         let focused = self.focused;
 
-        let (pointer_pos, press_pos, primary_clicked) = ui.input(|i| {
+        let (pointer_pos, press_pos, shift, double_clicked) = ui.input(|i| {
             let pointer_pos = app
                 .pointer
                 .live
@@ -632,11 +806,12 @@ impl TextEditor {
             (
                 pointer_pos,
                 i.pointer.press_origin(),
-                i.pointer.primary_clicked() && pointer_pos.is_some_and(|p| body.contains(p)),
+                i.modifiers.shift,
+                i.pointer.button_double_clicked(kit::PointerButton::Primary),
             )
         });
-        let clamp_to_text = |p: egui::Pos2| {
-            egui::pos2(
+        let clamp_to_text = |p: kit::Pos2| {
+            kit::pos2(
                 p.x.clamp(text_area.min.x, text_area.max.x - LINE_W),
                 p.y.clamp(text_area.min.y, text_area.max.y - LINE_W),
             )
@@ -649,52 +824,94 @@ impl TextEditor {
                 if !self.buf.selection_contains(pos) {
                     self.buf.set_cursor(pos, false);
                 }
-                app.context_menu.open_editor(p);
+                app.shell.context_menu.open_editor(p);
             } else if resp.drag_started() {
                 self.selecting = true;
-
                 let start = self.pos_at(clamp_to_text(press_pos.unwrap_or(p)), code_x, body_top);
                 self.buf.set_cursor(start, false);
                 self.buf.sel_anchor = Some(start);
                 let now = self.pos_at(clamp_to_text(p), code_x, body_top);
                 self.buf.set_cursor(now, true);
+                self.drag_overflow = selection_overflow(p.y, text_area);
+                app.pointer.pinned = None;
+                app.reset_caret_blink(ui.ctx());
             } else if self.selecting && ui.input(|i| i.pointer.primary_down()) {
-                let at = clamp_to_text(p);
-                app.pointer.pinned = Some(at);
-                let pos = self.pos_at(at, code_x, body_top);
-                self.buf.set_cursor(pos, true);
-            } else if primary_clicked {
+                app.pointer.text_selecting = true;
+                let pointer_moved = ui.input(|i| {
+                    i.events.iter().any(|event| {
+                        matches!(
+                            event,
+                            kit::Event::PointerMoved(_) | kit::Event::MouseMoved(_)
+                        )
+                    })
+                });
+                if pointer_moved {
+                    self.drag_overflow = selection_overflow(p.y, text_area);
+                }
+                let rows = (self.drag_overflow.abs() / SRC_ROW_PITCH).ceil() as usize;
+                if rows > 0 {
+                    if self.drag_overflow < 0.0 {
+                        self.scroll = self.scroll.saturating_sub(rows.min(4));
+                    } else {
+                        self.scroll = (self.scroll + rows.min(4)).min(self.max_scroll());
+                    }
+                }
                 let pos = self.pos_at(clamp_to_text(p), code_x, body_top);
-                self.buf.set_cursor(pos, false);
+                self.buf.set_cursor(pos, true);
+                app.pointer.pinned = None;
+                app.reset_caret_blink(ui.ctx());
+            } else if primary_clicked_in_body {
+                let pos = self.pos_at(clamp_to_text(p), code_x, body_top);
+                if double_clicked {
+                    self.buf.select_word(pos);
+                } else if shift {
+                    let anchor = self.buf.sel_anchor.unwrap_or(self.buf.cursor);
+                    self.buf.sel_anchor = Some(anchor);
+                    self.buf.set_cursor(pos, true);
+                } else if self.keep_selection_on_release || self.buf.selection_contains(pos) {
+                    // Refocusing by clicking inside an existing selection must not collapse it.
+                } else {
+                    self.buf.set_cursor(pos, false);
+                }
+                self.keep_selection_on_release = false;
+                app.reset_caret_blink(ui.ctx());
             }
         }
         if !ui.input(|i| i.pointer.primary_down()) {
             self.selecting = false;
+            self.drag_overflow = 0.0;
         }
 
         if focused && window_active {
-            ui.memory_mut(|m| {
-                m.set_focus_lock_filter(
-                    id,
-                    egui::EventFilter {
-                        tab: true,
-                        horizontal_arrows: true,
-                        vertical_arrows: true,
-                        escape: true,
-                    },
+            app.note_caret();
+            let caret_before = self.buf.cursor;
+            let out = ui.input(|input| {
+                self.buf
+                    .begin_undo_group((input.time * 2.0).floor().max(0.0) as u64);
+                apply_edit_events(
+                    &mut self.buf,
+                    &mut self.preedit,
+                    &input.events,
+                    true,
+                    &char_allowed,
                 )
             });
-            let caret_before = self.buf.cursor;
-            let events = ui.input(|i| i.events.clone());
-            let out = apply_edit_events(
-                &mut self.buf,
-                &mut self.preedit,
-                &events,
-                true,
-                &char_allowed,
-            );
             if out.changed {
                 self.modified = true;
+            }
+            let keyboard_input = ui.input(|i| {
+                i.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        kit::Event::Key { pressed: true, .. }
+                            | kit::Event::Text(_)
+                            | kit::Event::Paste(_)
+                            | kit::Event::Ime(_)
+                    )
+                })
+            });
+            if keyboard_input {
+                app.reset_caret_blink(ui.ctx());
             }
             if let Some(text) = out.copy {
                 ui.ctx().copy_text(text);
@@ -709,10 +926,11 @@ impl TextEditor {
         } else {
             self.preedit.clear();
         }
+        self.ensure_layout();
 
-        let text_painter = painter.with_clip_rect(egui::Rect::from_min_max(
-            egui::pos2(code_x, body_top),
-            egui::pos2(bar_line, body_bottom),
+        let text_painter = painter.with_clip_rect(kit::Rect::from_min_max(
+            kit::pos2(code_x, body_top),
+            kit::pos2(bar_line, body_bottom),
         ));
 
         if let Some((start, end)) = self.buf.selection() {
@@ -721,22 +939,21 @@ impl TextEditor {
                 if idx < start.0 || idx > end.0 {
                     continue;
                 }
-                let line = self.buf.line(idx);
-                let chars: Vec<char> = line.chars().collect();
-                let c0 = if idx == start.0 { start.1 } else { 0 }.min(chars.len());
-                let c1 = if idx == end.0 { end.1 } else { chars.len() }.min(chars.len());
-                let x0 = code_x + text_advance(&chars[..c0].iter().collect::<String>());
-                let x1 = code_x + text_advance(&chars[..c1].iter().collect::<String>());
+                let columns = self.buf.line_chars(idx);
+                let c0 = if idx == start.0 { start.1 } else { 0 }.min(columns);
+                let c1 = if idx == end.0 { end.1 } else { columns }.min(columns);
+                let x0 = code_x + self.advance_at(idx, c0);
+                let x1 = code_x + self.advance_at(idx, c1);
                 let x1 = x1.min(code_x + code_w);
                 if x1 <= x0 {
                     continue;
                 }
                 painter.rect_filled(
-                    egui::Rect::from_min_size(
-                        egui::pos2(x0, body_top + k as f32 * SRC_ROW_PITCH + LINE_W),
-                        egui::vec2(x1 - x0, SRC_LINE_H),
+                    kit::Rect::from_min_size(
+                        kit::pos2(x0, body_top + k as f32 * SRC_ROW_PITCH + LINE_W),
+                        kit::vec2(x1 - x0, SRC_LINE_H),
                     ),
-                    egui::CornerRadius::ZERO,
+                    kit::CornerRadius::ZERO,
                     theme().sel_bg,
                 );
             }
@@ -751,45 +968,42 @@ impl TextEditor {
             let y = body_top + k as f32 * SRC_ROW_PITCH + LINE_W + SRC_LINE_H / 2.0;
             app.text(
                 &painter,
-                egui::pos2(text_right_x(gutter_line, panel.min.x), y),
-                egui::Align2::RIGHT_CENTER,
-                &format!("{}", idx + 1),
+                kit::pos2(text_right_x(gutter_line, panel.min.x), y),
+                kit::Align2::RIGHT_CENTER,
+                &self.layout.line_numbers[idx],
                 theme().editor_line_number,
             );
         }
-        let user_names = code_user_names(&self.buf.lines);
         for k in 0..visible {
             let idx = self.scroll + k;
             if idx >= self.buf.line_count() {
                 break;
             }
             let y = body_top + k as f32 * SRC_ROW_PITCH + LINE_W + SRC_LINE_H / 2.0;
-            paint_code_line(
+            paint_code_runs(
                 app,
                 &text_painter,
                 code_x,
                 y,
-                self.buf.line(idx),
                 code_w,
-                &user_names,
+                &self.layout.runs[idx],
             );
         }
 
-        let mut caret_rect: Option<egui::Rect> = None;
+        let mut caret_rect: Option<kit::Rect> = None;
         if focused {
             let (cl, cc) = self.buf.cursor;
             if cl >= self.scroll && cl < self.scroll + visible {
                 let k = cl - self.scroll;
                 let top = body_top + k as f32 * SRC_ROW_PITCH + LINE_W;
                 let mid = top + SRC_LINE_H / 2.0;
-                let head: String = self.buf.line(cl).chars().take(cc).collect();
-                let mut x = (code_x + text_advance(&head)).round();
+                let mut x = (code_x + self.advance_at(cl, cc)).round();
                 if !self.preedit.is_empty() {
                     let pw = text_advance(&self.preedit);
                     app.text(
                         &text_painter,
-                        egui::pos2(x, mid),
-                        egui::Align2::LEFT_CENTER,
+                        kit::pos2(x, mid),
+                        kit::Align2::LEFT_CENTER,
                         &self.preedit,
                         theme().editor_text,
                     );
@@ -804,8 +1018,15 @@ impl TextEditor {
                 }
 
                 let caret = text_caret_rect(x, top, SRC_LINE_H);
-
-                text_painter.rect_filled(caret, egui::CornerRadius::ZERO, theme().editor_text);
+                if !self.preedit.is_empty() || app.caret_visible(ui.ctx()) {
+                    text_painter.with_layer(kit::PaintLayer::Dynamic, || {
+                        text_painter.rect_filled(
+                            caret,
+                            kit::CornerRadius::ZERO,
+                            theme().editor_text,
+                        );
+                    });
+                }
                 caret_rect = Some(caret);
             }
         }
@@ -816,13 +1037,12 @@ impl TextEditor {
                     .ctx()
                     .layer_transform_to_global(ui.layer_id())
                     .unwrap_or_default();
-                let area = egui::Rect::from_min_max(
-                    egui::pos2(code_x, body_top),
-                    egui::pos2(bar_line, body_bottom),
+                let area = kit::Rect::from_min_max(
+                    kit::pos2(code_x, body_top),
+                    kit::pos2(bar_line, body_bottom),
                 );
                 ui.output_mut(|o| {
-                    o.ime = Some(egui::output::IMEOutput {
-                        purpose: egui::IMEPurpose::Normal,
+                    o.ime = Some(kit::output::IMEOutput {
                         rect: to_global * area,
                         cursor_rect: to_global * bar,
                         should_interrupt_composition: false,
@@ -847,15 +1067,16 @@ impl TextEditor {
             &mut self.scroll,
             &mut self.scroll_grab,
         );
+    }
+}
 
-        if self.selecting
-            && ui.input(|i| i.pointer.primary_down())
-            && let Some(p) = app.pointer.live.or_else(|| {
-                ui.input(|i| i.pointer.interact_pos().or_else(|| i.pointer.latest_pos()))
-            })
-        {
-            app.pointer.pinned = Some(clamp_to_text(p));
-        }
+fn selection_overflow(y: f32, text_area: kit::Rect) -> f32 {
+    if y < text_area.min.y {
+        y - text_area.min.y
+    } else if y > text_area.max.y - LINE_W {
+        y - (text_area.max.y - LINE_W)
+    } else {
+        0.0
     }
 }
 
@@ -881,66 +1102,71 @@ fn push_run(runs: &mut Vec<(String, SynKind)>, text: String, kind: SynKind) {
     runs.push((text, kind));
 }
 
+#[cfg(test)]
 pub(crate) fn code_user_names(lines: &[String]) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     for line in lines {
-        let chars: Vec<char> = line.chars().collect();
-        let n = chars.len();
-        let mut i = 0;
-        let mut in_string = false;
-        let mut escaped = false;
-        while i < n {
-            let ch = chars[i];
-            if in_string {
-                if escaped {
-                    escaped = false;
-                } else if ch == '\\' {
-                    escaped = true;
-                } else if ch == '"' {
-                    in_string = false;
-                }
-                i += 1;
-                continue;
-            }
-            if ch == '"' {
-                in_string = true;
-                i += 1;
-                continue;
-            }
-            if ch == '/' && chars.get(i + 1) == Some(&'/') {
-                break;
-            }
-            if ch == '#' {
-                let color_end = i + 7;
-                let color = color_end <= n
-                    && chars[i + 1..color_end]
-                        .iter()
-                        .all(|digit| digit.is_ascii_hexdigit())
-                    && chars
-                        .get(color_end)
-                        .is_none_or(|next| !next.is_ascii_alphanumeric() && *next != '_');
-                i = if color { color_end } else { n };
-                continue;
-            }
-            if ch.is_ascii_alphabetic() || ch == '_' {
-                let start = i;
-                i += 1;
-                while i < n && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
-                    i += 1;
-                }
-                let mut next = i;
-                while next < n && chars[next].is_whitespace() {
-                    next += 1;
-                }
-                if chars.get(next) == Some(&':') || chars.get(next) == Some(&'=') {
-                    names.insert(chars[start..i].iter().collect());
-                }
-                continue;
-            }
-            i += 1;
-        }
+        collect_line_user_names(line, &mut names);
     }
     names
+}
+
+fn collect_line_user_names(line: &str, names: &mut BTreeSet<String>) {
+    let chars: Vec<char> = line.chars().collect();
+    let n = chars.len();
+    let mut i = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+    while i < n {
+        let ch = chars[i];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if ch == '/' && chars.get(i + 1) == Some(&'/') {
+            break;
+        }
+        if ch == '#' {
+            let color_end = i + 7;
+            let color = color_end <= n
+                && chars[i + 1..color_end]
+                    .iter()
+                    .all(|digit| digit.is_ascii_hexdigit())
+                && chars
+                    .get(color_end)
+                    .is_none_or(|next| !next.is_ascii_alphanumeric() && *next != '_');
+            i = if color { color_end } else { n };
+            continue;
+        }
+        if ch.is_ascii_alphabetic() || ch == '_' {
+            let start = i;
+            i += 1;
+            while i < n && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let mut next = i;
+            while next < n && chars[next].is_whitespace() {
+                next += 1;
+            }
+            if chars.get(next) == Some(&':') || chars.get(next) == Some(&'=') {
+                names.insert(chars[start..i].iter().collect());
+            }
+            continue;
+        }
+        i += 1;
+    }
 }
 
 #[cfg(test)]
@@ -1019,7 +1245,7 @@ pub(crate) fn code_runs_with_names(
     runs
 }
 
-pub(crate) fn syn_color(kind: SynKind) -> egui::Color32 {
+pub(crate) fn syn_color(kind: SynKind) -> kit::Color32 {
     match kind {
         SynKind::Plain => theme().editor_text,
         SynKind::UserName => theme().syn_keyword,
@@ -1027,30 +1253,29 @@ pub(crate) fn syn_color(kind: SynKind) -> egui::Color32 {
     }
 }
 
-pub(crate) fn paint_code_line(
-    app: &mut StockApp,
-    painter: &egui::Painter,
+pub(crate) fn paint_code_runs(
+    app: &mut AppState,
+    painter: &kit::Painter,
     code_x: f32,
     y: f32,
-    line: &str,
     code_w: f32,
-    user_names: &BTreeSet<String>,
+    runs: &[(String, SynKind)],
 ) {
     let end = code_x + code_w;
     let mut x = code_x;
-    for (text, kind) in code_runs_with_names(line, user_names) {
+    for (text, kind) in runs {
         if x >= end {
             break;
         }
-        let color = syn_color(kind);
-        let w = text_advance(&text);
+        let color = syn_color(*kind);
+        let w = text_advance(text);
         if x + w > end {
-            let shown = fit_line(&text, end - x);
+            let shown = fit_line(text, end - x);
             if !shown.is_empty() {
                 app.text(
                     painter,
-                    egui::pos2(x, y),
-                    egui::Align2::LEFT_CENTER,
+                    kit::pos2(x, y),
+                    kit::Align2::LEFT_CENTER,
                     &shown,
                     color,
                 );
@@ -1059,9 +1284,9 @@ pub(crate) fn paint_code_line(
         }
         app.text(
             painter,
-            egui::pos2(x, y),
-            egui::Align2::LEFT_CENTER,
-            &text,
+            kit::pos2(x, y),
+            kit::Align2::LEFT_CENTER,
+            text,
             color,
         );
         x += w;
@@ -1085,33 +1310,36 @@ pub(crate) fn fit_line(line: &str, max_w: f32) -> String {
     out
 }
 
-pub(crate) fn scrollbar_track(panel: egui::Rect) -> egui::Rect {
+pub(crate) fn scrollbar_track(panel: kit::Rect) -> kit::Rect {
     let bar_line = panel.max.x - 2.0 * LINE_W - SRC_BAR_W;
-    egui::Rect::from_min_max(
-        egui::pos2(bar_line + LINE_W, panel.min.y + SRC_BODY_TOP),
-        egui::pos2(panel.max.x - LINE_W, panel.max.y - LINE_W),
+    kit::Rect::from_min_max(
+        kit::pos2(bar_line + LINE_W, panel.min.y + SRC_BODY_TOP),
+        kit::pos2(panel.max.x - LINE_W, panel.max.y - LINE_W),
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "hard-edge primitive keeps geometry arguments explicit"
+)]
 pub(crate) fn vertical_scrollbar(
-    app: &mut StockApp,
-    ui: &mut egui::Ui,
-    painter: &egui::Painter,
-    id: egui::Id,
-    panel: egui::Rect,
+    app: &mut AppState,
+    ui: &mut kit::Ui,
+    painter: &kit::Painter,
+    id: kit::Id,
+    panel: kit::Rect,
     body_top: f32,
     body_bottom: f32,
     visible: usize,
     total: usize,
     max_scroll: usize,
     scroll: &mut usize,
-    scroll_grab: &mut Option<egui::Vec2>,
+    scroll_grab: &mut Option<kit::Vec2>,
 ) {
     let bar_line = panel.max.x - 2.0 * LINE_W - SRC_BAR_W;
-    let track = egui::Rect::from_min_max(
-        egui::pos2(bar_line + LINE_W, body_top),
-        egui::pos2(panel.max.x - LINE_W, body_bottom),
+    let track = kit::Rect::from_min_max(
+        kit::pos2(bar_line + LINE_W, body_top),
+        kit::pos2(panel.max.x - LINE_W, body_bottom),
     );
     let total = total.max(1) as f32;
     let track_h = track.height();
@@ -1126,25 +1354,26 @@ pub(crate) fn vertical_scrollbar(
         } else {
             value as f32 / max_scroll as f32
         };
-        egui::Rect::from_min_size(
-            egui::pos2(track.min.x, (body_top + travel * t).round()),
-            egui::vec2(track.width(), handle_h),
+        kit::Rect::from_min_size(
+            kit::pos2(track.min.x, (body_top + travel * t).round()),
+            kit::vec2(track.width(), handle_h),
         )
     };
     let handle = handle_at(*scroll);
 
-    let track_resp = ui.interact(
-        track,
-        id.with("vscroll_track"),
-        egui::Sense::click_and_drag(),
-    );
-    let bar = ui.interact(handle, id.with("vscroll"), egui::Sense::click_and_drag());
+    let bar = ui.interact(handle, id.with("vscroll"), kit::Sense::click_and_drag());
+    let track_sense = if bar.is_pointer_button_down_on() {
+        kit::Sense::hover()
+    } else {
+        kit::Sense::click_and_drag()
+    };
+    let track_resp = ui.interact(track, id.with("vscroll_track"), track_sense);
     if bar.hovered() || bar.dragged() || track_resp.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        ui.ctx().set_cursor_icon(kit::CursorIcon::ResizeVertical);
         app.pointer.hint = CursorKind::Slider;
     }
 
-    let (down, press, egui_pointer) = ui.input(|i| {
+    let (down, press, pointer_event) = ui.input(|i| {
         (
             i.pointer.primary_down(),
             i.pointer.press_origin(),
@@ -1152,7 +1381,7 @@ pub(crate) fn vertical_scrollbar(
         )
     });
 
-    let pointer = app.pointer.live.or(egui_pointer);
+    let pointer = app.pointer.live.or(pointer_event);
     let press = app.pointer.live.or(press);
     if !down {
         *scroll_grab = None;
@@ -1165,7 +1394,7 @@ pub(crate) fn vertical_scrollbar(
             *scroll_grab = Some(if handle.contains(p0) {
                 p0 - handle.min
             } else {
-                egui::vec2(0.0, handle_h / 2.0)
+                kit::vec2(0.0, handle_h / 2.0)
             });
         }
     }
@@ -1188,8 +1417,8 @@ pub(crate) fn vertical_scrollbar(
         app.pointer.pinned = Some(handle.min + grab);
     }
 
-    painter.rect_filled(track, egui::CornerRadius::ZERO, theme().scroll_track);
-    painter.rect_filled(handle, egui::CornerRadius::ZERO, theme().scroll_thumb);
+    painter.rect_filled(track, kit::CornerRadius::ZERO, theme().scroll_track);
+    painter.rect_filled(handle, kit::CornerRadius::ZERO, theme().scroll_thumb);
     hline_hard(
         painter,
         handle.min.x,
@@ -1213,4 +1442,36 @@ pub(crate) fn vertical_scrollbar(
         body_bottom,
         theme().scroll_border,
     );
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn layout_rebuilds_only_the_changed_line() {
+        let mut editor = TextEditor::new();
+        editor.load("alpha\nbeta\ngamma");
+        editor.ensure_layout();
+        assert_eq!(editor.layout.rebuilt_lines, 3);
+
+        editor.buf.set_cursor((1, 4), false);
+        editor.buf.insert_char('!');
+        editor.ensure_layout();
+        assert_eq!(editor.layout.rebuilt_lines, 1);
+        assert_eq!(editor.layout.line_numbers, ["1", "2", "3"]);
+        assert_eq!(editor.buf.line(1), "beta!");
+    }
+
+    #[test]
+    fn inserted_line_only_rebuilds_the_split_line() {
+        let mut editor = TextEditor::new();
+        editor.load("alpha\nbeta\ngamma");
+        editor.ensure_layout();
+        editor.buf.set_cursor((1, 2), false);
+        editor.buf.insert_newline();
+        editor.ensure_layout();
+        assert_eq!(editor.layout.rebuilt_lines, 2);
+        assert_eq!(editor.layout.line_numbers, ["1", "2", "3", "4"]);
+    }
 }

@@ -3,64 +3,54 @@
     windows_subsystem = "windows"
 )]
 
-use eframe::egui;
 use std::fmt::Write as _;
 
-mod app;
-mod assets;
-mod data;
-mod ecs;
-mod font;
-mod grid;
-mod indicator;
+mod application;
+mod domain;
+mod engine;
 mod platform;
-mod pointer;
-mod script;
-mod theme;
 mod ui;
 
-#[cfg(target_os = "windows")]
-mod win32;
-
-use crate::app::*;
-use crate::grid::*;
+#[cfg(test)]
+use crate::application::app::*;
+#[cfg(test)]
+use crate::domain::layout::*;
 
 fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         let text = panic_text(info);
-        let _ = std::fs::write(crash_log_path(), &text);
-        report_crash(&text);
+        let log_path = crash_log_path();
+        let log_error = std::fs::write(&log_path, &text).err();
+        report_crash(&text, &log_path, log_error);
     }));
 }
 
 fn panic_text(info: &std::panic::PanicHookInfo<'_>) -> String {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut out = String::new();
-        let payload = info.payload();
-        let msg = payload
-            .downcast_ref::<&str>()
-            .copied()
-            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-            .unwrap_or("(读不出 panic 正文)");
-        let _ = writeln!(out, "panic: {msg}");
-        if let Some(loc) = info.location() {
-            let _ = writeln!(out, "位置: {}:{}", loc.file(), loc.line());
-        }
-        let _ = writeln!(
-            out,
-            "线程: {}",
-            std::thread::current().name().unwrap_or("(无名)")
-        );
-        let _ = writeln!(out, "时间: {:?}", std::time::SystemTime::now());
-        let _ = writeln!(out, "版本: {}", env!("CARGO_PKG_VERSION"));
-        let _ = writeln!(
-            out,
-            "\n--- backtrace ---\n{}",
-            std::backtrace::Backtrace::force_capture()
-        );
-        out
-    }))
-    .unwrap_or_else(|_| "panic（连 panic 钩子自己都炸了）".to_string())
+    let mut out = String::new();
+    let payload = info.payload();
+    let msg = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("(panic payload is not valid UTF-8 text)");
+    let _ = writeln!(out, "panic: {msg}");
+    if let Some(loc) = info.location() {
+        let _ = writeln!(out, "location: {}:{}", loc.file(), loc.line());
+    }
+    let _ = writeln!(
+        out,
+        "thread: {}",
+        std::thread::current().name().unwrap_or("(unnamed)")
+    );
+    let _ = writeln!(out, "time: {:?}", std::time::SystemTime::now());
+    let _ = writeln!(out, "version: {}", env!("CARGO_PKG_VERSION"));
+    let _ = writeln!(out, "executable: {:?}", std::env::current_exe());
+    let _ = writeln!(
+        out,
+        "\n--- backtrace ---\n{}",
+        std::backtrace::Backtrace::force_capture()
+    );
+    out
 }
 
 fn crash_log_path() -> std::path::PathBuf {
@@ -70,61 +60,40 @@ fn crash_log_path() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("roundtable-crash.log"))
 }
 
-fn report_crash(text: &str) {
+fn report_crash(text: &str, log_path: &std::path::Path, log_error: Option<std::io::Error>) {
     eprintln!("{text}");
     if cfg!(debug_assertions) {
         return;
     }
-    let body = format!(
-        "圆桌崩了，这一句记在：\n{}\n\n{}",
-        crash_log_path().display(),
-        text
-    );
-    platform::message_box("圆桌 - 崩溃", &body);
+    let persistence = match log_error {
+        Some(error) => format!(
+            "Crash log could not be written to {}:\n{error}",
+            log_path.display()
+        ),
+        None => format!("Crash log: {}", log_path.display()),
+    };
+    let body = format!("RoundTable crashed.\n{persistence}\n\n{text}");
+    platform::message_box("RoundTable - Crash", &body);
 }
 
-fn main() -> eframe::Result {
+fn main() {
     install_panic_hook();
     if !platform::acquire_single_instance() {
-        return Ok(());
+        return;
     }
     let result = run();
 
     if let Err(e) = &result {
-        let body = format!("圆桌起不来：\n{e}");
+        let body = format!("RoundTable could not start:\n{e}");
         eprintln!("{body}");
         if !cfg!(debug_assertions) {
-            platform::message_box("圆桌 - 启动失败", &body);
+            platform::message_box("RoundTable - Startup Failed", &body);
         }
     }
-    result
 }
 
-fn run() -> eframe::Result {
-    let (win_x, win_y, win_w, win_h) = match platform::work_area().or_else(platform::screen_area) {
-        Some((x, y, w, h)) => (x as f32, y as f32, w as f32, h as f32),
-        None => (0.0, 0.0, WINDOW_W, WINDOW_H),
-    };
-    let mut wgpu_options = eframe::WgpuConfiguration::default();
-    wgpu_options.surface.present_mode = eframe::wgpu::PresentMode::AutoNoVsync;
-    wgpu_options.surface.desired_maximum_frame_latency = Some(2);
-    let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(APP_NAME)
-            .with_decorations(false)
-            .with_position([win_x, win_y])
-            .with_inner_size([win_w, win_h])
-            .with_min_inner_size([WINDOW_MIN_W, WINDOW_MIN_H])
-            .with_fullscreen(true),
-        wgpu_options,
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        APP_NAME,
-        native_options,
-        Box::new(|cc| Ok(Box::new(StockApp::new(cc)))),
-    )
+fn run() -> Result<(), String> {
+    platform::run_app()
 }
 
 #[cfg(test)]

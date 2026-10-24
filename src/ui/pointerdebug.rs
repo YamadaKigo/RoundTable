@@ -1,24 +1,24 @@
-use crate::app::*;
-use crate::grid::*;
+use crate::application::app::*;
+use crate::domain::layout::*;
+use crate::engine::kit;
+use crate::engine::theme::*;
 use crate::platform::client_origin;
-use crate::pointer::*;
-use crate::theme::*;
-use eframe::egui;
+use crate::platform::pointer::*;
 
 pub(crate) const POINTER_TRAIL_S: f64 = 1.20;
 pub(crate) const POINTER_TRAIL_MAX: usize = 260;
 
 pub(crate) const POINTER_TRAIL_HOT_S: f64 = 0.18;
 
-impl StockApp {
-    pub(crate) fn paint_pointer_debug(&mut self, ctx: &egui::Context, at: egui::Pos2) {
+impl AppState {
+    pub(crate) fn paint_pointer_debug(&mut self, ctx: &kit::Context, at: kit::Pos2) {
         if !self.pointer.show_trail {
             return;
         }
         let now = ctx.input(|i| i.time);
         let origin = client_origin(self.hwnd);
-        let to_client = |screen: egui::Pos2| match origin {
-            Some((ox, oy)) => egui::pos2(screen.x - ox as f32, screen.y - oy as f32),
+        let to_client = |screen: kit::Pos2| match origin {
+            Some((ox, oy)) => kit::pos2(screen.x - ox as f32, screen.y - oy as f32),
             None => screen,
         };
         let samples: Vec<PointerSample> = self
@@ -58,7 +58,7 @@ impl StockApp {
             text_w = text_w.max(self.text_width(line));
         }
 
-        let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("rt_pointer_debug"));
+        let layer = kit::LayerId::new(kit::Order::Tooltip, kit::Id::new("rt_pointer_debug"));
         let painter = ctx.layer_painter(layer);
         let t = theme();
 
@@ -71,21 +71,27 @@ impl StockApp {
             };
             painter.line_segment(
                 [to_client(a.position), to_client(b.position)],
-                egui::Stroke::new(LINE_W, color),
+                kit::Stroke::new(LINE_W, color),
             );
+        }
+        if let Some(last) = samples.last() {
+            let from = to_client(last.position);
+            if from.distance(at) >= 1.0 {
+                painter.line_segment([from, at], kit::Stroke::new(LINE_W, t.pointer_trail_hot));
+            }
         }
         if let Some(first) = samples.first() {
             let p = to_client(first.position);
             painter.rect_filled(
-                egui::Rect::from_center_size(p, egui::vec2(3.0, 3.0)),
-                egui::CornerRadius::ZERO,
+                kit::Rect::from_center_size(p, kit::vec2(3.0, 3.0)),
+                kit::CornerRadius::ZERO,
                 t.pointer_trail,
             );
         }
 
         painter.rect_filled(
-            egui::Rect::from_center_size(at, egui::vec2(3.0, 3.0)),
-            egui::CornerRadius::ZERO,
+            kit::Rect::from_center_size(at, kit::vec2(3.0, 3.0)),
+            kit::CornerRadius::ZERO,
             t.pointer_trail_hot,
         );
 
@@ -93,7 +99,7 @@ impl StockApp {
         let w = snap_cells_up(text_w + 2.0 * pad).max(cells(20));
         let h = cells(TEXT_ROWS * lines.len() as i32);
         let bounds = ctx.input(|i| i.content_rect());
-        let mut min = at + egui::vec2(18.0, 18.0);
+        let mut min = at + kit::vec2(18.0, 18.0);
         if min.x + w > bounds.max.x - LINE_W {
             min.x = at.x - 18.0 - w;
         }
@@ -104,18 +110,18 @@ impl StockApp {
         let min_y = bounds.min.y + LINE_W;
         min.x = min.x.clamp(min_x, (bounds.max.x - w).max(min_x));
         min.y = min.y.clamp(min_y, (bounds.max.y - h).max(min_y));
-        let badge = egui::Rect::from_min_size(min, egui::vec2(w, h));
-        painter.rect_filled(badge, egui::CornerRadius::ZERO, t.menu_bg);
+        let badge = kit::Rect::from_min_size(min, kit::vec2(w, h));
+        painter.rect_filled(badge, kit::CornerRadius::ZERO, t.menu_bg);
         border_hard(&painter, badge, t.ctrl_border);
         for (i, line) in lines.iter().enumerate() {
-            let row = egui::Rect::from_min_size(
-                egui::pos2(badge.min.x, badge.min.y + grid_line(i as i32 * TEXT_ROWS)),
-                egui::vec2(badge.width(), cells(TEXT_ROWS)),
+            let row = kit::Rect::from_min_size(
+                kit::pos2(badge.min.x, badge.min.y + grid_line(i as i32 * TEXT_ROWS)),
+                kit::vec2(badge.width(), cells(TEXT_ROWS)),
             );
             self.text(
                 &painter,
-                egui::pos2(text_left_x(row.min.x, badge.min.x), row.center().y),
-                egui::Align2::LEFT_CENTER,
+                kit::pos2(text_left_x(row.min.x, badge.min.x), row.center().y),
+                kit::Align2::LEFT_CENTER,
                 line,
                 t.text,
             );

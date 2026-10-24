@@ -1,0 +1,5 @@
+Spleen 8x16
+Author: Frederic Cambus
+Source: https://github.com/fcambus/spleen
+License: BSD 2-Clause
+License text: spleen-LICENSE.txt

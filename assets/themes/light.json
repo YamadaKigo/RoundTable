@@ -2,7 +2,7 @@
   "format": "roundtable-theme",
   "version": 4,
   "id": "light",
-  "name": "浅色",
+  "name": "Light",
   "colors": {
     "application": {
       "title_bar": {

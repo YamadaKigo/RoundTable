@@ -1,61 +1,66 @@
-use crate::grid::LINE_W;
-use eframe::egui;
+use crate::domain::layout::LINE_W;
+use crate::engine::kit;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(dead_code)]
 pub(crate) enum FillPattern {
     Horizontal,
+    #[cfg(test)]
     Vertical,
+    #[cfg(test)]
     Dot,
 }
 
 pub(crate) const TITLE_FILL: FillPattern = FillPattern::Horizontal;
 
 pub(crate) fn paint_fill(
-    painter: &egui::Painter,
-    rect: egui::Rect,
+    painter: &kit::Painter,
+    rect: kit::Rect,
     pattern: FillPattern,
-    color: egui::Color32,
+    color: kit::Color32,
 ) {
     if !rect.is_positive() {
         return;
     }
     let painter = painter.with_clip_rect(rect);
+    #[cfg(test)]
     let x0 = rect.min.x.round() as i32;
+    #[cfg(test)]
     let x1 = rect.max.x.round() as i32;
     let y0 = rect.min.y.round() as i32;
     let y1 = rect.max.y.round() as i32;
-    let mut mesh = egui::Mesh::default();
+    let mut mesh = kit::Mesh::default();
     match pattern {
         FillPattern::Horizontal => {
             for y in (y0..y1).step_by(2) {
                 mesh.add_colored_rect(
-                    egui::Rect::from_min_size(
-                        egui::pos2(rect.min.x, y as f32),
-                        egui::vec2(rect.width(), LINE_W),
+                    kit::Rect::from_min_size(
+                        kit::pos2(rect.min.x, y as f32),
+                        kit::vec2(rect.width(), LINE_W),
                     ),
                     color,
                 );
             }
         }
+        #[cfg(test)]
         FillPattern::Vertical => {
             for x in (x0..x1).step_by(2) {
                 mesh.add_colored_rect(
-                    egui::Rect::from_min_size(
-                        egui::pos2(x as f32, rect.min.y),
-                        egui::vec2(LINE_W, rect.height()),
+                    kit::Rect::from_min_size(
+                        kit::pos2(x as f32, rect.min.y),
+                        kit::vec2(LINE_W, rect.height()),
                     ),
                     color,
                 );
             }
         }
+        #[cfg(test)]
         FillPattern::Dot => {
             for y in (y0..y1).step_by(2) {
                 for x in (x0..x1).step_by(2) {
                     mesh.add_colored_rect(
-                        egui::Rect::from_min_size(
-                            egui::pos2(x as f32, y as f32),
-                            egui::vec2(LINE_W, LINE_W),
+                        kit::Rect::from_min_size(
+                            kit::pos2(x as f32, y as f32),
+                            kit::vec2(LINE_W, LINE_W),
                         ),
                         color,
                     );
@@ -64,7 +69,7 @@ pub(crate) fn paint_fill(
         }
     }
     if !mesh.is_empty() {
-        painter.add(egui::Shape::mesh(mesh));
+        painter.add(kit::Shape::mesh(mesh));
     }
 }
 
@@ -74,19 +79,19 @@ mod tests {
 
     #[test]
     fn all_fill_templates_emit_pixel_marks_inside_the_target() {
-        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(16.0, 16.0));
+        let area = kit::Rect::from_min_size(kit::Pos2::ZERO, kit::vec2(16.0, 16.0));
         for pattern in [
             FillPattern::Horizontal,
             FillPattern::Vertical,
             FillPattern::Dot,
         ] {
-            let ctx = egui::Context::default();
-            let raw = egui::RawInput {
+            let ctx = kit::Context::default();
+            let raw = kit::RawInput {
                 screen_rect: Some(area),
                 ..Default::default()
             };
             let mut output = ctx.run_ui(raw, |ui| {
-                paint_fill(ui.painter(), area, pattern, egui::Color32::RED);
+                paint_fill(ui.painter(), area, pattern, kit::Color32::RED);
             });
             assert!(!output.shapes.is_empty(), "{pattern:?} 没有画出底纹");
             output.textures_delta.clear();

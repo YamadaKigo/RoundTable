@@ -1,7 +1,7 @@
-use crate::app::*;
-use crate::grid::*;
+use crate::application::app::*;
+use crate::domain::layout::*;
+use crate::engine::kit;
 use crate::ui::menu::*;
-use eframe::egui;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum ContextMenuKind {
@@ -25,7 +25,7 @@ pub(crate) enum ContextAction {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct OpenContextMenu {
     pub(crate) kind: ContextMenuKind,
-    pub(crate) anchor: egui::Pos2,
+    pub(crate) anchor: kit::Pos2,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -35,7 +35,7 @@ pub(crate) struct ContextMenuState {
 }
 
 impl ContextMenuState {
-    pub(crate) fn open_main(&mut self, anchor: egui::Pos2) {
+    pub(crate) fn open_main(&mut self, anchor: kit::Pos2) {
         self.open = Some(OpenContextMenu {
             kind: ContextMenuKind::MainBlank,
             anchor,
@@ -46,7 +46,7 @@ impl ContextMenuState {
         };
     }
 
-    pub(crate) fn open_editor(&mut self, anchor: egui::Pos2) {
+    pub(crate) fn open_editor(&mut self, anchor: kit::Pos2) {
         self.open = Some(OpenContextMenu {
             kind: ContextMenuKind::Editor,
             anchor,
@@ -62,25 +62,27 @@ impl ContextMenuState {
         self.menu = MenuState::default();
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn open(&self) -> Option<OpenContextMenu> {
         self.open
     }
 }
 
-const MAIN_DEMO_ITEMS: &[MenuNode] = &[MenuNode::act("演示按钮一"), MenuNode::act("演示按钮二")];
+const MAIN_DEMO_ITEMS: &[MenuNode] = &[
+    MenuNode::act("Demo Action One"),
+    MenuNode::act("Demo Action Two"),
+];
 const MAIN_ITEMS: &[MenuNode] = &[
-    MenuNode::act("新增图表"),
-    MenuNode::act("打开调试控制台"),
-    MenuNode::sub("演示项", MAIN_DEMO_ITEMS),
+    MenuNode::act("New Chart"),
+    MenuNode::act("OpenDebug Console"),
+    MenuNode::sub("Demo Actions", MAIN_DEMO_ITEMS),
 ];
 
 const EDITOR_ITEMS: &[MenuNode] = &[
-    MenuNode::act("剪切"),
-    MenuNode::act("复制"),
-    MenuNode::act("粘贴"),
-    MenuNode::act("全选"),
-    MenuNode::act("撤销"),
+    MenuNode::act("Cut"),
+    MenuNode::act("Copy"),
+    MenuNode::act("Paste"),
+    MenuNode::act("Select All"),
+    MenuNode::act("Undo"),
 ];
 
 fn items(kind: ContextMenuKind) -> &'static [MenuNode] {
@@ -92,28 +94,28 @@ fn items(kind: ContextMenuKind) -> &'static [MenuNode] {
 
 fn action_of(label: &str) -> Option<ContextAction> {
     Some(match label {
-        "新增图表" => ContextAction::AddChart,
-        "打开调试控制台" => ContextAction::OpenConsole,
-        "演示按钮一" => ContextAction::DemoOne,
-        "演示按钮二" => ContextAction::DemoTwo,
-        "剪切" => ContextAction::Cut,
-        "复制" => ContextAction::Copy,
-        "粘贴" => ContextAction::Paste,
-        "全选" => ContextAction::SelectAll,
-        "撤销" => ContextAction::Undo,
+        "New Chart" => ContextAction::AddChart,
+        "OpenDebug Console" => ContextAction::OpenConsole,
+        "Demo Action One" => ContextAction::DemoOne,
+        "Demo Action Two" => ContextAction::DemoTwo,
+        "Cut" => ContextAction::Cut,
+        "Copy" => ContextAction::Copy,
+        "Paste" => ContextAction::Paste,
+        "Select All" => ContextAction::SelectAll,
+        "Undo" => ContextAction::Undo,
         _ => return None,
     })
 }
 
 pub(crate) fn menu_rect(
-    app: &mut StockApp,
+    app: &mut AppState,
     kind: ContextMenuKind,
-    anchor: egui::Pos2,
-    layout: egui::Rect,
-) -> egui::Rect {
+    anchor: kit::Pos2,
+    layout: kit::Rect,
+) -> kit::Rect {
     let rows = items(kind);
     let panel = MenuPanel::bounded(
-        egui::Rect::from_min_size(anchor, egui::Vec2::ZERO),
+        kit::Rect::from_min_size(anchor, kit::Vec2::ZERO),
         menu_panel_width(app, rows),
         rows.len(),
         layout,
@@ -121,38 +123,38 @@ pub(crate) fn menu_rect(
     panel.rect
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn item_rect(panel: egui::Rect, i: usize) -> egui::Rect {
-    egui::Rect::from_min_size(
-        egui::pos2(panel.min.x, panel.min.y + grid_line(i as i32 * TEXT_ROWS)),
-        egui::vec2(panel.width(), cells(TEXT_ROWS)),
+#[cfg(test)]
+pub(crate) fn item_rect(panel: kit::Rect, i: usize) -> kit::Rect {
+    kit::Rect::from_min_size(
+        kit::pos2(panel.min.x, panel.min.y + grid_line(i as i32 * TEXT_ROWS)),
+        kit::vec2(panel.width(), cells(TEXT_ROWS)),
     )
 }
 
 pub(crate) fn ui_context_menu(
-    app: &mut StockApp,
-    ui: &mut egui::Ui,
-    layout: egui::Rect,
+    app: &mut AppState,
+    ui: &mut kit::Ui,
+    layout: kit::Rect,
 ) -> Option<ContextAction> {
-    let menu = app.context_menu.open?;
-    if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
-        app.context_menu.close();
+    let menu = app.shell.context_menu.open?;
+    if ui.ctx().input(|i| i.key_pressed(kit::Key::Escape)) {
+        app.shell.context_menu.close();
         return None;
     }
 
     let rows = items(menu.kind);
 
-    let anchor = egui::Rect::from_min_size(menu.anchor, egui::Vec2::ZERO);
-    let keep = [egui::Rect::from_center_size(
+    let anchor = kit::Rect::from_min_size(menu.anchor, kit::Vec2::ZERO);
+    let keep = [kit::Rect::from_center_size(
         menu.anchor,
-        egui::vec2(LINE_W, LINE_W),
+        kit::vec2(LINE_W, LINE_W),
     )];
-    let mut state = app.context_menu.menu.clone();
+    let mut state = app.shell.context_menu.menu.clone();
     let picked = ui_menu_popup_persistent(app, ui, anchor, rows, &mut state, layout, &keep);
     if state.open.is_some() {
-        app.context_menu.menu = state;
+        app.shell.context_menu.menu = state;
     } else {
-        app.context_menu.close();
+        app.shell.context_menu.close();
     }
     picked.and_then(action_of)
 }

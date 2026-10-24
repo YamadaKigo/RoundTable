@@ -1,14 +1,14 @@
-use crate::app::*;
-use crate::grid::*;
-use crate::theme::*;
+use crate::application::app::*;
+use crate::domain::layout::*;
+use crate::engine::kit;
+use crate::engine::theme::*;
 use crate::ui::button::*;
 use crate::ui::editor::vertical_scrollbar;
 use crate::ui::textbox::*;
 use crate::ui::textbuf::char_allowed;
-use eframe::egui;
 use std::collections::VecDeque;
 
-pub(crate) const CONSOLE_TITLE: &str = "调试控制台";
+pub(crate) const CONSOLE_TITLE: &str = "Debug Console";
 pub(crate) const CONSOLE_COLS: i32 = 84;
 pub(crate) const CONSOLE_ROWS: i32 = 40;
 pub(crate) const CONSOLE_W: f32 = cells(CONSOLE_COLS);
@@ -25,30 +25,30 @@ pub(crate) const CONSOLE_FOOTER_H: f32 = cells(CONSOLE_FOOTER_ROWS);
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ConsoleFooterLayout {
-    pub(crate) footer: egui::Rect,
-    pub(crate) input: egui::Rect,
-    pub(crate) buttons: [egui::Rect; 3],
+    pub(crate) footer: kit::Rect,
+    pub(crate) input: kit::Rect,
+    pub(crate) buttons: [kit::Rect; 3],
 }
 
-pub(crate) fn console_footer_layout(rect: egui::Rect, widths: [f32; 3]) -> ConsoleFooterLayout {
+pub(crate) fn console_footer_layout(rect: kit::Rect, widths: [f32; 3]) -> ConsoleFooterLayout {
     let top = (rect.max.y - CONSOLE_FOOTER_H).max(rect.min.y);
-    let footer = egui::Rect::from_min_max(egui::pos2(rect.min.x, top), rect.max);
+    let footer = kit::Rect::from_min_max(kit::pos2(rect.min.x, top), rect.max);
 
     let mut x = rect.max.x;
-    let mut buttons = [egui::Rect::NOTHING; 3];
+    let mut buttons = [kit::Rect::NOTHING; 3];
     for i in (0..3).rev() {
         x -= widths[i];
         buttons[i] =
-            egui::Rect::from_min_size(egui::pos2(x, top), egui::vec2(widths[i], CONSOLE_FOOTER_H));
+            kit::Rect::from_min_size(kit::pos2(x, top), kit::vec2(widths[i], CONSOLE_FOOTER_H));
 
         x += LINE_W;
     }
 
     let left = rect.min.x + grid_line(1);
     let right = (buttons[0].min.x + LINE_W).max(left + cells(1));
-    let input = egui::Rect::from_min_max(
-        egui::pos2(left, top),
-        egui::pos2(right, top + CONSOLE_FOOTER_H),
+    let input = kit::Rect::from_min_max(
+        kit::pos2(left, top),
+        kit::pos2(right, top + CONSOLE_FOOTER_H),
     );
     ConsoleFooterLayout {
         footer,
@@ -62,7 +62,7 @@ pub(crate) struct DebugConsole {
     input: TextInput,
 
     scroll: usize,
-    scroll_grab: Option<egui::Vec2>,
+    scroll_grab: Option<kit::Vec2>,
     follow: bool,
     wheel_acc: f32,
     last_status: String,
@@ -85,7 +85,7 @@ impl DebugConsole {
             wheel_acc: 0.0,
             last_status: String::new(),
         };
-        console.log("调试控制台已就绪。输入 help 查看命令。");
+        console.log("Debug console ready. Type help for commands.");
         console
     }
 
@@ -108,7 +108,7 @@ impl DebugConsole {
         }
         self.last_status = status.to_owned();
         if !status.is_empty() {
-            self.log(format!("[状态] {status}"));
+            self.log(format!("[Status] {status}"));
         }
     }
 
@@ -116,6 +116,10 @@ impl DebugConsole {
         self.lines.clear();
         self.scroll = 0;
         self.follow = true;
+    }
+
+    pub(crate) fn dragging(&self) -> bool {
+        self.scroll_grab.is_some()
     }
 
     #[cfg(test)]
@@ -128,35 +132,35 @@ impl DebugConsole {
         self.scroll
     }
 
-    pub(crate) fn ui(&mut self, app: &mut StockApp, ui: &mut egui::Ui, rect: egui::Rect) {
+    pub(crate) fn ui(&mut self, app: &mut AppState, ui: &mut kit::Ui, rect: kit::Rect) {
         let painter = ui.painter().clone().with_clip_rect(rect);
-        painter.rect_filled(rect, egui::CornerRadius::ZERO, theme().work_bg);
+        painter.rect_filled(rect, kit::CornerRadius::ZERO, theme().work_bg);
 
         let header = free_band(rect, 0, TEXT_ROWS);
 
         let header_segs = vec![
-            format!("窗口 {}", app.debug_windows.windows.len()),
+            format!("Windows: {}", app.workbench.debug_windows.windows.len()),
             if app.pointer.system {
-                "鼠标 系统".to_owned()
+                "Pointer System".to_owned()
             } else {
-                "鼠标 软件".to_owned()
+                "Pointer Software".to_owned()
             },
         ];
-        app.paint_status_bar(&painter, header, &header_segs);
+        app.paint_status_bar_on_layer(&painter, header, &header_segs, ui.ctx().current_layer());
 
-        let labels = ["执行", "清空", "状态"];
+        let labels = ["Run", "Clear", "Status"];
         let mut widths = [0.0f32; 3];
         for (i, label) in labels.iter().enumerate() {
             widths[i] = app.button_width(&ButtonContent::Text((*label).to_owned()));
         }
         let layout = console_footer_layout(rect, widths);
         let footer = layout.footer;
-        let log = egui::Rect::from_min_max(
-            egui::pos2(rect.min.x, header.max.y - LINE_W),
-            egui::pos2(rect.max.x, footer.min.y),
+        let log = kit::Rect::from_min_max(
+            kit::pos2(rect.min.x, header.max.y - LINE_W),
+            kit::pos2(rect.max.x, footer.min.y),
         );
 
-        painter.rect_filled(log, egui::CornerRadius::ZERO, theme().work_bg);
+        painter.rect_filled(log, kit::CornerRadius::ZERO, theme().work_bg);
         self.ui_log(app, ui, &painter, log);
         hline_hard(
             &painter,
@@ -166,7 +170,7 @@ impl DebugConsole {
             theme().ctrl_border,
         );
 
-        painter.rect_filled(footer, egui::CornerRadius::ZERO, theme().panel_bg);
+        painter.rect_filled(footer, kit::CornerRadius::ZERO, theme().panel_bg);
         hline_hard(
             &painter,
             footer.min.x,
@@ -180,7 +184,7 @@ impl DebugConsole {
             ui,
             &painter,
             layout.buttons[0],
-            &ButtonContent::Text("执行".to_owned()),
+            &ButtonContent::Text("Run".to_owned()),
             false,
             "",
         ) {
@@ -190,7 +194,7 @@ impl DebugConsole {
             ui,
             &painter,
             layout.buttons[1],
-            &ButtonContent::Text("清空".to_owned()),
+            &ButtonContent::Text("Clear".to_owned()),
             false,
             "",
         ) {
@@ -200,7 +204,7 @@ impl DebugConsole {
             ui,
             &painter,
             layout.buttons[2],
-            &ButtonContent::Text("状态".to_owned()),
+            &ButtonContent::Text("Status".to_owned()),
             false,
             "",
         ) {
@@ -212,7 +216,7 @@ impl DebugConsole {
                 app,
                 ui,
                 layout.input,
-                egui::Id::new(CONSOLE_INPUT_ID),
+                kit::Id::new(CONSOLE_INPUT_ID),
                 &char_allowed,
                 TextInputStyle {
                     bg: theme().work_bg,
@@ -221,12 +225,12 @@ impl DebugConsole {
                 },
             );
         }
-        if app.win_silent {
-            ui.memory_mut(|m| m.surrender_focus(egui::Id::new(CONSOLE_INPUT_ID)));
+        if app.shell.win_silent {
+            ui.memory_mut(|m| m.surrender_focus(kit::Id::new(CONSOLE_INPUT_ID)));
         }
         let focused =
-            !app.win_silent && ui.memory(|m| m.has_focus(egui::Id::new(CONSOLE_INPUT_ID)));
-        if focused && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            !app.shell.win_silent && ui.memory(|m| m.has_focus(kit::Id::new(CONSOLE_INPUT_ID)));
+        if focused && ui.input(|i| i.key_pressed(kit::Key::Enter)) {
             execute = true;
         }
         if execute {
@@ -236,19 +240,19 @@ impl DebugConsole {
 
     fn ui_log(
         &mut self,
-        app: &mut StockApp,
-        ui: &mut egui::Ui,
-        painter: &egui::Painter,
-        log: egui::Rect,
+        app: &mut AppState,
+        ui: &mut kit::Ui,
+        painter: &kit::Painter,
+        log: kit::Rect,
     ) {
-        let inner = egui::Rect::from_min_max(
-            log.min + egui::vec2(LINE_W, LINE_W),
-            egui::pos2(log.max.x - SRC_BAR_W - 2.0 * LINE_W, log.max.y - LINE_W),
+        let inner = kit::Rect::from_min_max(
+            log.min + kit::vec2(LINE_W, LINE_W),
+            kit::pos2(log.max.x - SRC_BAR_W - 2.0 * LINE_W, log.max.y - LINE_W),
         );
         let rows = ((inner.height() / SRC_ROW_PITCH).floor() as usize).max(1);
         let max_scroll = self.lines.len().saturating_sub(rows);
 
-        let hovered = !app.win_silent
+        let hovered = !app.shell.win_silent
             && ui
                 .input(|i| i.pointer.hover_pos())
                 .is_some_and(|p| log.contains(p));
@@ -256,11 +260,10 @@ impl DebugConsole {
             let mut acc = self.wheel_acc;
             ui.input(|i| {
                 for event in &i.events {
-                    if let egui::Event::MouseWheel { unit, delta, .. } = event {
+                    if let kit::Event::MouseWheel { unit, delta, .. } = event {
                         acc += match unit {
-                            egui::MouseWheelUnit::Line => delta.y,
-                            egui::MouseWheelUnit::Point => delta.y / WHEEL_POINTS_PER_NOTCH,
-                            egui::MouseWheelUnit::Page => delta.y,
+                            kit::MouseWheelUnit::Line => delta.y,
+                            kit::MouseWheelUnit::Point => delta.y / WHEEL_POINTS_PER_NOTCH,
                         };
                     }
                 }
@@ -284,7 +287,7 @@ impl DebugConsole {
             app,
             ui,
             painter,
-            egui::Id::new("rt_console_scroll"),
+            kit::Id::new("rt_console_scroll"),
             log,
             log.min.y,
             log.max.y,
@@ -306,15 +309,15 @@ impl DebugConsole {
             let y = inner.min.y + k as f32 * SRC_ROW_PITCH + SRC_LINE_H / 2.0;
             app.text(
                 &text_painter,
-                egui::pos2(text_x, y),
-                egui::Align2::LEFT_CENTER,
+                kit::pos2(text_x, y),
+                kit::Align2::LEFT_CENTER,
                 line,
                 theme().input_text,
             );
         }
     }
 
-    fn submit(&mut self, app: &mut StockApp, time: f64) {
+    fn submit(&mut self, app: &mut AppState, time: f64) {
         let command = self.input.text().trim().to_owned();
         self.input.set_text("");
         if command.is_empty() {
@@ -325,29 +328,33 @@ impl DebugConsole {
         self.follow = true;
     }
 
-    pub(crate) fn run_command(&mut self, app: &mut StockApp, command: &str, time: f64) {
+    pub(crate) fn run_command(&mut self, app: &mut AppState, command: &str, time: f64) {
         let mut parts = command.splitn(2, char::is_whitespace);
         let head = parts.next().unwrap_or("").to_ascii_lowercase();
         let rest = parts.next().unwrap_or("").trim();
         match head.as_str() {
             "" => {}
             "help" | "?" => {
-                self.log("help / ?        显示命令列表");
-                self.log("status          输出运行状态快照");
-                self.log("pointer         输出鼠标位置和速度");
-                self.log("trail on|off    开关鼠标轨迹叠层");
-                self.log("data            行情数量和视图状态");
-                self.log("windows         列出当前打开的窗口");
-                self.log("regen           重新生成一段行情");
-                self.log("echo <文本>     原样输出文本");
-                self.log("clear / cls     清空日志");
-                self.log("close / quit    关闭控制台窗口");
+                self.log("help / ?        show commands");
+                self.log("status          print runtime state");
+                self.log("pointer         print pointer position and speed");
+                self.log("trail on|off    toggle the pointer trail overlay");
+                self.log("data            print bar count and view state");
+                self.log("windows         list open windows");
+                self.log("regen           generate new market data");
+                self.log("echo <text>     print text verbatim");
+                self.log("clear / cls     clear the log");
+                self.log("close / quit    close the console window");
             }
             "clear" | "cls" => self.clear(),
             "status" => self.print_status(app),
             "fps" => self.log(format!(
                 "fps={:.1} frame={:.2}ms interval={:.2}ms frames={} uptime={:.1}s",
-                app.fps, app.frame_ms, app.frame_interval_ms, app.frames, time
+                app.stats.fps,
+                app.stats.frame_ms,
+                app.stats.frame_interval_ms,
+                app.stats.frames,
+                time
             )),
             "pointer" => {
                 let p = app.pointer.position();
@@ -369,20 +376,22 @@ impl DebugConsole {
                 ));
             }
             "data" => {
-                let view = app.active_chart_pane().map(|pane| &app.panes[pane].view);
+                let view = app
+                    .active_chart_pane()
+                    .map(|pane| &app.chart_world.panes[pane].view);
                 self.log(format!(
                     "bars={} seed={} scale={} offset={} visible={}",
-                    app.bars.len(),
-                    app.bar_seed,
+                    app.chart_world.bars.len(),
+                    app.chart_world.bar_seed,
                     view.map_or(0, |view| view.scale),
                     view.map_or(0, |view| view.offset),
                     view.map_or(0, |view| view.visible)
                 ));
             }
             "windows" => {
-                let open = app.debug_windows.windows.len();
+                let open = app.workbench.debug_windows.windows.len();
                 self.log(format!("windows={open}"));
-                for (title, minimized, r) in &app.debug_windows.windows {
+                for (title, minimized, r) in &app.workbench.debug_windows.windows {
                     self.log(format!(
                         "{} {} ({:.0},{:.0}) {:.0}x{:.0}",
                         title,
@@ -401,19 +410,21 @@ impl DebugConsole {
             "close" | "quit" | "exit" => {
                 app.request_win(WinCmd::CloseConsole);
             }
-            _ => self.log(format!("未知命令：{command}。输入 help 查看命令列表。")),
+            _ => self.log(format!(
+                "Unknown command: {command}. Type help for commands."
+            )),
         }
     }
 
-    fn print_status(&mut self, app: &StockApp) {
+    fn print_status(&mut self, app: &AppState) {
         let p = app.pointer.position();
         self.log(format!(
             "frame={} fps={:.1} frame_ms={:.2} interval_ms={:.2} windows={}",
-            app.frames,
-            app.fps,
-            app.frame_ms,
-            app.frame_interval_ms,
-            app.debug_windows.windows.len()
+            app.stats.frames,
+            app.stats.fps,
+            app.stats.frame_ms,
+            app.stats.frame_interval_ms,
+            app.workbench.debug_windows.windows.len()
         ));
         let v = app.pointer.velocity();
         self.log(format!(
@@ -424,11 +435,13 @@ impl DebugConsole {
             v.y,
             if app.pointer.show_trail { "on" } else { "off" }
         ));
-        let view = app.active_chart_pane().map(|pane| &app.panes[pane].view);
+        let view = app
+            .active_chart_pane()
+            .map(|pane| &app.chart_world.panes[pane].view);
         self.log(format!(
             "data bars={} seed={} scale={} offset={} visible={}",
-            app.bars.len(),
-            app.bar_seed,
+            app.chart_world.bars.len(),
+            app.chart_world.bar_seed,
             view.map_or(0, |view| view.scale),
             view.map_or(0, |view| view.offset),
             view.map_or(0, |view| view.visible)
@@ -436,9 +449,9 @@ impl DebugConsole {
         self.log(format!(
             "theme={} charts={} source={} console={}",
             theme().name(),
-            app.debug_windows.chart_count,
-            app.debug_windows.source_open,
-            app.debug_windows.console_open
+            app.workbench.debug_windows.chart_count,
+            app.workbench.debug_windows.source_open,
+            app.workbench.debug_windows.console_open
         ));
     }
 }

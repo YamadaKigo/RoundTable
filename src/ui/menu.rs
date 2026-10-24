@@ -1,8 +1,8 @@
-use crate::app::*;
-use crate::grid::*;
-use crate::theme::*;
+use crate::application::app::*;
+use crate::domain::layout::*;
+use crate::engine::kit;
+use crate::engine::theme::*;
 use crate::ui::icon::CursorKind;
-use eframe::egui;
 
 pub(crate) struct MenuNode {
     pub(crate) label: &'static str,
@@ -40,97 +40,97 @@ pub(crate) struct MenuState {
 pub(crate) const MENU_DEPTH_MAX: usize = 4;
 
 const FILE_RECENT_MORE: &[MenuNode] = &[
-    MenuNode::act("三级示例 上证50"),
-    MenuNode::act("三级示例 沪深300"),
+    MenuNode::act("Example SSE 50"),
+    MenuNode::act("Example CSI 300"),
 ];
 const FILE_RECENT: &[MenuNode] = &[
-    MenuNode::act("上证50.csv"),
-    MenuNode::act("沪深300.csv"),
-    MenuNode::sub("更多", FILE_RECENT_MORE),
+    MenuNode::act("SSE50.csv"),
+    MenuNode::act("CSI300.csv"),
+    MenuNode::sub("More", FILE_RECENT_MORE),
 ];
 const FILE_ITEMS: &[MenuNode] = &[
-    MenuNode::act("新建"),
-    MenuNode::act("打开"),
-    MenuNode::sub("最近打开", FILE_RECENT),
-    MenuNode::act("保存"),
-    MenuNode::act("退出"),
+    MenuNode::act("New"),
+    MenuNode::act("Open"),
+    MenuNode::sub("Recent Files", FILE_RECENT),
+    MenuNode::act("Save"),
+    MenuNode::act("Exit"),
 ];
 const DATA_ITEMS: &[MenuNode] = &[
-    MenuNode::act("抓取行情"),
+    MenuNode::act("Fetch Market Data"),
     MenuNode::sub(
-        "随机游走",
+        "Random Walk",
         &[
-            MenuNode::act("按默认参数"),
+            MenuNode::act("Use Defaults"),
             MenuNode::sub(
-                "按参数",
-                &[MenuNode::act("长度 512 根"), MenuNode::act("长度 1024 根")],
+                "Use Parameters",
+                &[MenuNode::act("Length 512"), MenuNode::act("Length 1024")],
             ),
         ],
     ),
-    MenuNode::act("导入CSV"),
+    MenuNode::act("Import CSV"),
     MenuNode::sub(
-        "数据源设置",
-        &[MenuNode::act("本地文件"), MenuNode::act("远程接口")],
+        "Data Source",
+        &[MenuNode::act("Local File"), MenuNode::act("Remote API")],
     ),
 ];
 const ANALYZE_ITEMS: &[MenuNode] = &[
-    MenuNode::act("指标设置"),
+    MenuNode::act("Indicator Settings"),
     MenuNode::sub(
-        "画线工具",
+        "Drawing Tools",
         &[
-            MenuNode::act("趋势线"),
-            MenuNode::act("水平线"),
-            MenuNode::act("矩形"),
+            MenuNode::act("Trend Line"),
+            MenuNode::act("Horizontal Line"),
+            MenuNode::act("Rectangle"),
         ],
     ),
-    MenuNode::act("回测"),
+    MenuNode::act("Backtest"),
 ];
 
-const LAYOUT_ITEMS: &[MenuNode] = &[MenuNode::act("控制面板"), MenuNode::act("新增图表")];
+const LAYOUT_ITEMS: &[MenuNode] = &[MenuNode::act("Control Panel"), MenuNode::act("New Chart")];
 const TOOL_ITEMS: &[MenuNode] = &[
-    MenuNode::sub("设置", &[MenuNode::act("界面")]),
-    MenuNode::act("日志"),
+    MenuNode::sub("Settings", &[MenuNode::act("Interface")]),
+    MenuNode::act("Logs"),
 ];
 const HELP_ITEMS: &[MenuNode] = &[
-    MenuNode::act("关于"),
+    MenuNode::act("About"),
     MenuNode::sub(
-        "帮助主题",
-        &[MenuNode::act("快捷键"), MenuNode::act("常见问题")],
+        "Help Topics",
+        &[MenuNode::act("Shortcuts"), MenuNode::act("FAQ")],
     ),
 ];
 
 pub(crate) const TOP_TABS: [MenuTab; 6] = [
     MenuTab {
-        title: "文件",
+        title: "File",
         items: FILE_ITEMS,
     },
     MenuTab {
-        title: "数据",
+        title: "Data",
         items: DATA_ITEMS,
     },
     MenuTab {
-        title: "分析",
+        title: "Analysis",
         items: ANALYZE_ITEMS,
     },
     MenuTab {
-        title: "布局",
+        title: "Layout",
         items: LAYOUT_ITEMS,
     },
     MenuTab {
-        title: "工具",
+        title: "Tools",
         items: TOOL_ITEMS,
     },
     MenuTab {
-        title: "帮助",
+        title: "Help",
         items: HELP_ITEMS,
     },
 ];
 
-pub(crate) fn tab_width(app: &mut StockApp, title: &str) -> f32 {
+pub(crate) fn tab_width(app: &mut AppState, title: &str) -> f32 {
     snap_cells_up(app.text_width(title) + 2.0 * TEXT_PAD_X).max(cells(3))
 }
 
-pub(crate) fn menu_panel_width(app: &mut StockApp, level: &[MenuNode]) -> f32 {
+pub(crate) fn menu_panel_width(app: &mut AppState, level: &[MenuNode]) -> f32 {
     let mut w = MENU_PANEL_W;
     for node in level {
         let arrow = if node.has_children() { PITCH } else { 0.0 };
@@ -146,13 +146,9 @@ pub(crate) enum MenuAlign {
     Left,
 }
 
-pub(crate) fn menu_item_rects(
-    bar: egui::Rect,
-    widths: &[f32],
-    align: MenuAlign,
-) -> Vec<egui::Rect> {
+pub(crate) fn menu_item_rects(bar: kit::Rect, widths: &[f32], align: MenuAlign) -> Vec<kit::Rect> {
     let item = |x: f32, w: f32| {
-        egui::Rect::from_min_size(egui::pos2(x, bar.min.y), egui::vec2(w, bar.height()))
+        kit::Rect::from_min_size(kit::pos2(x, bar.min.y), kit::vec2(w, bar.height()))
     };
     let mut rects = Vec::with_capacity(widths.len());
     match align {
@@ -176,19 +172,19 @@ fn snap_into(v: f32, lo: f32, hi: f32) -> f32 {
 
 #[derive(Clone, Copy)]
 pub(crate) struct MenuPanel {
-    pub(crate) rect: egui::Rect,
+    pub(crate) rect: kit::Rect,
     pub(crate) rows: usize,
 }
 
-fn menu_hit_rect(rect: egui::Rect) -> egui::Rect {
-    egui::Rect::from_min_max(
-        rect.min + egui::vec2(LINE_W, LINE_W),
-        rect.max - egui::vec2(LINE_W, LINE_W),
+fn menu_hit_rect(rect: kit::Rect) -> kit::Rect {
+    kit::Rect::from_min_max(
+        rect.min + kit::vec2(LINE_W, LINE_W),
+        rect.max - kit::vec2(LINE_W, LINE_W),
     )
 }
 
 impl MenuPanel {
-    pub(crate) fn left(anchor: egui::Rect, w: f32, rows: usize, window_bottom: f32) -> Self {
+    pub(crate) fn left(anchor: kit::Rect, w: f32, rows: usize, window_bottom: f32) -> Self {
         let h = cells(MENU_ROW_ROWS * rows as i32);
         let frame = grid_line(1);
         let below = anchor.max.y - LINE_W;
@@ -199,15 +195,15 @@ impl MenuPanel {
             below
         };
         Self {
-            rect: egui::Rect::from_min_size(
-                egui::pos2(anchor.min.x + frame, y + frame),
-                egui::vec2(w, h),
+            rect: kit::Rect::from_min_size(
+                kit::pos2(anchor.min.x + frame, y + frame),
+                kit::vec2(w, h),
             ),
             rows,
         }
     }
 
-    pub(crate) fn bounded(anchor: egui::Rect, w: f32, rows: usize, bounds: egui::Rect) -> Self {
+    pub(crate) fn bounded(anchor: kit::Rect, w: f32, rows: usize, bounds: kit::Rect) -> Self {
         let h = cells(MENU_ROW_ROWS * rows as i32);
         let frame = grid_line(1);
         let outer_w = w + 2.0 * frame;
@@ -229,22 +225,22 @@ impl MenuPanel {
             (bounds.max.y - LINE_W - outer_h).max(bounds.min.y),
         );
         Self {
-            rect: egui::Rect::from_min_size(egui::pos2(x + frame, y + frame), egui::vec2(w, h)),
+            rect: kit::Rect::from_min_size(kit::pos2(x + frame, y + frame), kit::vec2(w, h)),
             rows,
         }
     }
 
-    pub(crate) fn row(&self, j: usize) -> egui::Rect {
-        egui::Rect::from_min_size(
-            egui::pos2(
+    pub(crate) fn row(&self, j: usize) -> kit::Rect {
+        kit::Rect::from_min_size(
+            kit::pos2(
                 self.rect.min.x,
                 self.rect.min.y + grid_line(j as i32 * MENU_ROW_ROWS),
             ),
-            egui::vec2(self.rect.width(), MENU_ROW_H),
+            kit::vec2(self.rect.width(), MENU_ROW_H),
         )
     }
 
-    pub(crate) fn flyout(row: egui::Rect, w: f32, rows: usize, bounds: egui::Rect) -> Self {
+    pub(crate) fn flyout(row: kit::Rect, w: f32, rows: usize, bounds: kit::Rect) -> Self {
         let h = cells(MENU_ROW_ROWS * rows as i32);
         let frame = grid_line(1);
         let outer_w = w + 2.0 * frame;
@@ -259,8 +255,8 @@ impl MenuPanel {
 
         let y_want = row.min.y - LINE_W;
         Self {
-            rect: egui::Rect::from_min_size(
-                egui::pos2(
+            rect: kit::Rect::from_min_size(
+                kit::pos2(
                     snap_into(
                         x_want,
                         bounds.min.x,
@@ -272,47 +268,52 @@ impl MenuPanel {
                         (bounds.max.y - LINE_W - outer_h).max(bounds.min.y),
                     ) + frame,
                 ),
-                egui::vec2(w, h),
+                kit::vec2(w, h),
             ),
             rows,
         }
     }
 
-    pub(crate) fn paint_bg(&self, painter: &egui::Painter) {
+    pub(crate) fn paint_bg(&self, painter: &kit::Painter) {
         painter.rect_filled(
             self.frame_rect(),
-            egui::CornerRadius::ZERO,
+            kit::CornerRadius::ZERO,
             theme().menu_popup_frame_bg,
         );
-        painter.rect_filled(self.rect, egui::CornerRadius::ZERO, theme().menu_popup_bg);
+        painter.rect_filled(self.rect, kit::CornerRadius::ZERO, theme().menu_popup_bg);
     }
 
-    pub(crate) fn paint_row_hover(&self, painter: &egui::Painter, row: egui::Rect) {
-        painter.rect_filled(row, egui::CornerRadius::ZERO, theme().menu_popup_hover);
+    pub(crate) fn paint_row_hover(&self, painter: &kit::Painter, row: kit::Rect) {
+        painter.rect_filled(row, kit::CornerRadius::ZERO, theme().menu_popup_hover);
         border_hard(painter, row, theme().menu_popup_border);
     }
 
-    pub(crate) fn paint_border(&self, painter: &egui::Painter) {
+    pub(crate) fn paint_border(&self, painter: &kit::Painter) {
         border_hard(painter, self.frame_rect(), theme().menu_popup_frame_border);
         border_hard(painter, self.rect, theme().menu_popup_border);
     }
 
-    pub(crate) fn frame_rect(&self) -> egui::Rect {
+    pub(crate) fn frame_rect(&self) -> kit::Rect {
         self.rect.expand(grid_line(1))
     }
 
     pub(crate) fn ui_rows(
         &self,
-        app: &mut StockApp,
-        ui: &mut egui::Ui,
-        painter: &egui::Painter,
-        mut draw_row: impl FnMut(&mut StockApp, &egui::Painter, usize, egui::Rect),
+        app: &mut AppState,
+        ui: &mut kit::Ui,
+        painter: &kit::Painter,
+        mut draw_row: impl FnMut(&mut AppState, &kit::Painter, usize, kit::Rect),
     ) -> Option<usize> {
         self.paint_bg(painter);
         let mut clicked = None;
         for j in 0..self.rows {
             let row = self.row(j);
-            let resp = interact_rect(ui, menu_hit_rect(row), egui::Sense::click());
+            let resp = interact_rect(
+                ui,
+                menu_hit_rect(row),
+                kit::Id::new(("menu_popup_row", self.rect.width().to_bits(), j)),
+                kit::Sense::click(),
+            );
             if resp.hovered() {
                 app.pointer.force_hint(CursorKind::Normal, ui);
                 self.paint_row_hover(painter, row);
@@ -327,7 +328,7 @@ impl MenuPanel {
                     theme().menu_popup_separator,
                 );
             }
-            if resp.clicked() {
+            if resp.pressed() {
                 clicked = Some(j);
             }
         }
@@ -349,11 +350,11 @@ impl MenuBarStyle {
     fn colors(
         self,
     ) -> (
-        egui::Color32,
-        egui::Color32,
-        egui::Color32,
-        egui::Color32,
-        egui::Color32,
+        kit::Color32,
+        kit::Color32,
+        kit::Color32,
+        kit::Color32,
+        kit::Color32,
     ) {
         if self.pane {
             (
@@ -376,13 +377,13 @@ impl MenuBarStyle {
 }
 
 pub(crate) struct MenuBarOut {
-    pub(crate) rects: Vec<egui::Rect>,
+    pub(crate) rects: Vec<kit::Rect>,
 
     pub(crate) open: Option<usize>,
 }
 
 pub(crate) struct MenuBar<'a> {
-    bar: egui::Rect,
+    bar: kit::Rect,
     titles: &'a [&'static str],
     align: MenuAlign,
     style: MenuBarStyle,
@@ -390,7 +391,7 @@ pub(crate) struct MenuBar<'a> {
 
 impl<'a> MenuBar<'a> {
     pub(crate) fn new(
-        bar: egui::Rect,
+        bar: kit::Rect,
         titles: &'a [&'static str],
         align: MenuAlign,
         style: MenuBarStyle,
@@ -405,8 +406,8 @@ impl<'a> MenuBar<'a> {
 
     pub(crate) fn ui(
         &self,
-        app: &mut StockApp,
-        ui: &mut egui::Ui,
+        app: &mut AppState,
+        ui: &mut kit::Ui,
         mut open: Option<usize>,
     ) -> MenuBarOut {
         let painter = ui.painter().clone();
@@ -425,13 +426,18 @@ impl<'a> MenuBar<'a> {
             app.pointer.force_hint(CursorKind::Normal, ui);
         }
 
-        painter.rect_filled(self.bar, egui::CornerRadius::ZERO, bg);
+        painter.rect_filled(self.bar, kit::CornerRadius::ZERO, bg);
 
         let mut hovered = vec![false; self.titles.len()];
         for (i, rect) in rects.iter().enumerate() {
-            let resp = interact_rect(ui, menu_hit_rect(*rect), egui::Sense::click());
+            let resp = interact_rect(
+                ui,
+                menu_hit_rect(*rect),
+                kit::Id::new(("menu_bar_tab", self.titles[i], i)),
+                kit::Sense::click(),
+            );
             hovered[i] = resp.hovered();
-            if resp.clicked() {
+            if resp.pressed() {
                 open = if open == Some(i) { None } else { Some(i) };
             } else if hovered[i] && open.is_some_and(|cur| cur != i) {
                 open = Some(i);
@@ -446,7 +452,7 @@ impl<'a> MenuBar<'a> {
             app.text(
                 &painter,
                 rects[i].center(),
-                egui::Align2::CENTER_CENTER,
+                kit::Align2::CENTER_CENTER,
                 title,
                 text,
             );
@@ -474,21 +480,20 @@ impl<'a> MenuBar<'a> {
     }
 
     fn paint_hover(
-        painter: &egui::Painter,
-        rect: egui::Rect,
-        hover: egui::Color32,
-        border: egui::Color32,
+        painter: &kit::Painter,
+        rect: kit::Rect,
+        hover: kit::Color32,
+        border: kit::Color32,
     ) {
-        painter.rect_filled(rect, egui::CornerRadius::ZERO, hover);
+        painter.rect_filled(rect, kit::CornerRadius::ZERO, hover);
         border_hard(painter, rect, border);
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn menu_bar_ui(
-    app: &mut StockApp,
-    ui: &mut egui::Ui,
-    bar: egui::Rect,
+    app: &mut AppState,
+    ui: &mut kit::Ui,
+    bar: kit::Rect,
     titles: &[&'static str],
     align: MenuAlign,
     open: Option<usize>,
@@ -498,12 +503,12 @@ pub(crate) fn menu_bar_ui(
 }
 
 pub(crate) fn ui_menu_bar(
-    app: &mut StockApp,
-    ui: &mut egui::Ui,
-    bar: egui::Rect,
+    app: &mut AppState,
+    ui: &mut kit::Ui,
+    bar: kit::Rect,
     tabs: &[MenuTab],
     state: MenuState,
-) -> (Option<(usize, egui::Rect)>, MenuState) {
+) -> (Option<(usize, kit::Rect)>, MenuState) {
     let titles: Vec<&str> = tabs.iter().map(|t| t.title).collect();
     let out = menu_bar_ui(
         app,
@@ -526,38 +531,37 @@ pub(crate) fn ui_menu_bar(
 }
 
 pub(crate) fn ui_menu_popup(
-    app: &mut StockApp,
-    ui: &mut egui::Ui,
-    anchor: egui::Rect,
+    app: &mut AppState,
+    ui: &mut kit::Ui,
+    anchor: kit::Rect,
     items: &'static [MenuNode],
     state: &mut MenuState,
-    bounds: egui::Rect,
-    keep: &[egui::Rect],
+    bounds: kit::Rect,
+    keep: &[kit::Rect],
 ) -> Option<&'static str> {
     ui_menu_popup_inner(app, ui, anchor, items, state, bounds, keep)
 }
 
 pub(crate) fn ui_menu_popup_persistent(
-    app: &mut StockApp,
-    ui: &mut egui::Ui,
-    anchor: egui::Rect,
+    app: &mut AppState,
+    ui: &mut kit::Ui,
+    anchor: kit::Rect,
     items: &'static [MenuNode],
     state: &mut MenuState,
-    bounds: egui::Rect,
-    keep: &[egui::Rect],
+    bounds: kit::Rect,
+    keep: &[kit::Rect],
 ) -> Option<&'static str> {
     ui_menu_popup_inner(app, ui, anchor, items, state, bounds, keep)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn ui_menu_popup_inner(
-    app: &mut StockApp,
-    ui: &mut egui::Ui,
-    anchor: egui::Rect,
+    app: &mut AppState,
+    ui: &mut kit::Ui,
+    anchor: kit::Rect,
     items: &'static [MenuNode],
     state: &mut MenuState,
-    bounds: egui::Rect,
-    keep: &[egui::Rect],
+    bounds: kit::Rect,
+    keep: &[kit::Rect],
 ) -> Option<&'static str> {
     if state.open.is_none() {
         state.path.clear();
@@ -618,8 +622,8 @@ fn ui_menu_popup_inner(
 
             app.text(
                 painter,
-                egui::pos2(text_left_x(row.min.x, panel.rect.min.x), row.center().y),
-                egui::Align2::LEFT_CENTER,
+                kit::pos2(text_left_x(row.min.x, panel.rect.min.x), row.center().y),
+                kit::Align2::LEFT_CENTER,
                 node.label,
                 theme().menu_popup_text,
             );
@@ -647,24 +651,24 @@ fn ui_menu_popup_inner(
     Some(node.label)
 }
 
-fn paint_submenu_arrow(painter: &egui::Painter, row: egui::Rect) {
+fn paint_submenu_arrow(painter: &kit::Painter, row: kit::Rect) {
     let x = (row.max.x - PITCH + LINE_W).floor();
     let y = (row.center().y - 2.5).floor();
     for (i, w) in [1.0f32, 2.0, 3.0, 2.0, 1.0].into_iter().enumerate() {
         painter.rect_filled(
-            egui::Rect::from_min_size(egui::pos2(x, y + i as f32), egui::vec2(w, LINE_W)),
-            egui::CornerRadius::ZERO,
+            kit::Rect::from_min_size(kit::pos2(x, y + i as f32), kit::vec2(w, LINE_W)),
+            kit::CornerRadius::ZERO,
             theme().menu_text,
         );
     }
 }
 
-pub(crate) fn close_on_outside_click(ui: &egui::Ui, keep: &[egui::Rect], state: &mut MenuState) {
+pub(crate) fn close_on_outside_click(ui: &kit::Ui, keep: &[kit::Rect], state: &mut MenuState) {
     if state.open.is_none() {
         return;
     }
     let outside = ui.ctx().input(|i| {
-        i.pointer.primary_clicked()
+        i.pointer.primary_pressed()
             && i.pointer
                 .interact_pos()
                 .is_some_and(|p| !keep.iter().any(|r| r.contains(p)))

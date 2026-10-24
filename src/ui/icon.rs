@@ -1,10 +1,12 @@
-use crate::grid::*;
-use eframe::egui;
+use crate::domain::layout::*;
+use crate::engine::kit;
 
 pub(crate) const ICON_W: f32 = 2.0 * GRID;
 
+#[cfg(test)]
 pub(crate) const ICON_H: f32 = ICON_W;
 
+#[cfg(test)]
 pub(crate) const ICON_PX: usize = 16;
 
 pub(crate) const CURSOR_PX: usize = 31;
@@ -17,6 +19,7 @@ pub(crate) const CURSOR_CENTER: usize = CURSOR_PX / 2;
 
 pub(crate) const ICON_GAP: f32 = 3.0 * PITCH - ICON_W;
 
+#[cfg(test)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IconKind {
     Cross,
@@ -38,6 +41,7 @@ pub(crate) enum IconKind {
     Find,
 }
 
+#[cfg(test)]
 impl IconKind {
     pub(crate) const ALL: [IconKind; Self::COUNT] = [
         IconKind::Cross,
@@ -81,18 +85,17 @@ impl IconKind {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn label(self) -> &'static str {
         match self {
-            IconKind::Cross => "删除",
-            IconKind::New => "新建",
-            IconKind::Save => "保存",
-            IconKind::Compile => "编译",
-            IconKind::Cut => "剪切",
-            IconKind::Copy => "复制",
-            IconKind::Paste => "粘贴",
-            IconKind::Undo => "撤销",
-            IconKind::Find => "查找",
+            IconKind::Cross => "Delete",
+            IconKind::New => "New",
+            IconKind::Save => "Save",
+            IconKind::Compile => "Compile",
+            IconKind::Cut => "Cut",
+            IconKind::Copy => "Copy",
+            IconKind::Paste => "Paste",
+            IconKind::Undo => "Undo",
+            IconKind::Find => "Find",
         }
     }
 }
@@ -101,9 +104,10 @@ pub(crate) const ICON_TRANSPARENT_RGB: (u8, u8, u8) = (0xFF, 0x00, 0xFF);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PixelImage<const N: usize> {
-    px: [[Option<egui::Color32>; N]; N],
+    px: [[Option<kit::Color32>; N]; N],
 }
 
+#[cfg(test)]
 pub(crate) type IconImage = PixelImage<ICON_PX>;
 
 type CursorPixels = PixelImage<CURSOR_PX>;
@@ -113,8 +117,8 @@ pub(crate) fn snap_aabbcc_channel(v: u8) -> u8 {
     (step * 17) as u8
 }
 
-fn snap_aabbcc(c: egui::Color32) -> egui::Color32 {
-    egui::Color32::from_rgb(
+fn snap_aabbcc(c: kit::Color32) -> kit::Color32 {
+    kit::Color32::from_rgb(
         snap_aabbcc_channel(c.r()),
         snap_aabbcc_channel(c.g()),
         snap_aabbcc_channel(c.b()),
@@ -149,7 +153,7 @@ impl<const N: usize> PixelImage<N> {
                 if a < 128 || (r, g, b) == ICON_TRANSPARENT_RGB {
                     continue;
                 }
-                *cell = Some(snap_aabbcc(egui::Color32::from_rgb(r, g, b)));
+                *cell = Some(snap_aabbcc(kit::Color32::from_rgb(r, g, b)));
             }
         }
         Self { px }
@@ -159,10 +163,10 @@ impl<const N: usize> PixelImage<N> {
         self.px.iter().all(|row| row.iter().all(|p| p.is_none()))
     }
 
-    pub(crate) fn paint(&self, painter: &egui::Painter, rect: egui::Rect) {
+    pub(crate) fn paint(&self, painter: &kit::Painter, rect: kit::Rect) {
         let x0 = rect.min.x.round();
         let y0 = rect.min.y.round();
-        let mut mesh = egui::Mesh::default();
+        let mut mesh = kit::Mesh::default();
         for row in 0..N {
             let mut col = 0usize;
             while col < N {
@@ -175,31 +179,34 @@ impl<const N: usize> PixelImage<N> {
                     col += 1;
                 }
                 mesh.add_colored_rect(
-                    egui::Rect::from_min_size(
-                        egui::pos2(x0 + start as f32, y0 + row as f32),
-                        egui::vec2((col - start) as f32, LINE_W),
+                    kit::Rect::from_min_size(
+                        kit::pos2(x0 + start as f32, y0 + row as f32),
+                        kit::vec2((col - start) as f32, LINE_W),
                     ),
                     px,
                 );
             }
         }
         if !mesh.is_empty() {
-            painter.add(egui::Shape::mesh(mesh));
+            painter.add(kit::Shape::mesh(mesh));
         }
     }
 }
 
+#[cfg(test)]
 #[derive(Clone)]
 pub(crate) struct IconSet {
     icons: [IconImage; IconKind::COUNT],
 }
 
+#[cfg(test)]
 impl Default for IconSet {
     fn default() -> Self {
         Self::blank()
     }
 }
 
+#[cfg(test)]
 impl IconSet {
     pub(crate) fn blank() -> Self {
         Self {
@@ -208,7 +215,7 @@ impl IconSet {
     }
 
     pub(crate) fn load_or_create() -> Self {
-        let dir = crate::assets::icons_dir();
+        let dir = crate::platform::assets::icons_dir();
         let mut icons = [IconImage::blank(); IconKind::COUNT];
         for kind in IconKind::ALL {
             let path = dir.join(format!("{}.png", kind.file_stem()));
@@ -230,41 +237,14 @@ impl IconSet {
 }
 
 #[cfg(test)]
-pub(crate) use crate::assets::icons_dir;
+pub(crate) use crate::platform::assets::icons_dir;
 
-pub(crate) fn decode_png_rgba(bytes: &[u8]) -> Option<egui::IconData> {
-    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
-    decoder.set_transformations(png::Transformations::normalize_to_color8());
-    let mut reader = decoder.read_info().ok()?;
-    let mut buf = vec![0u8; reader.output_buffer_size()?];
-    let info = reader.next_frame(&mut buf).ok()?;
-    if info.bit_depth != png::BitDepth::Eight {
-        return None;
-    }
-    let mut rgba = Vec::with_capacity((info.width * info.height * 4) as usize);
-    match info.color_type {
-        png::ColorType::Rgba => rgba.extend_from_slice(&buf[..info.buffer_size()]),
-        png::ColorType::Rgb => {
-            for px in buf[..info.buffer_size()].chunks_exact(3) {
-                rgba.extend_from_slice(&[px[0], px[1], px[2], 0xFF]);
-            }
-        }
-        png::ColorType::GrayscaleAlpha => {
-            for px in buf[..info.buffer_size()].chunks_exact(2) {
-                rgba.extend_from_slice(&[px[0], px[0], px[0], px[1]]);
-            }
-        }
-        png::ColorType::Grayscale => {
-            for px in &buf[..info.buffer_size()] {
-                rgba.extend_from_slice(&[*px, *px, *px, 0xFF]);
-            }
-        }
-        png::ColorType::Indexed => return None,
-    }
-    Some(egui::IconData {
-        rgba,
-        width: info.width,
-        height: info.height,
+pub(crate) fn decode_png_rgba(bytes: &[u8]) -> Option<kit::IconData> {
+    let image = crate::engine::core::png::decode_rgba(bytes)?;
+    Some(kit::IconData {
+        rgba: image.rgba,
+        width: image.width,
+        height: image.height,
     })
 }
 
@@ -342,20 +322,36 @@ impl CursorKind {
         }
     }
 
+    pub(crate) fn system_icon(self) -> kit::CursorIcon {
+        match self {
+            CursorKind::Move => kit::CursorIcon::Move,
+            CursorKind::ResizeH => kit::CursorIcon::ResizeHorizontal,
+            CursorKind::ResizeV => kit::CursorIcon::ResizeVertical,
+            CursorKind::ResizeNwSe => kit::CursorIcon::ResizeNwSe,
+            CursorKind::ResizeNeSw => kit::CursorIcon::ResizeNeSw,
+            CursorKind::Text => kit::CursorIcon::Text,
+            CursorKind::Normal
+            | CursorKind::Left
+            | CursorKind::Right
+            | CursorKind::Slider
+            | CursorKind::Wheel => kit::CursorIcon::Default,
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn label(self) -> &'static str {
         match self {
-            CursorKind::Normal => "正常",
-            CursorKind::Left => "左键按下",
-            CursorKind::Right => "右键按下",
-            CursorKind::Move => "移动窗口",
-            CursorKind::ResizeH => "改尺寸（左右）",
-            CursorKind::ResizeV => "改尺寸（上下）",
-            CursorKind::ResizeNwSe => "改尺寸（右下）",
-            CursorKind::ResizeNeSw => "改尺寸（左下）",
-            CursorKind::Slider => "滑动滑块",
-            CursorKind::Wheel => "滚轮滚动",
-            CursorKind::Text => "文本输入",
+            CursorKind::Normal => "Normal",
+            CursorKind::Left => "Left Button Down",
+            CursorKind::Right => "Right Button Down",
+            CursorKind::Move => "Move Window",
+            CursorKind::ResizeH => "Resize Horizontally",
+            CursorKind::ResizeV => "Resize Vertically",
+            CursorKind::ResizeNwSe => "Resize Bottom-Right",
+            CursorKind::ResizeNeSw => "Resize Bottom-Left",
+            CursorKind::Slider => "Drag Slider",
+            CursorKind::Wheel => "Scroll Wheel",
+            CursorKind::Text => "Text Input",
         }
     }
 }
@@ -363,7 +359,7 @@ impl CursorKind {
 pub(crate) struct CursorImage {
     img: CursorPixels,
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     cache: Option<std::sync::Arc<[u8]>>,
 }
 
@@ -377,10 +373,14 @@ impl CursorImage {
     }
 
     fn new(img: CursorPixels) -> Self {
-        Self { img, cache: None }
+        Self {
+            img,
+            #[cfg(test)]
+            cache: None,
+        }
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     fn rgba_for(&mut self) -> std::sync::Arc<[u8]> {
         if let Some(rgba) = &self.cache {
             return rgba.clone();
@@ -410,7 +410,7 @@ impl Cursors {
     }
 
     pub(crate) fn load() -> Self {
-        let dir = crate::assets::cursors_dir();
+        let dir = crate::platform::assets::cursors_dir();
         let mut imgs = std::array::from_fn(|_| CursorImage::blank());
         for kind in CursorKind::ALL {
             let path = dir.join(format!("{}.png", kind.file_stem()));
@@ -444,21 +444,22 @@ impl Cursors {
         }
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub(crate) fn rgba(&mut self, kind: CursorKind) -> std::sync::Arc<[u8]> {
         self.imgs[kind.index()].rgba_for()
     }
 
-    pub(crate) fn paint(&self, painter: &egui::Painter, tip: egui::Pos2, kind: CursorKind) {
+    pub(crate) fn paint(&self, painter: &kit::Painter, tip: kit::Pos2, kind: CursorKind) {
         let [hx, hy] = self.hotspot(kind);
-        let rect = egui::Rect::from_min_size(
-            egui::pos2(tip.x.round() - hx as f32, tip.y.round() - hy as f32),
-            egui::vec2(CURSOR_W, CURSOR_H),
+        let rect = kit::Rect::from_min_size(
+            kit::pos2(tip.x.round() - hx as f32, tip.y.round() - hy as f32),
+            kit::vec2(CURSOR_W, CURSOR_H),
         );
         self.img(kind).paint(painter, rect);
     }
 }
 
+#[cfg(test)]
 pub(crate) fn decode_png(bytes: &[u8]) -> Option<IconImage> {
     decode_pixels(bytes)
 }
@@ -468,26 +469,11 @@ fn decode_cursor_png(bytes: &[u8]) -> Option<CursorPixels> {
 }
 
 fn decode_pixels<const N: usize>(bytes: &[u8]) -> Option<PixelImage<N>> {
-    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
-    decoder.set_transformations(png::Transformations::normalize_to_color8());
-    let mut reader = decoder.read_info().ok()?;
-    let mut buf = vec![0u8; reader.output_buffer_size()?];
-    let info = reader.next_frame(&mut buf).ok()?;
-    if info.bit_depth != png::BitDepth::Eight {
-        return None;
-    }
-    let channels = match info.color_type {
-        png::ColorType::Grayscale => 1,
-        png::ColorType::GrayscaleAlpha => 2,
-        png::ColorType::Rgb => 3,
-        png::ColorType::Rgba => 4,
-
-        png::ColorType::Indexed => return None,
-    };
+    let image = crate::engine::core::png::decode_rgba(bytes)?;
     Some(PixelImage::from_pixels(
-        info.width as usize,
-        info.height as usize,
-        &buf,
-        channels,
+        image.width as usize,
+        image.height as usize,
+        &image.rgba,
+        4,
     ))
 }
